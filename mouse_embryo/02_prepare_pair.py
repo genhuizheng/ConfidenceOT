@@ -69,7 +69,8 @@ def read_side(
         missing = required_obs.difference(dataset.obs.columns)
         if missing or "count" not in dataset.layers or "spatial" not in dataset.obsm:
             raise KeyError(f"{path.name} lacks required MOSTA fields; missing obs={sorted(missing)}")
-        labels_all = dataset.obs["annotation"].astype(str).to_numpy()
+        labels_all = np.asarray(dataset.obs["annotation"].astype(str).to_numpy(), dtype=str)
+        observation_ids_all = np.asarray(dataset.obs_names.astype(str), dtype=str)
         excluded_mask = np.isin(labels_all, list(excluded))
         eligible = np.flatnonzero(~excluded_mask)
         all_spatial = np.asarray(dataset.obsm["spatial"]).astype(np.float64)
@@ -79,13 +80,13 @@ def read_side(
         raw = sparse.csr_matrix(raw, dtype=np.float64)
         return {
             "counts": raw,
-            "genes": np.asarray(dataset.var_names.astype(str)),
+            "genes": np.asarray(dataset.var_names.astype(str), dtype=str),
             "labels": labels_all[rows],
             "spatial": all_spatial[rows],
             "background_spatial": all_spatial[excluded_mask],
             "background_labels": labels_all[excluded_mask],
-            "background_ids": np.asarray(dataset.obs_names.astype(str))[excluded_mask],
-            "observation_ids": np.asarray(dataset.obs_names.astype(str))[rows],
+            "background_ids": observation_ids_all[excluded_mask],
+            "observation_ids": observation_ids_all[rows],
             "rows": rows,
             "sample": path.name.removesuffix(".MOSTA.h5ad"),
             "path": str(path.resolve()),
@@ -177,6 +178,10 @@ def main() -> None:
         source_rows=source["rows"], target_rows=target["rows"],
         hvg_genes=common_genes[hvg_indices], explained_variance_ratio=explained,
     )
+    # Enforce a portable, pickle-free artifact contract before reporting success.
+    with np.load(destination, allow_pickle=False) as verification:
+        for key in verification.files:
+            verification[key]
     metadata = {
         "source_sample": source["sample"], "target_sample": target["sample"],
         "source_path": source["path"], "target_path": target["path"],
