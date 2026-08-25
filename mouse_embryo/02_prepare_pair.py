@@ -23,7 +23,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("target_h5ad", type=Path)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--n-per-side", type=int, default=1000)
+    parser.add_argument(
+        "--all-bins", action="store_true",
+        help="Use every non-excluded spatial bin on each side without downsampling.",
+    )
     parser.add_argument("--n-hvg", type=int, default=2000)
+    parser.add_argument(
+        "--heldout-hvg", type=int, default=0,
+        help="Randomly reserve this many selected HVGs for independent downstream validation.",
+    )
     parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--seed", type=int, default=20260824)
     parser.add_argument("--exclude-annotation", nargs="+", default=["Cavity"])
@@ -126,6 +134,7 @@ def shared_hvg_pca(
     target: sparse.csr_matrix,
     *,
     n_hvg: int,
+    heldout_hvg: int,
     n_pcs: int,
     seed: int,
 ):
@@ -137,7 +146,13 @@ def shared_hvg_pca(
     expressed = np.flatnonzero(mean > 0)
     hvg_n = min(int(n_hvg), expressed.size)
     selected = expressed[np.argsort(dispersion[expressed], kind="stable")[-hvg_n:]]
-    dense = combined[:, selected].toarray().astype(np.float32)
+    if heldout_hvg < 0 or heldout_hvg >= selected.size:
+        raise ValueError("heldout_hvg must be nonnegative and smaller than the selected HVG count.")
+    rng = np.random.default_rng(seed + 17011)
+    heldout = np.sort(rng.choice(selected, size=heldout_hvg, replace=False)) if heldout_hvg else np.array([], dtype=int)
+    transport = np.setdiff1d(selected, heldout, assume_unique=True)
+    heldout_values = combined[:, heldout].toarray().astype(np.float32)
+    dense = combined[:, transport].toarray().astype(np.float32)
     gene_mean = dense.mean(axis=0, dtype=np.float64)
     gene_std = dense.std(axis=0, dtype=np.float64)
     gene_std[gene_std < 1e-8] = 1.0
@@ -145,21 +160,23 @@ def shared_hvg_pca(
     pcs_n = min(int(n_pcs), dense.shape[0] - 1, dense.shape[1])
     model = PCA(n_components=pcs_n, svd_solver="randomized", random_state=seed)
     coordinates = model.fit_transform(dense).astype(np.float32)
-    return coordinates, selected, model.explained_variance_ratio_.astype(np.float32)
+    return coordinates, transport, heldout, heldout_values, model.explained_variance_ratio_.astype(np.float32)
 
 
 def main() -> None:
     args = parse_args()
-    if min(args.n_per_side, args.n_hvg, args.n_pcs) <= 0:
+    if (not args.all_bins and args.n_per_side <= 0) or min(args.n_hvg, args.n_pcs) <= 0:
         raise ValueError("Sampling, HVG, and PCA dimensions must be positive.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
     excluded = set(args.exclude_annotation)
-    source = read_side(args.source_h5ad, n=args.n_per_side, excluded=excluded, rng=rng)
-    target = read_side(args.target_h5ad, n=args.n_per_side, excluded=excluded, rng=rng)
+    requested_n = np.iinfo(np.int64).max if args.all_bins else args.n_per_side
+    source = read_side(args.source_h5ad, n=requested_n, excluded=excluded, rng=rng)
+    target = read_side(args.target_h5ad, n=requested_n, excluded=excluded, rng=rng)
     source_counts, target_counts, common_genes = common_gene_matrices(source, target)
-    coordinates, hvg_indices, explained = shared_hvg_pca(
-        source_counts, target_counts, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=args.seed
+    coordinates, hvg_indices, heldout_indices, heldout_values, explained = shared_hvg_pca(
+        source_counts, target_counts, n_hvg=args.n_hvg, heldout_hvg=args.heldout_hvg,
+        n_pcs=args.n_pcs, seed=args.seed
     )
     n_source = source_counts.shape[0]
     destination = args.output_dir / "prepared_pair.npz"
@@ -177,6 +194,9 @@ def main() -> None:
         source_ids=source["observation_ids"], target_ids=target["observation_ids"],
         source_rows=source["rows"], target_rows=target["rows"],
         hvg_genes=common_genes[hvg_indices], explained_variance_ratio=explained,
+        heldout_genes=common_genes[heldout_indices],
+        source_heldout_log=heldout_values[:n_source],
+        target_heldout_log=heldout_values[n_source:],
     )
     # Enforce a portable, pickle-free artifact contract before reporting success.
     with np.load(destination, allow_pickle=False) as verification:
@@ -188,9 +208,12 @@ def main() -> None:
         "source_eligible_n": source["eligible_n"], "target_eligible_n": target["eligible_n"],
         "source_sampled_n": int(n_source), "target_sampled_n": int(target_counts.shape[0]),
         "common_gene_n": int(common_genes.size), "hvg_n": int(hvg_indices.size),
+        "selected_hvg_n": int(hvg_indices.size + heldout_indices.size),
+        "heldout_hvg_n": int(heldout_indices.size),
         "pca_n": int(coordinates.shape[1]), "seed": args.seed,
         "excluded_annotations": sorted(excluded),
-        "representation": "raw count -> library 1e4 -> log1p -> joint HVG -> scaled joint PCA",
+        "all_bins": bool(args.all_bins),
+        "representation": "raw count -> library 1e4 -> log1p -> joint HVG split -> scaled joint PCA on transport genes",
     }
     (args.output_dir / "preparation.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(json.dumps(metadata, indent=2))
