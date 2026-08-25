@@ -12,13 +12,12 @@
 #SBATCH -t 48:00:00
 #SBATCH -A MCB26031
 
-set -euo pipefail
+set -eo pipefail
 task_started=$SECONDS
 source /home1/10119/ghzheng/.bashrc
 conda activate worldmodeltraining
 
 repo=/scratch/10119/ghzheng/OT_project/code/ConfidenceOT
-data_root=/scratch/10119/ghzheng/OT_project/data
 run_root=/scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage
 manifest="$run_root/pair_manifest.csv"
 task_root="$run_root/pairs"
@@ -59,11 +58,6 @@ echo "source=$source_h5ad"
 echo "target=$target_h5ad"
 echo "output=$output"
 echo "local_work=$local_root"
-nvidia-smi
-python -m confidenceot
-python -c 'from confidenceot.cuda import cuda_available; assert cuda_available(), "ConfidenceOT cannot see the H200 through PyTorch"'
-df -h "${TMPDIR:-/tmp}"
-free -h
 
 if [[ ! -f "$output/preparation/prepared_pair.npz" ]]; then
   python mouse_embryo/02_prepare_pair.py \
