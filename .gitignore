@@ -24,6 +24,7 @@ tmp/
 slurm/
 scripts/
 mouse_embryo/results/
+/mouse_embryo_results/
 *.inspect.ndjson
 *.zip
 
