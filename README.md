@@ -140,6 +140,22 @@ CPU fits use independent NumPy solver states. Concurrent CUDA fits use private
 CUDA streams and synchronize per stream rather than across the entire device.
 Results are returned in input order, regardless of completion order.
 
+## MOSTA rejected-bin DEG
+
+The mouse-embryo discovery workflow tests each section independently. For a
+candidate disappearance or emergence, its ConfidenceOT-rejected spatial bins
+are compared with all retained bins on the same side and in the same section
+using Scanpy's Wilcoxon test. Genes used in the OT representation are excluded
+from DEG to avoid circular validation. Across-section output is a descriptive
+consensus rank and does not pool section p-values.
+
+```bash
+python -m pip install -r mouse_embryo/requirements_deg.txt
+python mouse_embryo/09_spatial_bin_deg_meta.py RUN_ROOT DATA_ROOT OUTPUT_ROOT
+python mouse_embryo/10_run_spatial_bin_gseapy.py OUTPUT_ROOT MOUSE_PATHWAYS.gmt GSEA_ROOT
+python mouse_embryo/11_visualize_spatial_bin_programs.py OUTPUT_ROOT FIGURE_ROOT --gsea-root GSEA_ROOT
+```
+
 ## Returned diagnostics
 
 `ConfidenceOTResult` contains:
