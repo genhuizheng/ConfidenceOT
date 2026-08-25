@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH -J cot_mosta_full
-#SBATCH -o /scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage/logs/%A_%a.out
-#SBATCH -e /scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage/logs/%A_%a.err
+#SBATCH -J cot_mosta_e4
+#SBATCH -o /scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage_tol1e4/logs/%A_%a.out
+#SBATCH -e /scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage_tol1e4/logs/%A_%a.err
 #SBATCH -p gh
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 72
-#SBATCH -a 0-35%10
+#SBATCH -a 0-35%4
 #SBATCH --mail-user=genhuizheng@utexas.edu
 #SBATCH --mail-type=FAIL,END
 #SBATCH -t 48:00:00
@@ -18,7 +18,7 @@ source /home1/10119/ghzheng/.bashrc
 conda activate worldmodeltraining
 
 repo=/scratch/10119/ghzheng/OT_project/code/ConfidenceOT
-run_root=/scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage
+run_root=/scratch/10119/ghzheng/OT_project/mouse_embryo_results/full_three_stage_tol1e4
 manifest="$run_root/pair_manifest.csv"
 task_root="$run_root/pairs"
 local_root="${TMPDIR:-/tmp}/confidenceot_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
@@ -71,7 +71,7 @@ if [[ ! -f "$output/analysis/SUCCESS" ]]; then
     "$output/analysis" \
     "$local_root" \
     --epsilon 0.1 --lambda-a 1.0 --lambda-b 1.0 \
-    --rejection-budget 0.15 --tolerance 1e-3 \
+    --rejection-budget 0.15 --tolerance 1e-4 \
     --null-calibration-replicates 5 \
     --null-validation-replicates 5 \
     --calibration-grid-size 5 \
