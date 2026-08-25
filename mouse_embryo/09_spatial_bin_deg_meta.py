@@ -166,13 +166,26 @@ def scanpy_wilcoxon(
         "logfoldchanges": "log2_fold_change",
         "pvals": "p_value",
         "pvals_adj": "fdr",
-        "pct_nz_group": "rejected_expression_fraction",
-        "pct_nz_reference": "retained_expression_fraction",
     })
+    # Scanpy versions differ in whether get_rank_genes_groups_df exposes both
+    # pct_nz columns. Compute them directly so the output schema is stable.
+    result = result.drop(
+        columns=["pct_nz_group", "pct_nz_reference", "pct_nz_rest"],
+        errors="ignore",
+    )
     rejected_mean = np.asarray(expression[:rejected_n].mean(axis=0)).ravel()
     retained_mean = np.asarray(expression[rejected_n:].mean(axis=0)).ravel()
+    rejected_fraction = np.asarray(
+        expression[:rejected_n].getnnz(axis=0), dtype=float
+    ).ravel() / rejected_n
+    retained_n = expression.shape[0] - rejected_n
+    retained_fraction = np.asarray(
+        expression[rejected_n:].getnnz(axis=0), dtype=float
+    ).ravel() / retained_n
     mean_lookup = pd.DataFrame({
         "gene": genes,
+        "rejected_expression_fraction": rejected_fraction,
+        "retained_expression_fraction": retained_fraction,
         "rejected_mean_log_expression": rejected_mean,
         "retained_mean_log_expression": retained_mean,
         "mean_log_expression_difference": rejected_mean - retained_mean,
@@ -241,6 +254,12 @@ def descriptive_consensus(section_tables: list[pd.DataFrame]) -> pd.DataFrame:
         "rejected_expression_fraction", "retained_expression_fraction",
         "mean_log_expression_difference",
     ]
+    required = {"gene", "sample", *columns}
+    for table in section_tables:
+        missing = sorted(required.difference(table.columns))
+        if missing:
+            sample = table["sample"].iloc[0] if "sample" in table else "unknown"
+            raise RuntimeError(f"Section {sample} DEG output lacked columns: {missing}")
     long = pd.concat(
         [table[["gene", "sample", *columns]] for table in section_tables],
         ignore_index=True,
