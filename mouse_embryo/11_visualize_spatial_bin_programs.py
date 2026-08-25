@@ -63,9 +63,9 @@ def consensus_plot(axis: plt.Axes, table: pd.DataFrame, top_n: int) -> None:
 
 
 def pathway_plot(axis: plt.Axes, table: pd.DataFrame, top_n: int) -> None:
-    values = table.sort_values(["padj", "NES"], ascending=[True, False]).head(top_n).sort_values("NES")
+    values = table.sort_values(["fdr", "NES"], ascending=[True, False]).head(top_n).sort_values("NES")
     limit = max(float(values.NES.abs().max()), 1.0)
-    sizes = 25 + 30 * np.minimum(-np.log10(np.maximum(values.padj, 1e-300)), 10)
+    sizes = 25 + 30 * np.minimum(-np.log10(np.maximum(values.fdr, 1e-300)), 10)
     axis.scatter(
         values.NES, np.arange(len(values)), c=values.NES, s=sizes,
         cmap="coolwarm", vmin=-limit, vmax=limit, edgecolor="#333333", linewidth=0.35,
@@ -74,6 +74,22 @@ def pathway_plot(axis: plt.Axes, table: pd.DataFrame, top_n: int) -> None:
     axis.axvline(0, color="#555555", linewidth=0.8)
     axis.set_xlabel("Normalized enrichment score")
     axis.set_title("Ranked pathway enrichment")
+    axis.grid(axis="x", alpha=0.13)
+
+
+def pathway_consensus_plot(axis: plt.Axes, table: pd.DataFrame, top_n: int) -> None:
+    positive = table.nlargest(top_n, "pathway_consensus_score")
+    negative = table.nsmallest(top_n, "pathway_consensus_score")
+    values = pd.concat([negative, positive]).drop_duplicates("pathway").sort_values(
+        "pathway_consensus_score"
+    )
+    labels = values.pathway.str.replace("_", " ").str.removeprefix("GOBP ")
+    colors = np.where(values.pathway_consensus_score >= 0, UP_COLOR, DOWN_COLOR)
+    axis.barh(np.arange(len(values)), values.pathway_consensus_score, color=colors, alpha=0.88)
+    axis.set_yticks(np.arange(len(values)), labels, fontsize=7)
+    axis.axvline(0, color="#555555", linewidth=0.8)
+    axis.set_xlabel("Median section NES × direction consistency")
+    axis.set_title("Across-section pathway consensus")
     axis.grid(axis="x", alpha=0.13)
 
 
@@ -106,9 +122,18 @@ def main() -> None:
             panel_builders.append((f"Section {sample}", ("section", table, sample)))
         panel_builders.append(("Across-section consensus", ("consensus", consensus, "consensus")))
 
-        gsea_path = None if args.gsea_root is None else args.gsea_root / candidate_root.name / "fgsea_results.csv"
+        gsea_candidate_root = None if args.gsea_root is None else args.gsea_root / candidate_root.name
+        gsea_path = None if gsea_candidate_root is None else gsea_candidate_root / "consensus_gsea_results.csv"
         if gsea_path is not None and gsea_path.exists():
-            panel_builders.append(("Pathway enrichment", ("pathway", pd.read_csv(gsea_path), "gsea")))
+            panel_builders.append(("Consensus-rank GSEA", ("pathway", pd.read_csv(gsea_path), "gsea")))
+        pathway_consensus_path = (
+            None if gsea_candidate_root is None else gsea_candidate_root / "pathway_consensus.csv"
+        )
+        if pathway_consensus_path is not None and pathway_consensus_path.exists():
+            panel_builders.append((
+                "Across-section pathway consensus",
+                ("pathway_consensus", pd.read_csv(pathway_consensus_path), "pathway_consensus"),
+            ))
 
         figure, axes = plt.subplots(
             1, len(panel_builders), figsize=(6.2 * len(panel_builders), 5.8), squeeze=False
@@ -119,6 +144,8 @@ def main() -> None:
                 section_volcano(axis, table, args.top_genes)
             elif kind == "consensus":
                 consensus_plot(axis, table, args.top_genes)
+            elif kind == "pathway_consensus":
+                pathway_consensus_plot(axis, table, args.top_pathways)
             else:
                 pathway_plot(axis, table, args.top_pathways)
             axis.set_title(panel_title)
@@ -128,11 +155,23 @@ def main() -> None:
                 section_volcano(single_axis, table, args.top_genes)
             elif kind == "consensus":
                 consensus_plot(single_axis, table, args.top_genes)
+            elif kind == "pathway_consensus":
+                pathway_consensus_plot(single_axis, table, args.top_pathways)
             else:
                 pathway_plot(single_axis, table, args.top_pathways)
             single_axis.set_title(f"{title}: {panel_title}", fontsize=10)
             single.tight_layout()
             save(single, panel_root / f"{candidate_root.name}__{tag}", args.dpi)
+
+        if gsea_candidate_root is not None:
+            for section_gsea_path in sorted(gsea_candidate_root.glob("section_*_gsea_results.csv")):
+                sample = section_gsea_path.name.removeprefix("section_").removesuffix("_gsea_results.csv")
+                section_gsea = pd.read_csv(section_gsea_path)
+                single, single_axis = plt.subplots(figsize=(8.2, 6.1))
+                pathway_plot(single_axis, section_gsea, args.top_pathways)
+                single_axis.set_title(f"{title}: section {sample} pathway enrichment", fontsize=10)
+                single.tight_layout()
+                save(single, panel_root / f"{candidate_root.name}__{sample}__gsea", args.dpi)
 
         figure.suptitle(title, fontsize=14)
         figure.tight_layout(rect=[0, 0, 1, 0.94])

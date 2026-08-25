@@ -152,6 +152,7 @@ consensus rank and does not pool section p-values.
 ```bash
 python -m pip install -r mouse_embryo/requirements_deg.txt
 python mouse_embryo/09_spatial_bin_deg_meta.py RUN_ROOT DATA_ROOT OUTPUT_ROOT
+python mouse_embryo/12_prepare_mouse_msigdb_gmt.py GENE_SET_ROOT
 python mouse_embryo/10_run_spatial_bin_gseapy.py OUTPUT_ROOT MOUSE_PATHWAYS.gmt GSEA_ROOT
 python mouse_embryo/11_visualize_spatial_bin_programs.py OUTPUT_ROOT FIGURE_ROOT --gsea-root GSEA_ROOT
 ```
