@@ -129,6 +129,17 @@ Use `cuda_dtype="float32"` for speed or `cuda_dtype="float64"` when closer
 agreement with the CPU reference is required. Explicit CUDA requests fail
 cleanly if CUDA is unavailable unless `fallback_to_cpu=True` is set.
 
+Independent matrices can be fitted concurrently without changing the update
+order inside any individual solve:
+
+```python
+results = model.fit_many(cost_matrices, workers=4)
+```
+
+CPU fits use independent NumPy solver states. Concurrent CUDA fits use private
+CUDA streams and synchronize per stream rather than across the entire device.
+Results are returned in input order, regardless of completion order.
+
 ## Returned diagnostics
 
 `ConfidenceOTResult` contains:

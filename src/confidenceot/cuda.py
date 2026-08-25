@@ -157,7 +157,7 @@ def _generalized_kl(torch: Any, values: Any, reference: Any) -> Any:
     return terms.sum()
 
 
-def fit_cuda(
+def _fit_cuda_impl(
     cost_matrix: np.ndarray,
     *,
     backbone: str,
@@ -221,7 +221,7 @@ def fit_cuda(
     seen = {(source_gate_np.tobytes(), target_gate_np.tobytes()): 0}
     result = None
     if device.type == "cuda":
-        torch.cuda.synchronize()
+        torch.cuda.current_stream(device).synchronize()
     started = time.perf_counter()
     for outer in range(max_outer_iterations):
         source_gate = torch.as_tensor(source_gate_np, device=device)
@@ -297,7 +297,7 @@ def fit_cuda(
     if backbone == "uot":
         objective_t = objective_t + lambda_a * _generalized_kl(torch, source_mass, a) + lambda_b * _generalized_kl(torch, target_mass, b)
     if device.type == "cuda":
-        torch.cuda.synchronize()
+        torch.cuda.current_stream(device).synchronize()
     elapsed = time.perf_counter() - started
     source_score = source_score_t.detach().cpu().double().numpy()
     target_score = target_score_t.detach().cpu().double().numpy()
@@ -323,3 +323,30 @@ def fit_cuda(
         objective=float(objective_t.item()),
         fit_seconds=elapsed,
     )
+
+
+def fit_cuda(cost_matrix: np.ndarray, **kwargs: Any) -> ConfidenceOTResult:
+    """Run one torch fit, using an isolated CUDA stream when applicable.
+
+    A private stream permits independent ConfidenceOT fits to overlap without
+    introducing a device-wide synchronization barrier. The numerical steps
+    inside each fit remain exactly sequential. The private implementation also
+    supports ``_torch_device='cpu'`` for CPU-vs-torch parity tests.
+    """
+    torch_device = str(kwargs.get("_torch_device", "cuda"))
+    if torch_device != "cuda":
+        return _fit_cuda_impl(cost_matrix, **kwargs)
+    try:
+        import torch
+    except ImportError as error:
+        raise CUDAUnavailableError(
+            "CUDA ConfidenceOT requires PyTorch. Install the `confidenceot[cuda]` extra."
+        ) from error
+    if not torch.cuda.is_available():
+        raise CUDAUnavailableError(
+            "PyTorch is installed without an available CUDA runtime. Install a CUDA-enabled "
+            "PyTorch build and verify `torch.cuda.is_available()` first."
+        )
+    stream = torch.cuda.Stream(device=torch.cuda.current_device())
+    with torch.cuda.stream(stream):
+        return _fit_cuda_impl(cost_matrix, **kwargs)

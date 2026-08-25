@@ -1,4 +1,5 @@
 import unittest
+import warnings
 
 import numpy as np
 
@@ -17,22 +18,35 @@ class ConfidenceOTCalibrationTest(unittest.TestCase):
         )
         self.assertEqual(len(source_nulls), 2)
         self.assertEqual(source_nulls[0].shape, (12, 12))
-        result = calibrate_confidence_cost(
-            [source_nulls[0], target_nulls[0]],
-            [source_nulls[1], target_nulls[1]],
-            backbone="uot",
-            source_raw_acceptance_target=1.0,
-            target_raw_acceptance_target=1.0,
-            grid_size=3,
-            tolerance=1e-3,
-            max_iterations=1_000,
-            max_outer_iterations=30,
-            device="cpu",
+        common = dict(
+            backbone="uot", source_raw_acceptance_target=1.0,
+            target_raw_acceptance_target=1.0, grid_size=3,
+            tolerance=1e-3, max_iterations=1_000,
+            max_outer_iterations=30, device="cpu",
         )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            result = calibrate_confidence_cost(
+                [source_nulls[0], target_nulls[0]],
+                [source_nulls[1], target_nulls[1]], workers=1, **common,
+            )
+            parallel = calibrate_confidence_cost(
+                [source_nulls[0], target_nulls[0]],
+                [source_nulls[1], target_nulls[1]], workers=2, **common,
+            )
         self.assertGreater(result.rejection_cost, 0.0)
         self.assertEqual(result.backbone, "uot")
         self.assertEqual(len(result.validation), 2)
         self.assertTrue(np.all(np.isfinite(result.curve_costs)))
+        self.assertEqual(parallel.rejection_cost, result.rejection_cost)
+        np.testing.assert_array_equal(parallel.curve_costs, result.curve_costs)
+        np.testing.assert_array_equal(
+            parallel.source_raw_acceptance_curve, result.source_raw_acceptance_curve
+        )
+        np.testing.assert_array_equal(
+            parallel.target_raw_acceptance_curve, result.target_raw_acceptance_curve
+        )
+        self.assertEqual(parallel.validation, result.validation)
 
 
 if __name__ == "__main__":

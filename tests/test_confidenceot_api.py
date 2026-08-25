@@ -72,6 +72,25 @@ class ConfidenceOTAPITest(unittest.TestCase):
         self.assertEqual(m4_exact(self.cost, device="cpu").variant, "exact")
         self.assertEqual(m4_reversible(self.cost, device="cpu").variant, "reversible")
 
+    def test_fit_many_parallel_is_identical_and_ordered(self) -> None:
+        matrices = (self.cost, self.cost * 0.75, self.cost * 1.25)
+        model = ConfidenceOT(
+            backbone="uot", variant="reversible", device="cpu",
+            max_iterations=2_000, max_outer_iterations=10,
+            warn_on_terminal=False,
+        )
+        serial = model.fit_many(matrices, workers=1)
+        parallel = model.fit_many(matrices, workers=3)
+        self.assertEqual(len(parallel), len(matrices))
+        for expected, actual in zip(serial, parallel):
+            np.testing.assert_array_equal(actual.source_gate, expected.source_gate)
+            np.testing.assert_array_equal(actual.target_gate, expected.target_gate)
+            np.testing.assert_array_equal(actual.coupling, expected.coupling)
+
+    def test_fit_many_rejects_invalid_worker_count(self) -> None:
+        with self.assertRaises(ValueError):
+            ConfidenceOT(device="cpu").fit_many((self.cost,), workers=0)
+
     def test_explicit_cuda_fails_cleanly_when_unavailable(self) -> None:
         if cuda_available():
             self.skipTest("CUDA is available on this test host.")

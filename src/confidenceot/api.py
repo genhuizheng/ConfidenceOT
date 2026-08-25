@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import time
-from typing import Literal
+from concurrent.futures import ThreadPoolExecutor
+from typing import Literal, Sequence
 import warnings
 
 import numpy as np
@@ -110,6 +111,31 @@ class ConfidenceOT:
                     stacklevel=2,
                 )
         return self._warn_if_needed(self._fit_cpu(cost, **kwargs))
+
+    def fit_many(
+        self,
+        cost_matrices: Sequence[ArrayLike],
+        *,
+        workers: int = 1,
+    ) -> list[ConfidenceOTResult]:
+        """Fit independent cost matrices concurrently in input order.
+
+        Parallelism is deliberately outside each M4 solve, so Sinkhorn and
+        Gauss--Seidel gate-update order are unchanged. CUDA fits receive
+        independent streams in :func:`confidenceot.cuda.fit_cuda`; CPU fits
+        use independent NumPy solver states. ``workers=1`` is the serial
+        numerical reference.
+        """
+        if workers <= 0:
+            raise ValueError("workers must be a positive integer.")
+        matrices = tuple(cost_matrices)
+        if workers == 1 or len(matrices) <= 1:
+            return [self.fit(matrix) for matrix in matrices]
+        with ThreadPoolExecutor(
+            max_workers=min(int(workers), len(matrices)),
+            thread_name_prefix="confidenceot-fit",
+        ) as executor:
+            return list(executor.map(self.fit, matrices))
 
     def _warn_if_needed(self, result: ConfidenceOTResult) -> ConfidenceOTResult:
         if not self.warn_on_terminal:

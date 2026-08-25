@@ -147,6 +147,8 @@ def calibrate_confidence_cost(
     device: Literal["auto", "cpu", "cuda"] = "auto",
     cuda_dtype: Literal["float32", "float64"] = "float32",
     fallback_to_cpu: bool = False,
+    workers: int = 1,
+    emit_warnings: bool = True,
 ) -> NullCalibrationResult:
     """Estimate a rejection cost with M4-E and validate it with M4-R."""
     nulls = tuple(np.asarray(value, dtype=np.float64) for value in calibration_nulls)
@@ -155,6 +157,8 @@ def calibrate_confidence_cost(
         raise ValueError("At least one calibration null is required.")
     if grid_size < 3:
         raise ValueError("grid_size must be at least 3.")
+    if workers <= 0:
+        raise ValueError("workers must be a positive integer.")
     shape = nulls[0].shape
     if any(value.shape != shape for value in (*nulls, *validation_values)):
         raise ValueError("All calibration and validation nulls must share one shape.")
@@ -169,21 +173,20 @@ def calibrate_confidence_cost(
         key = float(c_value)
         if key in cache:
             return cache[key]
-        fitted = []
-        for null in nulls:
-            fit = ConfidenceOT(
-                backbone=backbone, variant="exact", rejection_cost=key,
-                epsilon=epsilon, lambda_a=lambda_a, lambda_b=lambda_b,
-                source_rejection_budget=source_rejection_budget,
-                target_rejection_budget=target_rejection_budget,
-                tolerance=tolerance, max_iterations=max_iterations,
-                max_outer_iterations=max_outer_iterations, device=device,
-                cuda_dtype=cuda_dtype, fallback_to_cpu=fallback_to_cpu,
-                warn_on_terminal=False,
-            ).fit(null)
+        model = ConfidenceOT(
+            backbone=backbone, variant="exact", rejection_cost=key,
+            epsilon=epsilon, lambda_a=lambda_a, lambda_b=lambda_b,
+            source_rejection_budget=source_rejection_budget,
+            target_rejection_budget=target_rejection_budget,
+            tolerance=tolerance, max_iterations=max_iterations,
+            max_outer_iterations=max_outer_iterations, device=device,
+            cuda_dtype=cuda_dtype, fallback_to_cpu=fallback_to_cpu,
+            warn_on_terminal=False,
+        )
+        fitted = model.fit_many(nulls, workers=workers)
+        for fit in fitted:
             if not fit.inner_converged or not fit.outer_converged or fit.cycle_detected:
                 warning_set.add("At least one M4-E calibration fit ended with a terminal warning.")
-            fitted.append(fit)
         cache[key] = (
             float(np.mean([fit.source_raw_acceptance for fit in fitted])),
             float(np.mean([np.mean(fit.source_gate) for fit in fitted])),
@@ -227,8 +230,7 @@ def calibrate_confidence_cost(
         warning_set.add("A raw-acceptance curve was nonmonotone; continuous refinement was skipped.")
 
     validation_records: list[NullValidationRecord] = []
-    for index, null in enumerate(validation_values):
-        fit = ConfidenceOT(
+    validation_model = ConfidenceOT(
             backbone=backbone, variant="reversible", rejection_cost=c_star,
             epsilon=epsilon, lambda_a=lambda_a, lambda_b=lambda_b,
             source_rejection_budget=source_rejection_budget,
@@ -237,7 +239,9 @@ def calibrate_confidence_cost(
             max_outer_iterations=max_outer_iterations, device=device,
             cuda_dtype=cuda_dtype, fallback_to_cpu=fallback_to_cpu,
             warn_on_terminal=False,
-        ).fit(null)
+        )
+    validation_fits = validation_model.fit_many(validation_values, workers=workers)
+    for index, fit in enumerate(validation_fits):
         validation_records.append(NullValidationRecord(
             null_index=index,
             source_raw_acceptance=fit.source_raw_acceptance,
@@ -254,8 +258,9 @@ def calibrate_confidence_cost(
         ):
             warning_set.add("The frozen rejection cost exceeded a held-out M4-R raw-acceptance target.")
     messages = tuple(sorted(warning_set))
-    for message in messages:
-        warnings.warn(message, RuntimeWarning, stacklevel=2)
+    if emit_warnings:
+        for message in messages:
+            warnings.warn(message, RuntimeWarning, stacklevel=2)
     return NullCalibrationResult(
         backbone=backbone,
         rejection_cost=c_star,
