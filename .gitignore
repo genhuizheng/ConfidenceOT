@@ -23,6 +23,7 @@ Progress_report_20260818/
 tmp/
 slurm/
 scripts/
+mouse_embryo/results/
 *.inspect.ndjson
 *.zip
 
