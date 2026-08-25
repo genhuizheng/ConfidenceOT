@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.numba_cache/
+.matplotlib_cache/
+.codex_test_deps/
+pytest-cache-files-*/
+
+# Local Python/R environments and caches
+.venv/
+venv/
+.mpl-cache/
+.mplconfig/
+.r-library/
+
+# Generated benchmark data, reports, and scratch outputs
+results/
+Progress_report_20260818/
+20260813_progress_report/
+tmp/
+slurm/
+scripts/
+*.inspect.ndjson
+*.zip
+
+# Keep one GitHub-facing README; ignore manuscript and internal Markdown notes
+*.md
+*.MD
+!/README.md
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

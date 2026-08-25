@@ -1,0 +1,16 @@
+CF-UOT verification
+=====================
+Python: 3.11.5 | packaged by Anaconda, Inc. | (main, Sep 11 2023, 13:26:23) [MSC v.1916 64 bit (AMD64)]
+
+Budgeted gate verification
+---------------------------
+exact optimum + coverage floor: 300/300 cases
+zero-tie preservation: 32/32 cases with previously-accepted zeros
+
+Unit and integration tests
+--------------------------
+..........................................................
+----------------------------------------------------------------------
+Ran 58 tests in 0.843s
+
+OK
