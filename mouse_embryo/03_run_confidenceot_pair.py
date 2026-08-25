@@ -112,19 +112,33 @@ def main() -> None:
                wall: float, cpu: float, extra: dict, *, signal_definition: str,
                explicit_source_rejected: np.ndarray | None = None,
                explicit_target_rejected: np.ndarray | None = None) -> None:
-        transported_mass = float(coupling.sum())
-        concordant = float(coupling[source_labels[:, None] == target_labels[None, :]].sum())
-        weighted_cost = float(np.sum(coupling * cost) / transported_mass) if transported_mass > 0 else np.nan
-        row_sum = coupling.sum(axis=1, keepdims=True)
-        conditional = np.divide(coupling, row_sum, out=np.zeros_like(coupling), where=row_sum > 0)
+        analysis_coupling = coupling
+        if explicit_source_rejected is not None and explicit_target_rejected is not None:
+            retained_mask = (~explicit_source_rejected)[:, None] & (~explicit_target_rejected)[None, :]
+            analysis_coupling = np.where(retained_mask, coupling, 0.0)
+        solver_mass = float(coupling.sum())
+        retained_mass = float(analysis_coupling.sum())
+        concordant = float(analysis_coupling[source_labels[:, None] == target_labels[None, :]].sum())
+        weighted_cost = (
+            float(np.sum(analysis_coupling * cost) / retained_mass) if retained_mass > 0 else np.nan
+        )
+        row_sum = analysis_coupling.sum(axis=1, keepdims=True)
+        conditional = np.divide(
+            analysis_coupling, row_sum, out=np.zeros_like(analysis_coupling), where=row_sum > 0
+        )
         with np.errstate(divide="ignore", invalid="ignore"):
             entropy_terms = np.where(conditional > 0, -conditional * np.log(conditional), 0.0)
         row = {
             "method": method, "wall_seconds": wall, "cpu_seconds": cpu,
-            "transported_mass": transported_mass,
-            "same_annotation_transport_fraction": concordant / transported_mass if transported_mass > 0 else np.nan,
-            "mean_transport_cost": weighted_cost,
-            "mean_source_transport_entropy": float(entropy_terms.sum(axis=1).mean()),
+            "solver_transport_mass": solver_mass,
+            "retained_analysis_mass": retained_mass,
+            "retained_same_annotation_transport_fraction": (
+                concordant / retained_mass if retained_mass > 0 else np.nan
+            ),
+            "retained_mean_transport_cost": weighted_cost,
+            "retained_mean_source_transport_entropy": float(
+                entropy_terms.sum(axis=1)[row_sum.ravel() > 0].mean()
+            ) if np.any(row_sum > 0) else np.nan,
             "source_mean_rejection_signal": float(np.mean(source_signal)),
             "target_mean_rejection_signal": float(np.mean(target_signal)),
             "rejection_signal_definition": signal_definition,
@@ -133,7 +147,9 @@ def main() -> None:
         metrics.append(row)
         rejection_rows.extend(population_rejection(method, "source", source_labels, source_signal))
         rejection_rows.extend(population_rejection(method, "target", target_labels, target_signal))
-        transition_rows.extend(population_transitions(method, coupling, source_labels, target_labels))
+        transition_rows.extend(
+            population_transitions(method, analysis_coupling, source_labels, target_labels)
+        )
         for side, labels, coordinates, ids, signal, explicit in (
             ("source", source_labels, prepared["source_spatial"], prepared.get("source_ids", np.arange(len(source_labels))),
              source_signal, explicit_source_rejected),
@@ -152,6 +168,7 @@ def main() -> None:
         safe = method.lower().replace(" ", "_").replace("/", "_").replace("|", "_")
         np.savez_compressed(
             method_root / f"{safe}.npz", coupling=coupling.astype(np.float32),
+            retained_analysis_coupling=analysis_coupling.astype(np.float32),
             source_rejection_signal=source_signal.astype(np.float32),
             target_rejection_signal=target_signal.astype(np.float32),
         )
