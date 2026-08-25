@@ -48,6 +48,9 @@ class NullCalibrationResult:
     refinement_method: str
     warning_messages: tuple[str, ...]
     validation: tuple[NullValidationRecord, ...]
+    validation_source_raw_acceptance: float
+    validation_target_raw_acceptance: float
+    validation_aggregate_valid: bool
 
 
 def rotation_null_costs(
@@ -252,11 +255,21 @@ def calibrate_confidence_cost(
         ))
         if not fit.inner_converged or not fit.outer_converged or fit.cycle_detected:
             warning_set.add("At least one held-out M4-R validation fit ended with a terminal warning.")
-        if (
-            fit.source_raw_acceptance > source_raw_acceptance_target
-            or fit.target_raw_acceptance > target_raw_acceptance_target
-        ):
-            warning_set.add("The frozen rejection cost exceeded a held-out M4-R raw-acceptance target.")
+    if validation_fits:
+        validation_source_raw = float(np.mean([fit.source_raw_acceptance for fit in validation_fits]))
+        validation_target_raw = float(np.mean([fit.target_raw_acceptance for fit in validation_fits]))
+        validation_aggregate_valid = bool(
+            validation_source_raw <= source_raw_acceptance_target
+            and validation_target_raw <= target_raw_acceptance_target
+        )
+        if not validation_aggregate_valid:
+            warning_set.add(
+                "The aggregate held-out M4-R raw-acceptance rate exceeded a target."
+            )
+    else:
+        validation_source_raw = float("nan")
+        validation_target_raw = float("nan")
+        validation_aggregate_valid = True
     messages = tuple(sorted(warning_set))
     if emit_warnings:
         for message in messages:
@@ -270,10 +283,15 @@ def calibrate_confidence_cost(
         source_projected_acceptance_curve=np.asarray([cache[c][1] for c in sorted(cache)]),
         target_projected_acceptance_curve=np.asarray([cache[c][3] for c in sorted(cache)]),
         selection_status=selection,
-        calibration_valid=bool(np.any(feasible) and not messages),
+        calibration_valid=bool(
+            np.any(feasible) and validation_aggregate_valid and not messages
+        ),
         source_monotone=source_monotone,
         target_monotone=target_monotone,
         refinement_method=refinement,
         warning_messages=messages,
         validation=tuple(validation_records),
+        validation_source_raw_acceptance=validation_source_raw,
+        validation_target_raw_acceptance=validation_target_raw,
+        validation_aggregate_valid=validation_aggregate_valid,
     )

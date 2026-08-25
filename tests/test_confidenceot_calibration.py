@@ -37,6 +37,15 @@ class ConfidenceOTCalibrationTest(unittest.TestCase):
         self.assertGreater(result.rejection_cost, 0.0)
         self.assertEqual(result.backbone, "uot")
         self.assertEqual(len(result.validation), 2)
+        self.assertAlmostEqual(
+            result.validation_source_raw_acceptance,
+            np.mean([record.source_raw_acceptance for record in result.validation]),
+        )
+        self.assertAlmostEqual(
+            result.validation_target_raw_acceptance,
+            np.mean([record.target_raw_acceptance for record in result.validation]),
+        )
+        self.assertTrue(result.validation_aggregate_valid)
         self.assertTrue(np.all(np.isfinite(result.curve_costs)))
         self.assertEqual(parallel.rejection_cost, result.rejection_cost)
         np.testing.assert_array_equal(parallel.curve_costs, result.curve_costs)

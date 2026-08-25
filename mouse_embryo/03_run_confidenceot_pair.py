@@ -235,6 +235,20 @@ def main() -> None:
             "target_monotone": calibration.target_monotone,
             "refinement_method": calibration.refinement_method,
             "warning_messages": list(calibration.warning_messages),
+            "validation_source_raw_acceptance": calibration.validation_source_raw_acceptance,
+            "validation_target_raw_acceptance": calibration.validation_target_raw_acceptance,
+            "validation_aggregate_valid": calibration.validation_aggregate_valid,
+            "validation_records": [
+                {
+                    "null_index": record.null_index,
+                    "source_raw_acceptance": record.source_raw_acceptance,
+                    "target_raw_acceptance": record.target_raw_acceptance,
+                    "inner_converged": record.inner_converged,
+                    "outer_converged": record.outer_converged,
+                    "cycle_detected": record.cycle_detected,
+                }
+                for record in calibration.validation
+            ],
             "curve_costs": calibration.curve_costs.tolist(),
             "source_raw_acceptance_curve": calibration.source_raw_acceptance_curve.tolist(),
             "target_raw_acceptance_curve": calibration.target_raw_acceptance_curve.tolist(),
