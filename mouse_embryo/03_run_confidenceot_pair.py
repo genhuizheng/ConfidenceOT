@@ -106,23 +106,49 @@ def main() -> None:
     metrics: list[dict] = []
     rejection_rows: list[dict] = []
     transition_rows: list[dict] = []
+    cell_rows: list[dict] = []
 
     def record(method: str, coupling: np.ndarray, source_signal: np.ndarray, target_signal: np.ndarray,
-               wall: float, cpu: float, extra: dict) -> None:
+               wall: float, cpu: float, extra: dict, *, signal_definition: str,
+               explicit_source_rejected: np.ndarray | None = None,
+               explicit_target_rejected: np.ndarray | None = None) -> None:
         transported_mass = float(coupling.sum())
         concordant = float(coupling[source_labels[:, None] == target_labels[None, :]].sum())
+        weighted_cost = float(np.sum(coupling * cost) / transported_mass) if transported_mass > 0 else np.nan
+        row_sum = coupling.sum(axis=1, keepdims=True)
+        conditional = np.divide(coupling, row_sum, out=np.zeros_like(coupling), where=row_sum > 0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            entropy_terms = np.where(conditional > 0, -conditional * np.log(conditional), 0.0)
         row = {
             "method": method, "wall_seconds": wall, "cpu_seconds": cpu,
             "transported_mass": transported_mass,
-            "annotation_concordance": concordant / transported_mass if transported_mass > 0 else np.nan,
+            "same_annotation_transport_fraction": concordant / transported_mass if transported_mass > 0 else np.nan,
+            "mean_transport_cost": weighted_cost,
+            "mean_source_transport_entropy": float(entropy_terms.sum(axis=1).mean()),
             "source_mean_rejection_signal": float(np.mean(source_signal)),
             "target_mean_rejection_signal": float(np.mean(target_signal)),
+            "rejection_signal_definition": signal_definition,
             **extra,
         }
         metrics.append(row)
         rejection_rows.extend(population_rejection(method, "source", source_labels, source_signal))
         rejection_rows.extend(population_rejection(method, "target", target_labels, target_signal))
         transition_rows.extend(population_transitions(method, coupling, source_labels, target_labels))
+        for side, labels, coordinates, ids, signal, explicit in (
+            ("source", source_labels, prepared["source_spatial"], prepared.get("source_ids", np.arange(len(source_labels))),
+             source_signal, explicit_source_rejected),
+            ("target", target_labels, prepared["target_spatial"], prepared.get("target_ids", np.arange(len(target_labels))),
+             target_signal, explicit_target_rejected),
+        ):
+            for index in range(len(labels)):
+                cell_rows.append({
+                    "method": method, "side": side, "sample_index": index,
+                    "observation_id": str(ids[index]), "annotation": str(labels[index]),
+                    "spatial_x": float(coordinates[index, 0]), "spatial_y": float(coordinates[index, 1]),
+                    "rejection_signal": float(signal[index]),
+                    "explicit_rejected": np.nan if explicit is None else bool(explicit[index]),
+                    "signal_definition": signal_definition,
+                })
         safe = method.lower().replace(" ", "_").replace("/", "_").replace("|", "_")
         np.savez_compressed(
             method_root / f"{safe}.npz", coupling=coupling.astype(np.float32),
@@ -134,7 +160,10 @@ def main() -> None:
         cost, epsilon=args.epsilon, threshold=args.tolerance, max_iterations=args.max_iterations
     ))
     record("Balanced OT", balanced.coupling, np.zeros(source.shape[0]), np.zeros(target.shape[0]),
-           wall, cpu, {"converged": balanced.converged, "iterations": balanced.n_iterations})
+           wall, cpu, {"converged": balanced.converged, "iterations": balanced.n_iterations},
+           signal_definition="no_rejection_gate",
+           explicit_source_rejected=np.zeros(source.shape[0], dtype=bool),
+           explicit_target_rejected=np.zeros(target.shape[0], dtype=bool))
 
     vanilla, wall, cpu = timed(lambda: unbalanced_ot(
         cost, epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
@@ -145,6 +174,7 @@ def main() -> None:
         marginal_deficit(vanilla.source_mass, vanilla.source_marginal),
         marginal_deficit(vanilla.target_mass, vanilla.target_marginal), wall, cpu,
         {"converged": vanilla.converged, "iterations": vanilla.n_iterations},
+        signal_definition="positive_marginal_mass_deficit",
     )
 
     if source.shape[0] == target.shape[0]:
@@ -153,7 +183,10 @@ def main() -> None:
         ))
         record("Partial OT", partial.coupling, (~partial.source_gate).astype(float),
                (~partial.target_gate).astype(float), wall, cpu,
-               {"converged": partial.success, "iterations": np.nan})
+               {"converged": partial.success, "iterations": np.nan},
+               signal_definition="binary_unmatched_support",
+               explicit_source_rejected=~partial.source_gate,
+               explicit_target_rejected=~partial.target_gate)
 
     rejection_costs: list[tuple[str, float]] = []
     if args.rejection_mode in ("fixed", "both"):
@@ -215,11 +248,26 @@ def main() -> None:
                        "cycle_detected": fitted.cycle_detected,
                        "rejection_cost": fitted.rejection_cost,
                        "device": fitted.device, "backend": fitted.backend,
-                   })
+                   }, signal_definition="binary_confidence_gate",
+                   explicit_source_rejected=~fitted.source_gate,
+                   explicit_target_rejected=~fitted.target_gate)
 
     pd.DataFrame(metrics).to_csv(args.output_dir / "method_metrics.csv", index=False)
     pd.DataFrame(rejection_rows).to_csv(args.output_dir / "population_rejection.csv", index=False)
     pd.DataFrame(transition_rows).to_csv(args.output_dir / "population_transitions.csv", index=False)
+    pd.DataFrame(cell_rows).to_csv(args.output_dir / "cell_rejection.csv", index=False)
+    preanalysis_rows = []
+    for side in ("source", "target"):
+        coordinates = prepared[f"{side}_background_spatial"]
+        labels = prepared.get(f"{side}_background_labels", np.repeat("Cavity", len(coordinates)))
+        ids = prepared.get(f"{side}_background_ids", np.arange(len(coordinates)))
+        for index in range(len(coordinates)):
+            preanalysis_rows.append({
+                "side": side, "observation_id": str(ids[index]), "annotation": str(labels[index]),
+                "spatial_x": float(coordinates[index, 0]), "spatial_y": float(coordinates[index, 1]),
+                "exclusion_reason": "anatomical_background_excluded_before_ot",
+            })
+    pd.DataFrame(preanalysis_rows).to_csv(args.output_dir / "preanalysis_exclusions.csv", index=False)
     run = {
         "prepared_pair": str(args.prepared_pair.resolve()), "cost_scale": cost_scale,
         "cost_shape": list(cost.shape), "epsilon": args.epsilon,
