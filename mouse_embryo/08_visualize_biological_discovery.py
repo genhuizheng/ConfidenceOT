@@ -26,6 +26,38 @@ STAGES = ("E9.5 → E10.5", "E10.5 → E11.5")
 SOURCE_COLOR = "#d55e00"
 TARGET_COLOR = "#0072b2"
 
+ANNOTATION_ZH = {
+    "AGM": "AGM区",
+    "Blood vessel": "血管",
+    "Brain": "脑",
+    "Branchial arch": "咽弓",
+    "Cartilage primordium": "软骨原基",
+    "Choroid plexus": "脉络丛",
+    "Connective tissue": "结缔组织",
+    "Dermomyotome": "皮肌节",
+    "Dorsal root ganglion": "背根神经节",
+    "Facial nerve": "面神经",
+    "GI tract": "胃肠道",
+    "Head mesenchyme": "头部间充质",
+    "Heart": "心脏",
+    "Inner ear": "内耳",
+    "Jaw and tooth": "颌与牙",
+    "Liver": "肝脏",
+    "Lung primordium": "肺原基",
+    "Meninges": "脑膜",
+    "Mesenchyme": "间充质",
+    "Mucosal epithelium": "黏膜上皮",
+    "Neural crest": "神经嵴",
+    "Notochord": "脊索",
+    "Pancreas primordium": "胰腺原基",
+    "Primitive gut tube": "原始肠管",
+    "Sclerotome": "生骨节",
+    "Spinal cord": "脊髓",
+    "Surface ectoderm": "表面外胚层",
+    "Sympathetic nerve": "交感神经",
+    "Urogenital ridge": "泌尿生殖嵴",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -185,35 +217,104 @@ def build_fate_candidates(
         for annotation in annotations:
             source_fraction = float(composition_lookup.get((source_stage, annotation), 0.0))
             target_fraction = float(composition_lookup.get((target_stage, annotation), 0.0))
-            source_rejection = float(source.loc[annotation, "certified_mean"]) if annotation in source.index else 0.0
-            target_rejection = float(target.loc[annotation, "certified_mean"]) if annotation in target.index else 0.0
-            source_rejection = 0.0 if np.isnan(source_rejection) else source_rejection
-            target_rejection = 0.0 if np.isnan(target_rejection) else target_rejection
+            source_present = source_fraction > 0.0
+            target_present = target_fraction > 0.0
+
+            source_certified_n = (
+                int(source.loc[annotation, "certified_pair_n"])
+                if annotation in source.index else 0
+            )
+            target_certified_n = (
+                int(target.loc[annotation, "certified_pair_n"])
+                if annotation in target.index else 0
+            )
+            source_certified = (
+                float(source.loc[annotation, "certified_mean"])
+                if source_present and source_certified_n > 0 else 0.0
+            )
+            target_certified = (
+                float(target.loc[annotation, "certified_mean"])
+                if target_present and target_certified_n > 0 else 0.0
+            )
+            source_all_pair = (
+                float(source.loc[annotation, "all_pair_mean"])
+                if source_present and annotation in source.index else 0.0
+            )
+            target_all_pair = (
+                float(target.loc[annotation, "all_pair_mean"])
+                if target_present and annotation in target.index else 0.0
+            )
+            calibration_supported = (
+                (not source_present or source_certified_n > 0)
+                and (not target_present or target_certified_n > 0)
+            )
+            certified_directional = target_certified - source_certified
+            all_pair_directional = target_all_pair - source_all_pair
+            displayed_directional = (
+                certified_directional if calibration_supported else all_pair_directional
+            )
             log2_fold_change = float(np.log2((target_fraction + 1e-4) / (source_fraction + 1e-4)))
             rows.append({
                 "stage_transition": transition, "annotation": annotation,
                 "source_fraction": source_fraction, "target_fraction": target_fraction,
                 "log2_target_over_source_fraction": log2_fold_change,
-                "source_certified_rejection": source_rejection,
-                "target_certified_rejection": target_rejection,
-                "directional_rejection": target_rejection - source_rejection,
-                "disappearance_score": source_rejection * max(-log2_fold_change, 0.0),
-                "emergence_score": target_rejection * max(log2_fold_change, 0.0),
+                "source_certified_rejection": source_certified,
+                "target_certified_rejection": target_certified,
+                "source_certified_pair_n": source_certified_n,
+                "target_certified_pair_n": target_certified_n,
+                "calibration_supported": calibration_supported,
+                "directional_rejection": displayed_directional,
+                "directional_rejection_certified": (
+                    certified_directional if calibration_supported else np.nan
+                ),
+                "directional_rejection_all_pairs": all_pair_directional,
+                "disappearance_score": (
+                    source_certified * max(-log2_fold_change, 0.0)
+                    if calibration_supported else 0.0
+                ),
+                "emergence_score": (
+                    target_certified * max(log2_fold_change, 0.0)
+                    if calibration_supported else 0.0
+                ),
             })
     return pd.DataFrame(rows)
 
 
-def plot_fate_candidates(candidates: pd.DataFrame, destination: Path, dpi: int, max_labels: int) -> None:
+def plot_fate_candidates(
+    candidates: pd.DataFrame,
+    destination: Path,
+    dpi: int,
+    max_labels: int,
+    language: str = "en",
+) -> None:
+    chinese = language == "zh"
+    if chinese:
+        plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DengXian", "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
     figure, axes = plt.subplots(1, 2, figsize=(15, 6.5), sharey=True)
+    image = None
     for axis, transition in zip(axes, STAGES):
         values = candidates[candidates.stage_transition.eq(transition)].copy()
         magnitude = np.maximum(values.source_certified_rejection, values.target_certified_rejection)
         sizes = 35 + 550 * np.sqrt(np.maximum(values.source_fraction, values.target_fraction))
+        supported = values.calibration_supported.astype(bool)
         image = axis.scatter(
-            values.log2_target_over_source_fraction, values.directional_rejection,
-            c=magnitude, s=sizes, cmap="magma", vmin=0, vmax=1,
+            values.loc[supported, "log2_target_over_source_fraction"],
+            values.loc[supported, "directional_rejection"],
+            c=magnitude[supported], s=sizes[supported], cmap="magma", vmin=0, vmax=1,
             edgecolor="#333333", linewidth=0.45, alpha=0.9,
         )
+        if np.any(~supported):
+            axis.scatter(
+                values.loc[~supported, "log2_target_over_source_fraction"],
+                values.loc[~supported, "directional_rejection"],
+                s=sizes[~supported], marker="X", color="#b7b7b7",
+                edgecolor="#555555", linewidth=0.55, alpha=0.9,
+                label=(
+                    "无有效校准；位置采用全部配对均值"
+                    if chinese else "N/A certificate; position = all-pair mean"
+                ),
+            )
         axis.axhline(0, color="#777777", linewidth=0.8)
         axis.axvline(0, color="#777777", linewidth=0.8)
         axis.axvspan(axis.get_xlim()[0], 0, ymin=0, ymax=0.5, color=SOURCE_COLOR, alpha=0.035)
@@ -222,22 +323,40 @@ def plot_fate_candidates(candidates: pd.DataFrame, destination: Path, dpi: int, 
         for index in np.argsort(label_score.to_numpy())[-max_labels:]:
             row = values.iloc[index]
             axis.annotate(
-                row.annotation,
+                ANNOTATION_ZH.get(row.annotation, row.annotation) if chinese else row.annotation,
                 (row.log2_target_over_source_fraction, row.directional_rejection),
                 xytext=(4, 4), textcoords="offset points", fontsize=8,
             )
         axis.set_title(transition)
-        axis.set_xlabel("Annotation abundance change, log2(target/source)")
+        axis.set_xlabel(
+            "注释群体丰度变化，log2(目标阶段/来源阶段)"
+            if chinese else "Annotation abundance change, log2(target/source)"
+        )
         axis.grid(alpha=0.15)
-        axis.text(0.02, 0.03, "candidate disappearance", color=SOURCE_COLOR,
+        axis.text(0.02, 0.03, "候选消失/重塑状态" if chinese else "candidate disappearance", color=SOURCE_COLOR,
                   transform=axis.transAxes, fontsize=10)
-        axis.text(0.98, 0.97, "candidate emergence", color=TARGET_COLOR,
+        axis.text(0.98, 0.97, "候选新生状态" if chinese else "candidate emergence", color=TARGET_COLOR,
                   transform=axis.transAxes, fontsize=10, ha="right", va="top")
-    axes[0].set_ylabel("Directional rejection: target − source")
-    figure.colorbar(image, ax=axes, label="Certified population rejection fraction",
-                    fraction=0.025, pad=0.02)
-    figure.suptitle("Developmental disappearance and emergence candidates", fontsize=16)
-    figure.subplots_adjust(left=0.08, right=0.91, bottom=0.14, top=0.87, wspace=0.18)
+        if np.any(~supported):
+            axis.legend(loc="lower right", frameon=False, fontsize=8)
+    axes[0].set_ylabel(
+        "方向性拒绝信号：目标阶段 − 来源阶段"
+        if chinese else "Directional rejection: target − source"
+    )
+    colorbar_axis = figure.add_axes([0.885, 0.20, 0.015, 0.60])
+    figure.colorbar(
+        image, cax=colorbar_axis,
+        label=(
+            "平均拒绝 bin 比例\n（仅有效校准配对）"
+            if chinese else "Mean rejected-bin fraction\n(calibration-valid pairs)"
+        ),
+    )
+    figure.suptitle(
+        "胚胎发育过程中候选消失与新生状态"
+        if chinese else "Developmental disappearance and emergence candidates",
+        fontsize=16,
+    )
+    figure.subplots_adjust(left=0.08, right=0.84, bottom=0.14, top=0.87, wspace=0.18)
     save_figure(
         figure, destination, dpi,
         panels=[
@@ -424,7 +543,11 @@ def plot_spatial_consensus(
     target = consensus_cells(cells, certificates, transition, "target")
     samples = [source["sample"].unique().tolist(), target["sample"].unique().tolist()]
     columns = max(max(map(len, samples)), 1)
-    figure, axes = plt.subplots(2, columns, figsize=(3.2 * columns, 6.8), squeeze=False)
+    # Wide layout is intentional: it fits a 16:9 presentation without placing
+    # the shared color bar over the rightmost embryo section.
+    figure, axes = plt.subplots(
+        2, columns, figsize=(4.4 * columns + 1.2, 7.4), squeeze=False
+    )
     last = None
     for row, (side, values) in enumerate((("source", source), ("target", target))):
         for column in range(columns):
@@ -454,10 +577,17 @@ def plot_spatial_consensus(
             axis.set_xticks([])
             axis.set_yticks([])
     if last is not None:
-        figure.colorbar(last, ax=axes, label="Rejection frequency across certified partner sections",
-                        fraction=0.018, pad=0.015)
+        colorbar_axis = figure.add_axes([0.925, 0.23, 0.012, 0.54])
+        figure.colorbar(
+            last,
+            cax=colorbar_axis,
+            label="Cross-section rejection\nfrequency (valid pairs)",
+        )
     figure.suptitle(f"Spatial consensus of developmental exclusion — {transition}", fontsize=15)
-    figure.subplots_adjust(left=0.03, right=0.92, bottom=0.05, top=0.88, hspace=0.30, wspace=0.10)
+    figure.subplots_adjust(
+        left=0.025, right=0.895, bottom=0.045, top=0.88,
+        hspace=0.25, wspace=0.08,
+    )
     panel_names = []
     for row, side in enumerate(("source", "target")):
         for column, sample in enumerate(samples[row]):
