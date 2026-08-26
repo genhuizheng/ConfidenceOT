@@ -20,11 +20,12 @@ venv/
 results/
 Progress_report_20260818/
 20260813_progress_report/
+progress_report7/
+mouse_embryo/results/
+/mouse_embryo_results/
 tmp/
 slurm/
 scripts/
-mouse_embryo/results/
-/mouse_embryo_results/
 *.inspect.ndjson
 *.zip
 
