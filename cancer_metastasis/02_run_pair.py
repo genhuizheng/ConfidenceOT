@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from confidenceot import ConfidenceOT, calibrate_confidence_cost, rotation_null_costs
-from common import json_ready, prepare_joint_representation, select_sample
+from common import json_ready, load_exact_side, prepare_joint_representation
 
 
 def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -68,6 +68,10 @@ def main() -> None:
     parser.add_argument("output_root", type=Path)
     parser.add_argument("--index", type=int, required=True, help="Zero-based row in the eligible manifest")
     parser.add_argument("--rejection-budget", type=float, default=0.95, help="Safety cap, not a biological target")
+    parser.add_argument("--analysis-scope", choices=("all", "malignant"), default="all")
+    parser.add_argument("--include-annotation", action="append", default=[],
+                        help="Cell-type value retained in malignant scope; may be repeated")
+    parser.add_argument("--minimum-scope-cells", type=int, default=20)
     parser.add_argument("--n-hvg", type=int, default=2000)
     parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--calibration-max-cells", type=int, default=2000)
@@ -92,26 +96,31 @@ def main() -> None:
     if "eligible" in row and not bool(row["eligible"]):
         raise ValueError(f"Ineligible pair: {row.get('skip_reason', '')}")
     pair_id = str(row["pair_id"])
-    output = args.output_root / pair_id / f"budget_{args.rejection_budget:.2f}"
+    output = args.output_root / pair_id / f"scope_{args.analysis_scope}" / f"budget_{args.rejection_budget:.2f}"
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
-    import anndata as ad
-    source_backed = ad.read_h5ad(row["source_h5ad"], backed="r")
-    target_backed = ad.read_h5ad(row["target_h5ad"], backed="r")
-    try:
-        source = select_sample(source_backed, str(row["source_sample"]))
-        target = select_sample(target_backed, str(row["target_sample"]))
-    finally:
-        source_backed.file.close(); target_backed.file.close()
-    if "feature_type" in source.var:
-        source = source[:, source.var["feature_type"].astype(str).eq("Gene Expression")].copy()
-    elif "feature_types" in source.var:
-        source = source[:, source.var["feature_types"].astype(str).eq("Gene Expression")].copy()
-    if "feature_type" in target.var:
-        target = target[:, target.var["feature_type"].astype(str).eq("Gene Expression")].copy()
-    elif "feature_types" in target.var:
-        target = target[:, target.var["feature_types"].astype(str).eq("Gene Expression")].copy()
+    def paths_for(side: str) -> list[str]:
+        column = f"{side}_h5ads_json"
+        if column in row and pd.notna(row[column]):
+            return [str(value) for value in json.loads(str(row[column]))]
+        return [str(row[f"{side}_h5ad"])]
+
+    source = load_exact_side(paths_for("source"), str(row["source_sample"]))
+    target = load_exact_side(paths_for("target"), str(row["target_sample"]))
     source_exact_n, target_exact_n = source.n_obs, target.n_obs
+    if args.analysis_scope == "malignant":
+        if not args.include_annotation:
+            raise ValueError("malignant scope requires at least one --include-annotation value")
+        source_label = labels(source)
+        target_label = labels(target)
+        source = source[np.isin(source_label, args.include_annotation)].copy()
+        target = target[np.isin(target_label, args.include_annotation)].copy()
+    source_scope_n, target_scope_n = source.n_obs, target.n_obs
+    if source_scope_n < args.minimum_scope_cells or target_scope_n < args.minimum_scope_cells:
+        raise ValueError(
+            f"scope={args.analysis_scope} is not evaluable: source={source_scope_n}, "
+            f"target={target_scope_n}, minimum={args.minimum_scope_cells}"
+        )
     sample_rng = np.random.default_rng(args.seed + args.index * 65537)
     if args.max_observed_cells_per_side > 0 and source.n_obs > args.max_observed_cells_per_side:
         keep = np.sort(sample_rng.choice(source.n_obs, args.max_observed_cells_per_side, replace=False))
@@ -171,6 +180,9 @@ def main() -> None:
         "pair_id": pair_id, "dataset_id": row["dataset_id"], "patient_id": row["patient_id"],
         "source_sample": row["source_sample"], "target_sample": row["target_sample"],
         "source_exact_n": source_exact_n, "target_exact_n": target_exact_n,
+        "analysis_scope": args.analysis_scope,
+        "included_annotations": "|".join(args.include_annotation),
+        "source_scope_n": source_scope_n, "target_scope_n": target_scope_n,
         "source_analyzed_n": source.n_obs, "target_analyzed_n": target.n_obs,
         "rejection_budget_cap": args.rejection_budget, "rejection_cost": calibration.rejection_cost,
         "calibration_valid": calibration.calibration_valid,

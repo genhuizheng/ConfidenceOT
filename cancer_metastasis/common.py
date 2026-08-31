@@ -80,12 +80,16 @@ def build_pair_manifest(converted_root: Path, minimum_cells: int = 20) -> pd.Dat
     for pair_id in sorted(set(source_map) | set(target_map)):
         sources, targets = source_map.get(pair_id, []), target_map.get(pair_id, [])
         reasons: list[str] = []
-        if len(sources) != 1:
-            reasons.append(f"source_file_count={len(sources)}")
-        if len(targets) != 1:
-            reasons.append(f"target_file_count={len(targets)}")
-        source = sources[0] if len(sources) == 1 else None
-        target = targets[0] if len(targets) == 1 else None
+        if not sources:
+            reasons.append("source_file_count=0")
+        elif len(sources) > 1 and any(item["file_kind"] != "library" for item in sources):
+            reasons.append(f"ambiguous_nonlibrary_source_file_count={len(sources)}")
+        if not targets:
+            reasons.append("target_file_count=0")
+        elif len(targets) > 1 and any(item["file_kind"] != "library" for item in targets):
+            reasons.append(f"ambiguous_nonlibrary_target_file_count={len(targets)}")
+        source = sources[0] if sources else None
+        target = targets[0] if targets else None
         patient = source["patient_id"] if source else (target["patient_id"] if target else "")
         dataset = source["dataset_id"] if source else (target["dataset_id"] if target else "")
         source_sample = target_sample = ""
@@ -96,15 +100,19 @@ def build_pair_manifest(converted_root: Path, minimum_cells: int = 20) -> pd.Dat
                 reasons.append("missing_patient_id")
             if source["patient_id"] != target["patient_id"]:
                 reasons.append("patient_mismatch")
-            if not source["pairing_verified"] or not target["pairing_verified"]:
-                reasons.append("pair_not_verified")
+            if any(item["dataset_id"] != source["dataset_id"] for item in sources + targets):
+                reasons.append("dataset_mismatch_across_files")
+            if any(item["patient_id"] != patient for item in sources + targets):
+                reasons.append("patient_mismatch_across_files")
             source_sample, target_sample = resolve_samples(
-                patient, pair_id, source["samples"], target["samples"]
+                patient, pair_id,
+                sorted({sample for item in sources for sample in item["samples"]}),
+                sorted({sample for item in targets for sample in item["samples"]}),
             )
             if not source_sample or not target_sample:
                 reasons.append("pair_samples_not_uniquely_resolved")
-        source_n = int(source["sample_counts"].get(source_sample, 0)) if source else 0
-        target_n = int(target["sample_counts"].get(target_sample, 0)) if target else 0
+        source_n = sum(int(item["sample_counts"].get(source_sample, 0)) for item in sources)
+        target_n = sum(int(item["sample_counts"].get(target_sample, 0)) for item in targets)
         if source and source_sample and not source_n:
             source_n = source["n_obs"] if len(source["samples"]) == 1 else 0
         if target and target_sample and not target_n:
@@ -117,8 +125,11 @@ def build_pair_manifest(converted_root: Path, minimum_cells: int = 20) -> pd.Dat
             "pair_id": pair_id, "dataset_id": dataset, "patient_id": patient,
             "source_h5ad": source["path"] if source else "",
             "target_h5ad": target["path"] if target else "",
+            "source_h5ads_json": json.dumps([item["path"] for item in sources]),
+            "target_h5ads_json": json.dumps([item["path"] for item in targets]),
             "source_sample": source_sample, "target_sample": target_sample,
             "source_n": source_n, "target_n": target_n,
+            "source_file_n": len(sources), "target_file_n": len(targets),
             "source_file_kind": source["file_kind"] if source else "",
             "target_file_kind": target["file_kind"] if target else "",
             "has_cell_type": bool(source and target and "cell_type" in source["obs_columns"] and "cell_type" in target["obs_columns"]),
@@ -142,6 +153,49 @@ def select_sample(data: Any, sample: str) -> Any:
     if sample and len(data.uns.get("pairing_metadata", {}).get("samples", [])) != 1:
         raise ValueError("Multi-sample H5AD lacks obs['sample_id']; exact pair cannot be isolated")
     return data.to_memory()
+
+
+def load_exact_side(paths: list[str], sample: str):
+    """Load one exact sample, combining its sorted-library files conservatively."""
+    import anndata as ad
+
+    pieces = []
+    expression_kinds = []
+    for value in paths:
+        backed = ad.read_h5ad(value, backed="r")
+        try:
+            piece = select_sample(backed, sample)
+        finally:
+            backed.file.close()
+        if "feature_type" in piece.var:
+            piece = piece[:, piece.var["feature_type"].astype(str).eq("Gene Expression")].copy()
+        elif "feature_types" in piece.var:
+            piece = piece[:, piece.var["feature_types"].astype(str).eq("Gene Expression")].copy()
+        keys = gene_keys(piece)
+        keep = ~pd.Index(keys).duplicated(keep="first")
+        piece = piece[:, keep].copy()
+        piece.var_names = pd.Index(keys[keep], dtype=str)
+        expression_kinds.append(expression_kind(piece))
+        pieces.append(piece)
+    if not pieces:
+        raise ValueError("No H5AD files supplied for one pair side")
+    if len(pieces) == 1:
+        return pieces[0]
+    combined = ad.concat(
+        pieces, axis=0, join="inner", merge="same", uns_merge="same", index_unique=None,
+    )
+    if combined.obs_names.has_duplicates:
+        combined.obs_names_make_unique()
+    kinds = sorted(set(expression_kinds))
+    if len(kinds) != 1:
+        raise ValueError(f"Library files disagree on Expression matrix type: {kinds}")
+    metadata = dict(combined.uns.get("metadata", {}))
+    metadata["Expression matrix type"] = kinds[0]
+    combined.uns["metadata"] = metadata
+    combined.uns["confidenceot_library_merge"] = {
+        "file_n": len(pieces), "gene_join": "inner", "sample_id": sample,
+    }
+    return combined
 
 
 def gene_keys(data: Any) -> np.ndarray:

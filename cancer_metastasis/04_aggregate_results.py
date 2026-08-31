@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    metric_files = sorted(args.result_root.glob("*/budget_*/pair_metrics.csv"))
+    metric_files = sorted(args.result_root.glob("*/scope_*/budget_*/pair_metrics.csv"))
     if not metric_files:
         raise FileNotFoundError(f"No pair_metrics.csv under {args.result_root}")
     metrics = pd.concat([pd.read_csv(path) for path in metric_files], ignore_index=True)
@@ -24,13 +24,13 @@ def main() -> None:
         "rejection_cost", "transported_mass", "calibration_seconds", "fit_seconds", "pipeline_seconds",
     ]
     patients = metrics.groupby(
-        ["dataset_id", "patient_id", "rejection_budget_cap"], as_index=False
+        ["dataset_id", "patient_id", "analysis_scope", "rejection_budget_cap"], as_index=False
     )[numeric].mean()
     patients["pair_n"] = metrics.groupby(
-        ["dataset_id", "patient_id", "rejection_budget_cap"]
+        ["dataset_id", "patient_id", "analysis_scope", "rejection_budget_cap"]
     ).size().to_numpy()
     patients.to_csv(args.output_dir / "patient_level_metrics.csv", index=False)
-    summary = patients.groupby(["dataset_id", "rejection_budget_cap"], as_index=False).agg(
+    summary = patients.groupby(["dataset_id", "analysis_scope", "rejection_budget_cap"], as_index=False).agg(
         patient_n=("patient_id", "nunique"), pair_n=("pair_n", "sum"),
         source_raw_rejection_rate=("source_raw_rejection_rate", "mean"),
         target_raw_rejection_rate=("target_raw_rejection_rate", "mean"),
@@ -42,9 +42,10 @@ def main() -> None:
     )
     summary.to_csv(args.output_dir / "dataset_budget_summary_patient_weighted.csv", index=False)
     populations = []
-    for path in sorted(args.result_root.glob("*/budget_*/population_rejection.csv")):
+    for path in sorted(args.result_root.glob("*/scope_*/budget_*/population_rejection.csv")):
         table = pd.read_csv(path)
-        table["pair_id"] = path.parents[1].name
+        table["pair_id"] = path.parents[2].name
+        table["analysis_scope"] = path.parents[1].name.removeprefix("scope_")
         table["rejection_budget_cap"] = float(path.parent.name.removeprefix("budget_"))
         populations.append(table)
     if populations:
