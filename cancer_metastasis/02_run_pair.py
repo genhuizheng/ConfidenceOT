@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from pathlib import Path
 import time
@@ -26,12 +27,13 @@ def labels(data) -> np.ndarray:
     return np.repeat("unannotated", data.n_obs)
 
 
-def confidence_frame(side: str, data, sample: str, result) -> pd.DataFrame:
+def confidence_frame(method: str, side: str, data, sample: str, result) -> pd.DataFrame:
     value = result.source_confidence if side == "source" else result.target_confidence
     gate = result.source_gate if side == "source" else result.target_gate
     raw_gate = result.source_raw_gate if side == "source" else result.target_raw_gate
     frame = pd.DataFrame({
-        "side": side, "observation_id": data.obs_names.astype(str), "sample_id": sample,
+        "method": method, "side": side,
+        "observation_id": data.obs_names.astype(str), "sample_id": sample,
         "annotation": labels(data), "retained": gate, "rejected": ~gate,
         "raw_retained": raw_gate, "raw_rejected": ~raw_gate,
         "decision_cost": value.decision_cost, "rejection_cost": value.rejection_cost,
@@ -47,7 +49,7 @@ def confidence_frame(side: str, data, sample: str, result) -> pd.DataFrame:
     return frame
 
 
-def transition_table(coupling, source_labels, target_labels, source_gate, target_gate):
+def transition_table(method, coupling, source_labels, target_labels, source_gate, target_gate):
     source_categories = sorted(np.unique(source_labels))
     target_categories = sorted(np.unique(target_labels))
     source_hot = np.column_stack([(source_labels == value) & source_gate for value in source_categories]).astype(float)
@@ -56,7 +58,7 @@ def transition_table(coupling, source_labels, target_labels, source_gate, target
     total = grouped.sum(axis=1, keepdims=True)
     conditional = np.divide(grouped, total, out=np.zeros_like(grouped), where=total > 0)
     return pd.DataFrame([
-        {"source_annotation": source, "target_annotation": target,
+        {"method": method, "source_annotation": source, "target_annotation": target,
          "transported_mass": grouped[i, j], "source_conditional_probability": conditional[i, j]}
         for i, source in enumerate(source_categories) for j, target in enumerate(target_categories)
     ])
@@ -153,59 +155,89 @@ def main() -> None:
         workers=args.workers, fallback_to_cpu=False,
     )
     calibration_seconds = time.perf_counter() - calibration_started
-    model = ConfidenceOT(
-        backbone="uot", variant="reversible", rejection_cost=calibration.rejection_cost,
-        epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
-        source_rejection_budget=args.rejection_budget, target_rejection_budget=args.rejection_budget,
-        tolerance=args.tolerance, device=args.device,
-    )
-    fit_started = time.perf_counter()
-    result = model.fit(cost)
-    fit_seconds = time.perf_counter() - fit_started
-    cells = pd.concat([
-        confidence_frame("source", source, str(row["source_sample"]), result),
-        confidence_frame("target", target, str(row["target_sample"]), result),
-    ], ignore_index=True)
+    source_labels, target_labels = labels(source), labels(target)
+    cell_tables = []
+    transition_tables = []
+    metric_rows = []
+    for method, variant in (("M4-E", "exact"), ("M4-R", "reversible")):
+        model = ConfidenceOT(
+            backbone="uot", variant=variant, rejection_cost=calibration.rejection_cost,
+            epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+            source_rejection_budget=args.rejection_budget,
+            target_rejection_budget=args.rejection_budget,
+            tolerance=args.tolerance, device=args.device,
+        )
+        fit_started = time.perf_counter()
+        result = model.fit(cost)
+        fit_seconds = time.perf_counter() - fit_started
+        cell_tables.extend([
+            confidence_frame(method, "source", source, str(row["source_sample"]), result),
+            confidence_frame(method, "target", target, str(row["target_sample"]), result),
+        ])
+        transition_tables.append(transition_table(
+            method, result.coupling, source_labels, target_labels,
+            result.source_gate, result.target_gate,
+        ))
+        metric_rows.append({
+            "pair_id": pair_id, "dataset_id": row["dataset_id"],
+            "patient_id": row["patient_id"], "source_sample": row["source_sample"],
+            "target_sample": row["target_sample"], "method": method, "variant": variant,
+            "source_exact_n": source_exact_n, "target_exact_n": target_exact_n,
+            "analysis_scope": args.analysis_scope,
+            "included_annotations": "|".join(args.include_annotation),
+            "source_scope_n": source_scope_n, "target_scope_n": target_scope_n,
+            "source_analyzed_n": source.n_obs, "target_analyzed_n": target.n_obs,
+            "rejection_budget_cap": args.rejection_budget,
+            "rejection_cost": calibration.rejection_cost,
+            "calibration_valid_for_m4r": calibration.calibration_valid,
+            "source_raw_rejection_rate": float(np.mean(~result.source_raw_gate)),
+            "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
+            "source_final_rejection_rate": float(np.mean(~result.source_gate)),
+            "target_final_rejection_rate": float(np.mean(~result.target_gate)),
+            "source_budget_override_rate": float(np.mean(result.source_confidence.budget_overridden)),
+            "target_budget_override_rate": float(np.mean(result.target_confidence.budget_overridden)),
+            "transported_mass": float(result.coupling.sum()),
+            "calibration_seconds_shared": calibration_seconds,
+            "fit_seconds": fit_seconds,
+            "inner_converged": result.inner_converged,
+            "outer_converged": result.outer_converged,
+            "cycle_detected": result.cycle_detected,
+            "cycle_length": result.cycle_length,
+            "outer_iterations": result.n_outer_iterations,
+            "total_inner_iterations": result.total_inner_iterations,
+            "device": result.device, "backend": result.backend,
+        })
+        if args.save_coupling:
+            np.savez_compressed(output / f"coupling_{method.lower().replace('-', '')}.npz",
+                                coupling=result.coupling)
+        del result, model
+        gc.collect()
+
+    cells = pd.concat(cell_tables, ignore_index=True)
     cells.to_csv(output / "cell_confidence.csv", index=False)
-    populations = cells.groupby(["side", "annotation"], dropna=False).agg(
+    populations = cells.groupby(["method", "side", "annotation"], dropna=False).agg(
         n=("rejected", "size"), raw_rejection_rate=("raw_rejected", "mean"),
         final_rejection_rate=("rejected", "mean"), budget_override_rate=("budget_overridden", "mean"),
         mean_confidence_score=("normalized_rejection_score", "mean")
     ).reset_index()
     populations.to_csv(output / "population_rejection.csv", index=False)
-    transition_table(result.coupling, labels(source), labels(target), result.source_gate, result.target_gate).to_csv(
-        output / "population_transitions.csv", index=False
-    )
-    metrics = {
-        "pair_id": pair_id, "dataset_id": row["dataset_id"], "patient_id": row["patient_id"],
-        "source_sample": row["source_sample"], "target_sample": row["target_sample"],
-        "source_exact_n": source_exact_n, "target_exact_n": target_exact_n,
-        "analysis_scope": args.analysis_scope,
-        "included_annotations": "|".join(args.include_annotation),
-        "source_scope_n": source_scope_n, "target_scope_n": target_scope_n,
-        "source_analyzed_n": source.n_obs, "target_analyzed_n": target.n_obs,
-        "rejection_budget_cap": args.rejection_budget, "rejection_cost": calibration.rejection_cost,
-        "calibration_valid": calibration.calibration_valid,
-        "source_raw_rejection_rate": float(np.mean(~result.source_raw_gate)),
-        "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
-        "source_final_rejection_rate": float(np.mean(~result.source_gate)),
-        "target_final_rejection_rate": float(np.mean(~result.target_gate)),
-        "source_budget_override_rate": float(np.mean(result.source_confidence.budget_overridden)),
-        "target_budget_override_rate": float(np.mean(result.target_confidence.budget_overridden)),
-        "transported_mass": float(result.coupling.sum()), "calibration_seconds": calibration_seconds,
-        "fit_seconds": fit_seconds, "pipeline_seconds": time.perf_counter() - started,
-        "inner_converged": result.inner_converged, "outer_converged": result.outer_converged,
-        "cycle_detected": result.cycle_detected, "device": result.device, "backend": result.backend,
-    }
-    pd.DataFrame([metrics]).to_csv(output / "pair_metrics.csv", index=False)
+    pd.concat(transition_tables, ignore_index=True).to_csv(
+        output / "population_transitions.csv", index=False)
+    pipeline_seconds = time.perf_counter() - started
+    for metrics in metric_rows:
+        metrics["pipeline_seconds_shared"] = pipeline_seconds
+    pd.DataFrame(metric_rows).to_csv(output / "pair_metrics.csv", index=False)
     (output / "calibration.json").write_text(json.dumps(json_ready(calibration), indent=2), encoding="utf-8")
     (output / "run.json").write_text(json.dumps({
-        **metrics, "hvg_n": len(hvg), "hvg": hvg, "preprocessing": preprocessing,
+        "pair_id": pair_id, "dataset_id": row["dataset_id"],
+        "patient_id": row["patient_id"], "analysis_scope": args.analysis_scope,
+        "rejection_cost": calibration.rejection_cost,
+        "calibration_valid_for_m4r": calibration.calibration_valid,
+        "pipeline_seconds": pipeline_seconds, "methods": metric_rows,
+        "hvg_n": len(hvg), "hvg": hvg, "preprocessing": preprocessing,
     }, indent=2), encoding="utf-8")
-    if args.save_coupling:
-        np.savez_compressed(output / "coupling.npz", coupling=result.coupling)
     (output / "SUCCESS").write_text("complete\n", encoding="utf-8")
-    print(json.dumps(metrics, indent=2))
+    print(pd.DataFrame(metric_rows).to_string(index=False))
 
 
 if __name__ == "__main__":

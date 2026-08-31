@@ -21,16 +21,19 @@ def main() -> None:
         "source_raw_rejection_rate", "target_raw_rejection_rate",
         "source_final_rejection_rate", "target_final_rejection_rate",
         "source_budget_override_rate", "target_budget_override_rate",
-        "rejection_cost", "transported_mass", "calibration_seconds", "fit_seconds", "pipeline_seconds",
+        "rejection_cost", "transported_mass", "fit_seconds",
     ]
     patients = metrics.groupby(
-        ["dataset_id", "patient_id", "analysis_scope", "rejection_budget_cap"], as_index=False
+        ["dataset_id", "patient_id", "analysis_scope", "method", "rejection_budget_cap"],
+        as_index=False
     )[numeric].mean()
     patients["pair_n"] = metrics.groupby(
-        ["dataset_id", "patient_id", "analysis_scope", "rejection_budget_cap"]
+        ["dataset_id", "patient_id", "analysis_scope", "method", "rejection_budget_cap"]
     ).size().to_numpy()
     patients.to_csv(args.output_dir / "patient_level_metrics.csv", index=False)
-    summary = patients.groupby(["dataset_id", "analysis_scope", "rejection_budget_cap"], as_index=False).agg(
+    summary = patients.groupby(
+        ["dataset_id", "analysis_scope", "method", "rejection_budget_cap"], as_index=False
+    ).agg(
         patient_n=("patient_id", "nunique"), pair_n=("pair_n", "sum"),
         source_raw_rejection_rate=("source_raw_rejection_rate", "mean"),
         target_raw_rejection_rate=("target_raw_rejection_rate", "mean"),
@@ -38,9 +41,25 @@ def main() -> None:
         target_final_rejection_rate=("target_final_rejection_rate", "mean"),
         source_budget_override_rate=("source_budget_override_rate", "mean"),
         target_budget_override_rate=("target_budget_override_rate", "mean"),
-        mean_pipeline_seconds=("pipeline_seconds", "mean"), total_pipeline_seconds=("pipeline_seconds", "sum"),
+        mean_fit_seconds=("fit_seconds", "mean"), total_fit_seconds=("fit_seconds", "sum"),
     )
     summary.to_csv(args.output_dir / "dataset_budget_summary_patient_weighted.csv", index=False)
+    run_keys = [
+        "pair_id", "dataset_id", "patient_id", "analysis_scope", "rejection_budget_cap",
+    ]
+    timing = metrics.drop_duplicates(run_keys)[
+        run_keys + ["calibration_seconds_shared", "pipeline_seconds_shared"]
+    ].copy()
+    timing.to_csv(args.output_dir / "run_level_timing.csv", index=False)
+    timing.groupby(
+        ["dataset_id", "analysis_scope", "rejection_budget_cap"], as_index=False
+    ).agg(
+        run_n=("pair_id", "size"),
+        mean_calibration_seconds=("calibration_seconds_shared", "mean"),
+        total_calibration_seconds=("calibration_seconds_shared", "sum"),
+        mean_pipeline_seconds=("pipeline_seconds_shared", "mean"),
+        total_pipeline_seconds=("pipeline_seconds_shared", "sum"),
+    ).to_csv(args.output_dir / "dataset_run_timing.csv", index=False)
     populations = []
     for path in sorted(args.result_root.glob("*/scope_*/budget_*/population_rejection.csv")):
         table = pd.read_csv(path)
