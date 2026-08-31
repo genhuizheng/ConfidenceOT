@@ -119,7 +119,7 @@ def main() -> None:
     if args.max_observed_cells_per_side > 0 and target.n_obs > args.max_observed_cells_per_side:
         keep = np.sort(sample_rng.choice(target.n_obs, args.max_observed_cells_per_side, replace=False))
         target = target[keep].copy()
-    source_pca, target_pca, hvg = prepare_joint_representation(
+    source_pca, target_pca, hvg, preprocessing = prepare_joint_representation(
         source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=args.seed + args.index
     )
     rng = np.random.default_rng(args.seed + args.index * 104729)
@@ -187,7 +187,9 @@ def main() -> None:
     }
     pd.DataFrame([metrics]).to_csv(output / "pair_metrics.csv", index=False)
     (output / "calibration.json").write_text(json.dumps(json_ready(calibration), indent=2), encoding="utf-8")
-    (output / "run.json").write_text(json.dumps({**metrics, "hvg_n": len(hvg), "hvg": hvg}, indent=2), encoding="utf-8")
+    (output / "run.json").write_text(json.dumps({
+        **metrics, "hvg_n": len(hvg), "hvg": hvg, "preprocessing": preprocessing,
+    }, indent=2), encoding="utf-8")
     if args.save_coupling:
         np.savez_compressed(output / "coupling.npz", coupling=result.coupling)
     (output / "SUCCESS").write_text("complete\n", encoding="utf-8")

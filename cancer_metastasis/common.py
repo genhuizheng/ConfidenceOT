@@ -163,6 +163,15 @@ def expression_matrix(data: Any):
     return data.X
 
 
+def expression_kind(data: Any) -> str:
+    metadata = data.uns.get("metadata", {})
+    if hasattr(metadata, "get"):
+        value = metadata.get("Expression matrix type", "")
+        if str(value).strip():
+            return str(value).strip().lower()
+    return "unknown"
+
+
 def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int):
     source_keys, target_keys = gene_keys(source), gene_keys(target)
     source_first: dict[str, int] = {}
@@ -176,16 +185,23 @@ def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs:
         raise ValueError("Fewer than two common genes")
     source_index = [source_first[key] for key in common]
     target_index = [target_first[key] for key in common]
-    source_x = expression_matrix(source)[:, source_index]
-    target_x = expression_matrix(target)[:, target_index]
-    source_x = sparse.csr_matrix(source_x, dtype=np.float64)
-    target_x = sparse.csr_matrix(target_x, dtype=np.float64)
-    def normalize(matrix):
+    source_x = sparse.csr_matrix(expression_matrix(source)[:, source_index], dtype=np.float64)
+    target_x = sparse.csr_matrix(expression_matrix(target)[:, target_index], dtype=np.float64)
+    source_kind, target_kind = expression_kind(source), expression_kind(target)
+    def normalize(matrix, kind):
+        if "log-normalized" in kind or "log normalized" in kind:
+            return matrix, "stored log-normalized expression used without retransformation"
+        if "normalized" in kind and "raw" not in kind:
+            if matrix.data.size and np.min(matrix.data) < 0:
+                return matrix, "stored normalized expression contains negative values; used as provided"
+            matrix.data = np.log1p(matrix.data)
+            return matrix, "stored normalized expression -> log1p"
         totals = np.asarray(matrix.sum(axis=1)).ravel()
         scaled = sparse.diags(1e4 / np.maximum(totals, 1.0)) @ matrix
         scaled.data = np.log1p(scaled.data)
-        return scaled
-    source_x, target_x = normalize(source_x), normalize(target_x)
+        return scaled, "raw counts -> library size 1e4 -> log1p"
+    source_x, source_transform = normalize(source_x, source_kind)
+    target_x, target_transform = normalize(target_x, target_kind)
     joint = sparse.vstack([source_x, target_x], format="csr")
     mean = np.asarray(joint.mean(axis=0)).ravel()
     mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
@@ -197,7 +213,15 @@ def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs:
     from sklearn.decomposition import PCA
     components = min(n_pcs, dense.shape[0] - 1, dense.shape[1])
     coordinates = PCA(n_components=components, random_state=seed).fit_transform(dense)
-    return coordinates[: source.n_obs], coordinates[source.n_obs :], [common[index] for index in selected]
+    preprocessing = {
+        "source_expression_kind": source_kind,
+        "target_expression_kind": target_kind,
+        "source_transform": source_transform,
+        "target_transform": target_transform,
+        "joint_hvg": "top variance after side-specific declared-expression transformation",
+        "joint_pca": "centered and gene-scaled PCA",
+    }
+    return coordinates[: source.n_obs], coordinates[source.n_obs :], [common[index] for index in selected], preprocessing
 
 
 def json_ready(value: Any) -> Any:
