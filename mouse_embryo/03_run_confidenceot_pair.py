@@ -111,7 +111,8 @@ def main() -> None:
     def record(method: str, coupling: np.ndarray, source_signal: np.ndarray, target_signal: np.ndarray,
                wall: float, cpu: float, extra: dict, *, signal_definition: str,
                explicit_source_rejected: np.ndarray | None = None,
-               explicit_target_rejected: np.ndarray | None = None) -> None:
+               explicit_target_rejected: np.ndarray | None = None,
+               source_confidence=None, target_confidence=None) -> None:
         analysis_coupling = coupling
         if explicit_source_rejected is not None and explicit_target_rejected is not None:
             retained_mask = (~explicit_source_rejected)[:, None] & (~explicit_target_rejected)[None, :]
@@ -150,13 +151,17 @@ def main() -> None:
         transition_rows.extend(
             population_transitions(method, analysis_coupling, source_labels, target_labels)
         )
-        for side, labels, coordinates, ids, signal, explicit in (
+        for side, labels, coordinates, ids, signal, explicit, confidence in (
             ("source", source_labels, prepared["source_spatial"], prepared.get("source_ids", np.arange(len(source_labels))),
-             source_signal, explicit_source_rejected),
+             source_signal, explicit_source_rejected, source_confidence),
             ("target", target_labels, prepared["target_spatial"], prepared.get("target_ids", np.arange(len(target_labels))),
-             target_signal, explicit_target_rejected),
+             target_signal, explicit_target_rejected, target_confidence),
         ):
+            normalized_score = (
+                confidence.normalized_rejection_score() if confidence is not None else None
+            )
             for index in range(len(labels)):
+                has_confidence = confidence is not None
                 cell_rows.append({
                     "method": method, "side": side, "sample_index": index,
                     "observation_id": str(ids[index]), "annotation": str(labels[index]),
@@ -164,6 +169,30 @@ def main() -> None:
                     "rejection_signal": float(signal[index]),
                     "explicit_rejected": np.nan if explicit is None else bool(explicit[index]),
                     "signal_definition": signal_definition,
+                    "decision_cost": (
+                        float(confidence.decision_cost[index]) if has_confidence else np.nan
+                    ),
+                    "rejection_cost": (
+                        float(confidence.rejection_cost) if has_confidence else np.nan
+                    ),
+                    "signed_rejection_margin": (
+                        float(confidence.signed_rejection_margin[index])
+                        if has_confidence else np.nan
+                    ),
+                    "relative_rejection_margin": (
+                        float(confidence.relative_rejection_margin[index])
+                        if has_confidence else np.nan
+                    ),
+                    "normalized_rejection_score": (
+                        float(normalized_score[index])
+                        if has_confidence else np.nan
+                    ),
+                    "raw_rejected": (
+                        bool(confidence.raw_rejected[index]) if has_confidence else np.nan
+                    ),
+                    "budget_overridden": (
+                        bool(confidence.budget_overridden[index]) if has_confidence else np.nan
+                    ),
                 })
         safe = method.lower().replace(" ", "_").replace("/", "_").replace("|", "_")
         np.savez_compressed(
@@ -281,7 +310,9 @@ def main() -> None:
                        "device": fitted.device, "backend": fitted.backend,
                    }, signal_definition="binary_confidence_gate",
                    explicit_source_rejected=~fitted.source_gate,
-                   explicit_target_rejected=~fitted.target_gate)
+                   explicit_target_rejected=~fitted.target_gate,
+                   source_confidence=fitted.source_confidence,
+                   target_confidence=fitted.target_confidence)
 
     pd.DataFrame(metrics).to_csv(args.output_dir / "method_metrics.csv", index=False)
     pd.DataFrame(rejection_rows).to_csv(args.output_dir / "population_rejection.csv", index=False)

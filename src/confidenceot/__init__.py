@@ -13,11 +13,12 @@ from confidenceot.calibration import (
     rotation_null_costs,
 )
 from confidenceot.cuda import CUDAUnavailableError, cuda_available, cuda_device_name
-from confidenceot.result import ConfidenceOTResult
+from confidenceot.result import BinConfidence, ConfidenceOTResult
 
 __all__ = [
     "ConfidenceOT",
     "ConfidenceOTResult",
+    "BinConfidence",
     "CUDAUnavailableError",
     "cuda_available",
     "cuda_device_name",

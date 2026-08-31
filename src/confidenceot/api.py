@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from confidenceot.cuda import CUDAUnavailableError, cuda_available, fit_cuda
-from confidenceot.result import ConfidenceOTResult
+from confidenceot.result import BinConfidence, ConfidenceOTResult
 
 
 Backbone = Literal["balanced", "uot"]
@@ -184,6 +184,45 @@ class ConfidenceOT:
             fitted = fit_uot_cost_matrix_gate(
                 cost, lambda_a=kwargs["lambda_a"], lambda_b=kwargs["lambda_b"], **common
             )
+        rejection_cost = float(kwargs["rejection_cost"])
+        variant = str(kwargs["variant"])
+
+        def confidence_readout(
+            decision_cost: np.ndarray,
+            coefficient: np.ndarray,
+            raw_gate: np.ndarray,
+            final_gate: np.ndarray,
+        ) -> BinConfidence:
+            decision = np.asarray(decision_cost, dtype=np.float64)
+            raw_rejected = ~np.asarray(raw_gate, dtype=bool)
+            final_rejected = ~np.asarray(final_gate, dtype=bool)
+            margin = decision - rejection_cost
+            return BinConfidence(
+                decision_cost=decision,
+                rejection_cost=rejection_cost,
+                signed_rejection_margin=margin,
+                relative_rejection_margin=margin / rejection_cost,
+                gate_coefficient=np.asarray(coefficient, dtype=np.float64),
+                raw_rejected=raw_rejected,
+                final_rejected=final_rejected,
+                budget_overridden=raw_rejected != final_rejected,
+                cost_kind=(
+                    "counterfactual" if variant == "reversible" else "support_restricted"
+                ),
+            )
+
+        source_confidence = confidence_readout(
+            fitted.source_gate_score,
+            fitted.source_gate_coefficient,
+            fitted.source_raw_gate,
+            fitted.source_gate,
+        )
+        target_confidence = confidence_readout(
+            fitted.target_gate_score,
+            fitted.target_gate_coefficient,
+            fitted.target_raw_gate,
+            fitted.target_gate,
+        )
         return ConfidenceOTResult(
             coupling=np.asarray(fitted.coupling),
             source_gate=np.asarray(fitted.source_gate),
@@ -192,9 +231,11 @@ class ConfidenceOT:
             target_score=np.asarray(fitted.target_gate_coefficient),
             source_raw_gate=np.asarray(fitted.source_raw_gate),
             target_raw_gate=np.asarray(fitted.target_raw_gate),
+            source_confidence=source_confidence,
+            target_confidence=target_confidence,
             backbone=backbone,
-            variant=str(kwargs["variant"]),
-            rejection_cost=float(kwargs["rejection_cost"]),
+            variant=variant,
+            rejection_cost=rejection_cost,
             device="cpu",
             backend="numpy",
             inner_converged=bool(fitted.inner_converged),

@@ -72,6 +72,51 @@ class ConfidenceOTAPITest(unittest.TestCase):
         self.assertEqual(m4_exact(self.cost, device="cpu").variant, "exact")
         self.assertEqual(m4_reversible(self.cost, device="cpu").variant, "reversible")
 
+    def test_reversible_fit_returns_per_bin_confidence_without_changing_gate(self) -> None:
+        fitted = ConfidenceOT(
+            backbone="uot",
+            variant="reversible",
+            device="cpu",
+            max_iterations=2_000,
+            max_outer_iterations=10,
+            warn_on_terminal=False,
+        ).fit(self.cost)
+        for confidence, gate, raw_gate, size in (
+            (fitted.source_confidence, fitted.source_gate, fitted.source_raw_gate, 10),
+            (fitted.target_confidence, fitted.target_gate, fitted.target_raw_gate, 11),
+        ):
+            self.assertEqual(confidence.cost_kind, "counterfactual")
+            self.assertEqual(confidence.decision_cost.shape, (size,))
+            np.testing.assert_allclose(
+                confidence.signed_rejection_margin,
+                confidence.counterfactual_cost - fitted.rejection_cost,
+            )
+            np.testing.assert_allclose(
+                confidence.relative_rejection_margin,
+                confidence.signed_rejection_margin / fitted.rejection_cost,
+            )
+            np.testing.assert_array_equal(confidence.raw_rejected, ~raw_gate)
+            np.testing.assert_array_equal(confidence.final_rejected, ~gate)
+            np.testing.assert_array_equal(
+                confidence.budget_overridden,
+                confidence.raw_rejected != confidence.final_rejected,
+            )
+            normalized = confidence.normalized_rejection_score()
+            self.assertTrue(np.all((normalized >= 0.0) & (normalized <= 1.0)))
+
+    def test_exact_confidence_is_not_mislabeled_counterfactual(self) -> None:
+        fitted = ConfidenceOT(
+            backbone="balanced",
+            variant="exact",
+            device="cpu",
+            max_iterations=2_000,
+            max_outer_iterations=10,
+            warn_on_terminal=False,
+        ).fit(self.cost)
+        self.assertEqual(fitted.source_confidence.cost_kind, "support_restricted")
+        with self.assertRaises(AttributeError):
+            _ = fitted.source_confidence.counterfactual_cost
+
     def test_fit_many_parallel_is_identical_and_ordered(self) -> None:
         matrices = (self.cost, self.cost * 0.75, self.cost * 1.25)
         model = ConfidenceOT(
@@ -130,6 +175,18 @@ class ConfidenceOTAPITest(unittest.TestCase):
                 np.testing.assert_array_equal(actual.source_gate, expected.source_gate)
                 np.testing.assert_array_equal(actual.target_gate, expected.target_gate)
                 np.testing.assert_allclose(actual.coupling, expected.coupling, rtol=2e-9, atol=2e-11)
+                np.testing.assert_allclose(
+                    actual.source_confidence.decision_cost,
+                    expected.source_confidence.decision_cost,
+                    rtol=2e-9,
+                    atol=2e-11,
+                )
+                np.testing.assert_allclose(
+                    actual.target_confidence.decision_cost,
+                    expected.target_confidence.decision_cost,
+                    rtol=2e-9,
+                    atol=2e-11,
+                )
 
 
 if __name__ == "__main__":

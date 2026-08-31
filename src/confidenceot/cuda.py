@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from confidenceot.result import ConfidenceOTResult
+from confidenceot.result import BinConfidence, ConfidenceOTResult
 
 
 class CUDAUnavailableError(RuntimeError):
@@ -301,14 +301,68 @@ def _fit_cuda_impl(
     elapsed = time.perf_counter() - started
     source_score = source_score_t.detach().cpu().double().numpy()
     target_score = target_score_t.detach().cpu().double().numpy()
+    source_partner = source_partner_mass.detach().cpu().double().numpy()
+    target_partner = target_partner_mass.detach().cpu().double().numpy()
+    if variant == "reversible":
+        source_decision_cost = source_cf.detach().cpu().double().numpy()
+        target_decision_cost = target_cf.detach().cpu().double().numpy()
+        cost_kind = "counterfactual"
+    else:
+        source_decision_cost = np.zeros_like(source_score)
+        target_decision_cost = np.zeros_like(target_score)
+        np.divide(
+            source_score,
+            source_partner,
+            out=source_decision_cost,
+            where=source_partner > 0.0,
+        )
+        np.divide(
+            target_score,
+            target_partner,
+            out=target_decision_cost,
+            where=target_partner > 0.0,
+        )
+        source_decision_cost[source_partner > 0.0] += rejection_cost
+        target_decision_cost[target_partner > 0.0] += rejection_cost
+        cost_kind = "support_restricted"
+    source_raw_gate = source_score < 0.0
+    target_raw_gate = target_score < 0.0
+
+    def confidence_readout(
+        decision_cost: np.ndarray,
+        coefficient: np.ndarray,
+        raw_gate: np.ndarray,
+        final_gate: np.ndarray,
+    ) -> BinConfidence:
+        margin = decision_cost - rejection_cost
+        raw_rejected = ~raw_gate
+        final_rejected = ~final_gate
+        return BinConfidence(
+            decision_cost=decision_cost,
+            rejection_cost=float(rejection_cost),
+            signed_rejection_margin=margin,
+            relative_rejection_margin=margin / rejection_cost,
+            gate_coefficient=coefficient,
+            raw_rejected=raw_rejected,
+            final_rejected=final_rejected,
+            budget_overridden=raw_rejected != final_rejected,
+            cost_kind=cost_kind,
+        )
+
     return ConfidenceOTResult(
         coupling=result.coupling.detach().cpu().double().numpy(),
         source_gate=source_gate_np,
         target_gate=target_gate_np,
         source_score=source_score,
         target_score=target_score,
-        source_raw_gate=source_score < 0.0,
-        target_raw_gate=target_score < 0.0,
+        source_raw_gate=source_raw_gate,
+        target_raw_gate=target_raw_gate,
+        source_confidence=confidence_readout(
+            source_decision_cost, source_score, source_raw_gate, source_gate_np
+        ),
+        target_confidence=confidence_readout(
+            target_decision_cost, target_score, target_raw_gate, target_gate_np
+        ),
         backbone=backbone,
         variant=variant,
         rejection_cost=float(rejection_cost),

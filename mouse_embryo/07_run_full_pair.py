@@ -293,6 +293,16 @@ def main() -> None:
         source_score, target_score = confidence.source_score.copy(), confidence.target_score.copy()
         source_raw_gate = confidence.source_raw_gate.copy()
         target_raw_gate = confidence.target_raw_gate.copy()
+        source_decision_cost = confidence.source_confidence.decision_cost.copy()
+        target_decision_cost = confidence.target_confidence.decision_cost.copy()
+        source_signed_margin = confidence.source_confidence.signed_rejection_margin.copy()
+        target_signed_margin = confidence.target_confidence.signed_rejection_margin.copy()
+        source_relative_margin = confidence.source_confidence.relative_rejection_margin.copy()
+        target_relative_margin = confidence.target_confidence.relative_rejection_margin.copy()
+        source_normalized_score = confidence.source_confidence.normalized_rejection_score()
+        target_normalized_score = confidence.target_confidence.normalized_rejection_score()
+        source_budget_overridden = confidence.source_confidence.budget_overridden.copy()
+        target_budget_overridden = confidence.target_confidence.budget_overridden.copy()
         del confidence
         gc.collect()
 
@@ -363,6 +373,12 @@ def main() -> None:
                 "spatial_y": prepared["source_spatial"][:, 1], "retained": source_gate,
                 "rejected": ~source_gate, "raw_accepted": source_raw_gate,
                 "confidence_coefficient": source_score,
+                "counterfactual_cost": source_decision_cost,
+                "rejection_cost": calibration.rejection_cost,
+                "signed_rejection_margin": source_signed_margin,
+                "relative_rejection_margin": source_relative_margin,
+                "normalized_rejection_score": source_normalized_score,
+                "budget_overridden": source_budget_overridden,
             }),
             pd.DataFrame({
                 "side": "target", "observation_id": target_ids,
@@ -370,6 +386,12 @@ def main() -> None:
                 "spatial_y": prepared["target_spatial"][:, 1], "retained": target_gate,
                 "rejected": ~target_gate, "raw_accepted": target_raw_gate,
                 "confidence_coefficient": target_score,
+                "counterfactual_cost": target_decision_cost,
+                "rejection_cost": calibration.rejection_cost,
+                "signed_rejection_margin": target_signed_margin,
+                "relative_rejection_margin": target_relative_margin,
+                "normalized_rejection_score": target_normalized_score,
+                "budget_overridden": target_budget_overridden,
             }),
         ], ignore_index=True)
         cell_rows.to_csv(args.output_dir / "cell_confidence.csv", index=False)

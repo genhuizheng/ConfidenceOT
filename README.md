@@ -70,6 +70,11 @@ print(result.source_gate)
 print(result.target_gate)
 print(result.source_rejection_rate)
 print(result.target_rejection_rate)
+
+# Per-observation M4-R readouts; these do not change the fitted gate.
+print(result.source_confidence.counterfactual_cost)
+print(result.source_confidence.signed_rejection_margin)
+print(result.source_confidence.normalized_rejection_score())
 ```
 
 `True` in a gate means that the observation is retained. `False` means that it
@@ -165,10 +170,18 @@ python mouse_embryo/11_visualize_spatial_bin_programs.py OUTPUT_ROOT FIGURE_ROOT
 - source and target gates;
 - raw, pre-budget gate decisions;
 - source and target gate scores;
+- structured per-observation confidence readouts under `source_confidence` and
+  `target_confidence`, including the decision cost, signed and relative margin,
+  raw and final rejection decisions, and a budget-override flag;
 - rejection rates;
 - convergence and cycle diagnostics;
 - outer and inner iteration counts;
 - objective value, backend, device, and fit time.
+
+For M4-R, the signed rejection margin is the counterfactual conditional cost
+minus the rejection cost. Positive values support rejection and negative
+values support retention. `normalized_rejection_score()` is a monotone
+visualization score, not a calibrated probability.
 
 ## Development
 
