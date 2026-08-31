@@ -1,5 +1,10 @@
 # ConfidenceOT
 
+Primary-to-metastasis application code is under `cancer_metastasis/`.  It audits exact
+patient/sample pair eligibility, runs data-driven null calibration and M4-R inference,
+exports per-cell confidence and population transitions, and supports a budget-cap pilot
+before the full Vista SLURM array is launched.
+
 ConfidenceOT is a confidence-filtered optimal transport package for detecting
 source and target observations that should not be forced into a transport
 match. It exposes two related algorithms over balanced or KL-unbalanced OT
