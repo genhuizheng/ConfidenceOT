@@ -202,8 +202,9 @@ def gene_keys(data: Any) -> np.ndarray:
     keys = np.asarray(data.var_names.astype(str), dtype=str)
     for column in ("gene_id", "gene_symbol"):
         if column in data.var:
-            values = data.var[column].astype(str).to_numpy()
-            valid = ~pd.Series(values).isin(["", "nan", "None"]).to_numpy()
+            values = data.var[column].astype(str).str.strip().to_numpy()
+            missing = {"", "na", "n/a", "nan", "none", "null", "<na>"}
+            valid = ~pd.Series(values).str.lower().isin(missing).to_numpy()
             keys = np.where(valid, values, keys)
             if column == "gene_id":
                 break

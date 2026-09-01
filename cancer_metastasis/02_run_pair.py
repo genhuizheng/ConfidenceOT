@@ -90,6 +90,8 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cuda")
     parser.add_argument("--save-coupling", action="store_true")
+    parser.add_argument("--skip-completed", action="store_true",
+                        help="Return immediately when the pair output already contains SUCCESS")
     args = parser.parse_args()
     if not 0 <= args.rejection_budget < 1:
         raise ValueError("rejection-budget must be in [0,1)")
@@ -99,6 +101,9 @@ def main() -> None:
         raise ValueError(f"Ineligible pair: {row.get('skip_reason', '')}")
     pair_id = str(row["pair_id"])
     output = args.output_root / pair_id / f"scope_{args.analysis_scope}" / f"budget_{args.rejection_budget:.2f}"
+    if args.skip_completed and (output / "SUCCESS").is_file():
+        print(f"SKIP completed index={args.index} pair_id={pair_id} output={output}")
+        return
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     def paths_for(side: str) -> list[str]:

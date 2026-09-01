@@ -56,7 +56,8 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
     --calibration-grid-size 5 \
     --tolerance 1e-4 \
     --workers 1 \
-    --device cuda; then
+    --device cuda \
+    --skip-completed; then
     echo "===== COMPLETE index=$index $(date --iso-8601=seconds) ====="
   else
     status=$?
