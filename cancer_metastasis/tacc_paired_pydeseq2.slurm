@@ -32,4 +32,6 @@ python cancer_metastasis/13_run_paired_pydeseq2.py \
   "$groups" "$output" \
   --minimum-cells-per-patient-status 20 \
   --minimum-total-count 10 \
+  --maximum-fdr 0.05 \
+  --absolute-log2-fold-change-thresholds 0.5 1.0 \
   --n-cpus 16

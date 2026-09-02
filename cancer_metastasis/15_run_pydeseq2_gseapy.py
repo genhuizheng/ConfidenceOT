@@ -11,6 +11,13 @@ import numpy as np
 import pandas as pd
 
 
+CONTRAST_LABELS = {
+    "rejected_vs_retained": ("robust_rejected", "robust_retained"),
+    "robust_rejected_vs_all_other_cells": ("robust_rejected", "all_other_cells"),
+    "robust_retained_vs_all_other_cells": ("robust_retained", "all_other_cells"),
+}
+
+
 def collection_name(term: str) -> str:
     upper = term.upper()
     if upper.startswith("HALLMARK_"):
@@ -51,7 +58,8 @@ def stable_rank(path: Path) -> pd.DataFrame:
 
 def run_one(label: str, rank_path: Path, pathways: dict[str, list[str]], output: Path,
             *, permutations: int, threads: int, minimum_size: int,
-            maximum_size: int, seed: int) -> dict:
+            maximum_size: int, seed: int, case_label: str,
+            reference_label: str) -> dict:
     rank = stable_rank(rank_path)
     ranked = set(rank.gene.astype(str))
     overlap_rows = []
@@ -78,15 +86,17 @@ def run_one(label: str, rank_path: Path, pathways: dict[str, list[str]], output:
         if column in result:
             result[column] = pd.to_numeric(result[column], errors="coerce")
     result["collection"] = result.pathway.map(collection_name)
-    result["direction"] = np.where(result.NES >= 0, "robust_rejected_enriched",
-                                   "robust_retained_enriched")
+    result["direction"] = np.where(
+        result.NES >= 0, f"{case_label}_enriched", f"{reference_label}_enriched"
+    )
     result = result.sort_values(["fdr", "NES"], ascending=[True, False])
     result.to_csv(output / f"{label}_gsea_results.csv", index=False)
     return {"analysis": label, "ranked_gene_n": len(rank),
             "eligible_pathway_n": int(overlap.eligible.sum()), "tested_pathway_n": len(result),
             "fdr_005_pathway_n": int(result.fdr.lt(0.05).sum()),
-            "rejected_enriched_fdr_005_n": int((result.fdr.lt(0.05) & result.NES.gt(0)).sum()),
-            "retained_enriched_fdr_005_n": int((result.fdr.lt(0.05) & result.NES.lt(0)).sum())}
+            "case_label": case_label, "reference_label": reference_label,
+            "case_enriched_fdr_005_n": int((result.fdr.lt(0.05) & result.NES.gt(0)).sum()),
+            "reference_enriched_fdr_005_n": int((result.fdr.lt(0.05) & result.NES.lt(0)).sum())}
 
 
 def main() -> None:
@@ -110,6 +120,9 @@ def main() -> None:
     run_index = 0
     for contrast_directory in contrast_directories:
         contrast = contrast_directory.name
+        if contrast not in CONTRAST_LABELS:
+            raise ValueError(f"Unknown contrast directory: {contrast}")
+        case_label, reference_label = CONTRAST_LABELS[contrast]
         destination = args.output_root / "contrasts" / contrast
         destination.mkdir(parents=True, exist_ok=True)
         inputs = {
@@ -123,15 +136,19 @@ def main() -> None:
                 label, path, pathways, destination,
                 permutations=args.permutations, threads=args.threads,
                 minimum_size=args.minimum_size, maximum_size=args.maximum_size,
-                seed=args.seed + run_index,
+                seed=args.seed + run_index, case_label=case_label,
+                reference_label=reference_label,
             )
             summary["contrast"] = contrast
             summaries.append(summary)
             run_index += 1
     report = {
         "engine": "GSEApy prerank", "ranking_metric": "paired PyDESeq2 Wald statistic",
-        "positive_direction": "robust rejected malignant cells",
-        "negative_direction": "robust retained malignant cells",
+        "direction_definition": "positive NES is the contrast-specific case; negative NES is the contrast-specific reference",
+        "contrast_labels": {
+            contrast: {"case": labels[0], "reference": labels[1]}
+            for contrast, labels in CONTRAST_LABELS.items()
+        },
         "permutations": args.permutations, "analyses": summaries,
         "interpretation_limit": "Pathway findings are exploratory until robust to cell-complexity sensitivity analysis.",
     }

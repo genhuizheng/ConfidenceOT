@@ -10,6 +10,28 @@ import numpy as np
 import pandas as pd
 
 
+def filter_deg(
+    table: pd.DataFrame,
+    *,
+    maximum_fdr: float,
+    minimum_absolute_log2_fold_change: float,
+) -> pd.DataFrame:
+    result = table[
+        table["fdr"].lt(maximum_fdr)
+        & table["log2_fold_change"].abs().ge(minimum_absolute_log2_fold_change)
+    ].copy()
+    result["direction"] = np.where(
+        result["log2_fold_change"].gt(0), "case_enriched", "reference_enriched"
+    )
+    return result.sort_values(
+        ["fdr", "log2_fold_change"], ascending=[True, False], kind="stable"
+    )
+
+
+def threshold_tag(value: float) -> str:
+    return f"{value:g}".replace(".", "p")
+
+
 def load_patient_pseudobulk(
     group_root: Path,
     minimum_cells_per_status: int,
@@ -143,6 +165,13 @@ def main() -> None:
     parser.add_argument("--minimum-cells-per-patient-status", type=int, default=20)
     parser.add_argument("--minimum-total-count", type=int, default=10)
     parser.add_argument("--n-cpus", type=int, default=16)
+    parser.add_argument("--maximum-fdr", type=float, default=0.05)
+    parser.add_argument(
+        "--absolute-log2-fold-change-thresholds",
+        type=float,
+        nargs="+",
+        default=[0.5, 1.0],
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,6 +198,41 @@ def main() -> None:
         result.to_csv(destination / "pydeseq2_all_gene_discovery.csv", index=False)
         non_ot = result[~result["used_for_ot_anywhere"]].copy()
         non_ot.to_csv(destination / "pydeseq2_non_ot_gene_validation.csv", index=False)
+        effect_filter_reports = []
+        for threshold in sorted(set(args.absolute_log2_fold_change_thresholds)):
+            if threshold < 0:
+                raise ValueError("Absolute log2 fold-change thresholds must be non-negative")
+            filtered = filter_deg(
+                result,
+                maximum_fdr=args.maximum_fdr,
+                minimum_absolute_log2_fold_change=threshold,
+            )
+            filtered_non_ot = filter_deg(
+                non_ot,
+                maximum_fdr=args.maximum_fdr,
+                minimum_absolute_log2_fold_change=threshold,
+            )
+            tag = threshold_tag(threshold)
+            filtered.to_csv(
+                destination / f"pydeseq2_all_gene_fdr_005_abs_log2fc_{tag}.csv",
+                index=False,
+            )
+            filtered_non_ot.to_csv(
+                destination / f"pydeseq2_non_ot_gene_fdr_005_abs_log2fc_{tag}.csv",
+                index=False,
+            )
+            effect_filter_reports.append({
+                "maximum_fdr": args.maximum_fdr,
+                "minimum_absolute_log2_fold_change": threshold,
+                "all_gene_n": len(filtered),
+                "non_ot_gene_n": len(filtered_non_ot),
+                "non_ot_case_enriched_n": int(
+                    filtered_non_ot["direction"].eq("case_enriched").sum()
+                ),
+                "non_ot_reference_enriched_n": int(
+                    filtered_non_ot["direction"].eq("reference_enriched").sum()
+                ),
+            })
         for label, table in (("all_gene", result), ("non_ot_gene", non_ot)):
             table[["gene", "wald_statistic"]].dropna().sort_values(
                 "wald_statistic", ascending=False
@@ -184,6 +248,7 @@ def main() -> None:
             "non_ot_validation_gene_n": len(non_ot),
             "fdr_005_all_gene_n": int(result["fdr"].lt(0.05).sum()),
             "fdr_005_non_ot_gene_n": int(non_ot["fdr"].lt(0.05).sum()),
+            "effect_filters": effect_filter_reports,
         })
     report = {
         "deg_engine": "PyDESeq2",
@@ -191,6 +256,7 @@ def main() -> None:
         "contrasts": contrast_reports,
         "count_input": "raw integer counts summed across target groups within patient, contrast, and comparison status",
         "gsea_rank": "PyDESeq2 Wald statistic",
+        "gsea_prefilter": "none; all finite Wald statistics are retained for preranked GSEA",
     }
     (args.output_dir / "pydeseq2_report.json").write_text(
         json.dumps(report, indent=2), encoding="utf-8"

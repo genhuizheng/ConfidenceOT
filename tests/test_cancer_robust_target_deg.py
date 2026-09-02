@@ -25,6 +25,26 @@ def test_human_gsea_collection_names():
     assert module.collection_name("WP_OVARIAN_CANCER") == "WikiPathways"
 
 
+def test_human_gsea_contrast_direction_labels():
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "cancer_metastasis" / "15_run_pydeseq2_gseapy.py"
+    spec = spec_from_file_location("cancer_gsea_directions", path)
+    module = module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert module.CONTRAST_LABELS["rejected_vs_retained"] == (
+        "robust_rejected", "robust_retained"
+    )
+    assert module.CONTRAST_LABELS["robust_rejected_vs_all_other_cells"] == (
+        "robust_rejected", "all_other_cells"
+    )
+    assert module.CONTRAST_LABELS["robust_retained_vs_all_other_cells"] == (
+        "robust_retained", "all_other_cells"
+    )
+
+
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "cancer_metastasis"))
 
@@ -43,6 +63,22 @@ PYDESEQ2 = load("paired_pydeseq2", "13_run_paired_pydeseq2.py")
 
 
 class CancerRobustTargetDegTest(unittest.TestCase):
+    def test_effect_filter_uses_fdr_and_absolute_log2_fold_change(self):
+        table = pd.DataFrame({
+            "gene": ["A", "B", "C", "D"],
+            "fdr": [0.01, 0.01, 0.10, 0.01],
+            "log2_fold_change": [0.7, -0.8, 2.0, 0.2],
+        })
+        result = PYDESEQ2.filter_deg(
+            table, maximum_fdr=0.05, minimum_absolute_log2_fold_change=0.5
+        )
+        self.assertEqual(set(result["gene"]), {"A", "B"})
+        directions = result.set_index("gene")["direction"].to_dict()
+        self.assertEqual(directions["A"], "case_enriched")
+        self.assertEqual(directions["B"], "reference_enriched")
+        self.assertEqual(PYDESEQ2.threshold_tag(0.5), "0p5")
+        self.assertEqual(PYDESEQ2.threshold_tag(1.0), "1")
+
     def test_pseudobulk_collapses_target_groups_within_patient(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
