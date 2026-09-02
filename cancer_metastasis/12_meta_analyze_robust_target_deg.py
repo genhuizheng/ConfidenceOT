@@ -97,17 +97,170 @@ def volcano(table: pd.DataFrame, output: Path) -> None:
     plt.close(fig)
 
 
+def jaccard_table(significant: pd.DataFrame, direction: str) -> pd.DataFrame:
+    selected = significant[significant["direction"].eq(direction)]
+    groups = sorted(selected["group_id"].unique())
+    sets = {
+        group: set(selected.loc[selected["group_id"].eq(group), "gene"])
+        for group in groups
+    }
+    rows = []
+    for left in groups:
+        for right in groups:
+            union = sets[left] | sets[right]
+            rows.append({
+                "direction": direction,
+                "left_group": left,
+                "right_group": right,
+                "intersection_gene_n": len(sets[left] & sets[right]),
+                "union_gene_n": len(union),
+                "jaccard": len(sets[left] & sets[right]) / len(union) if union else np.nan,
+            })
+    return pd.DataFrame(rows)
+
+
+def overlap_outputs(
+    individual: pd.DataFrame,
+    output_dir: Path,
+    *,
+    fdr_threshold: float,
+    minimum_abs_log2fc: float,
+    minimum_expression_fraction: float,
+    top_n: int,
+) -> dict:
+    individual = individual.copy()
+    individual["maximum_expression_fraction"] = individual[
+        ["rejected_expression_fraction", "retained_expression_fraction"]
+    ].max(axis=1)
+    eligible = individual[
+        (individual["fdr"] < fdr_threshold)
+        & (individual["log2_fold_change"].abs() >= minimum_abs_log2fc)
+        & (individual["maximum_expression_fraction"] >= minimum_expression_fraction)
+    ].copy()
+    eligible["direction"] = np.where(
+        eligible["log2_fold_change"] > 0,
+        "rejected_enriched",
+        "retained_enriched",
+    )
+    eligible["absolute_log2_fold_change"] = eligible["log2_fold_change"].abs()
+    eligible = eligible.sort_values(
+        ["group_id", "direction", "fdr", "absolute_log2_fold_change"],
+        ascending=[True, True, True, False], kind="stable",
+    )
+    eligible["rank_within_group_direction"] = eligible.groupby(
+        ["group_id", "direction"]
+    ).cumcount() + 1
+    significant = eligible[
+        eligible["rank_within_group_direction"] <= top_n
+    ].copy()
+    significant.to_csv(
+        output_dir / "individual_significant_genes_long.csv.gz",
+        index=False, compression="gzip",
+    )
+
+    group_summary = significant.groupby(
+        ["group_id", "patient_id", "target_sample", "direction"], as_index=False
+    ).agg(
+        selected_gene_n=("gene", "nunique"),
+        minimum_fdr=("fdr", "min"),
+        median_absolute_log2_fold_change=("absolute_log2_fold_change", "median"),
+    )
+    group_summary.to_csv(output_dir / "individual_group_deg_summary.csv", index=False)
+
+    tested_group = individual.groupby("gene")["group_id"].nunique()
+    tested_patient = individual.groupby("gene")["patient_id"].nunique()
+    recurrence = significant.groupby(["gene", "direction"], as_index=False).agg(
+        significant_group_n=("group_id", "nunique"),
+        significant_patient_n=("patient_id", "nunique"),
+        median_log2_fold_change=("log2_fold_change", "median"),
+        median_fdr=("fdr", "median"),
+    )
+    recurrence["tested_group_n"] = recurrence["gene"].map(tested_group)
+    recurrence["tested_patient_n"] = recurrence["gene"].map(tested_patient)
+    recurrence["group_recurrence_fraction"] = (
+        recurrence["significant_group_n"] / recurrence["tested_group_n"]
+    )
+    recurrence["patient_recurrence_fraction"] = (
+        recurrence["significant_patient_n"] / recurrence["tested_patient_n"]
+    )
+    recurrence = recurrence.sort_values(
+        ["direction", "significant_patient_n", "patient_recurrence_fraction",
+         "significant_group_n", "median_fdr"],
+        ascending=[True, False, False, False, True], kind="stable",
+    )
+    recurrence.to_csv(output_dir / "individual_gene_overlap_frequency.csv", index=False)
+
+    jaccards = []
+    for direction in ("rejected_enriched", "retained_enriched"):
+        table = jaccard_table(significant, direction)
+        jaccards.append(table)
+        if table.empty:
+            continue
+        matrix = table.pivot(index="left_group", columns="right_group", values="jaccard")
+        matrix.to_csv(output_dir / f"individual_group_jaccard_{direction}.csv")
+        fig, ax = plt.subplots(figsize=(13, 11))
+        image = ax.imshow(matrix.to_numpy(), vmin=0, vmax=1, cmap="viridis", aspect="auto")
+        ax.set_xticks(np.arange(len(matrix.columns)), labels=matrix.columns, rotation=90, fontsize=5)
+        ax.set_yticks(np.arange(len(matrix.index)), labels=matrix.index, fontsize=5)
+        ax.set_title(f"Individual DEG overlap: {direction.replace('_', ' ')}")
+        fig.colorbar(image, ax=ax, label="Jaccard similarity", fraction=0.035, pad=0.02)
+        fig.tight_layout()
+        fig.savefig(output_dir / f"individual_group_jaccard_{direction}.png", dpi=240)
+        fig.savefig(output_dir / f"individual_group_jaccard_{direction}.pdf")
+        plt.close(fig)
+    if jaccards:
+        pd.concat(jaccards, ignore_index=True).to_csv(
+            output_dir / "individual_group_jaccard_long.csv", index=False
+        )
+
+    for direction in ("rejected_enriched", "retained_enriched"):
+        top = recurrence[recurrence["direction"].eq(direction)].head(25).iloc[::-1]
+        if top.empty:
+            continue
+        fig, ax = plt.subplots(figsize=(7.5, 7))
+        ax.barh(top["gene"], top["significant_patient_n"], color=(
+            "#c44e52" if direction == "rejected_enriched" else "#4c72b0"
+        ))
+        ax.set(
+            xlabel="Patients with gene in individual top-DEG set",
+            title=f"Recurring individual DEGs: {direction.replace('_', ' ')}",
+        )
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        fig.tight_layout()
+        fig.savefig(output_dir / f"individual_recurrence_{direction}.png", dpi=240)
+        fig.savefig(output_dir / f"individual_recurrence_{direction}.pdf")
+        plt.close(fig)
+
+    return {
+        "individual_group_n": int(individual["group_id"].nunique()),
+        "individual_patient_n": int(individual["patient_id"].nunique()),
+        "selected_individual_deg_record_n": len(significant),
+        "overlap_definition": {
+            "fdr_less_than": fdr_threshold,
+            "absolute_log2_fold_change_at_least": minimum_abs_log2fc,
+            "maximum_group_expression_fraction_at_least": minimum_expression_fraction,
+            "maximum_genes_per_group_per_direction": top_n,
+        },
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group_output_root", type=Path)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--minimum-patients", type=int, default=5)
     parser.add_argument("--minimum-site-patients", type=int, default=3)
+    parser.add_argument("--individual-fdr", type=float, default=0.05)
+    parser.add_argument("--individual-min-abs-log2fc", type=float, default=0.25)
+    parser.add_argument("--individual-min-expression-fraction", type=float, default=0.05)
+    parser.add_argument("--individual-overlap-top-n", type=int, default=100)
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     diagnostics = []
     contrasts = []
+    individual_degs = []
     for path in sorted(args.group_output_root.glob("groups/*/diagnostics.json")):
         with path.open(encoding="utf-8") as handle:
             record = json.load(handle)
@@ -116,10 +269,23 @@ def main() -> None:
         contrast_path = path.parent / "non_ot_gene_contrasts.csv.gz"
         if record.get("status") == "complete" and contrast_path.is_file():
             contrasts.append(pd.read_csv(contrast_path))
+            deg_path = path.parent / "non_ot_gene_validation_deg.csv.gz"
+            if not deg_path.is_file():
+                raise FileNotFoundError(f"Missing individual DEG table: {deg_path}")
+            individual_degs.append(pd.read_csv(deg_path))
     diagnostics_table = pd.DataFrame(diagnostics)
     diagnostics_table.to_csv(args.output_dir / "group_deg_diagnostics.csv", index=False)
     if not contrasts:
         raise RuntimeError("No completed non-OT gene contrast tables were found")
+    individual = pd.concat(individual_degs, ignore_index=True)
+    overlap_report = overlap_outputs(
+        individual,
+        args.output_dir,
+        fdr_threshold=args.individual_fdr,
+        minimum_abs_log2fc=args.individual_min_abs_log2fc,
+        minimum_expression_fraction=args.individual_min_expression_fraction,
+        top_n=args.individual_overlap_top_n,
+    )
     long = pd.concat(contrasts, ignore_index=True)
     long.to_csv(
         args.output_dir / "non_ot_gene_contrasts_all_groups.csv.gz",
@@ -169,6 +335,7 @@ def main() -> None:
     )
     volcano(overall, args.output_dir)
     report = {
+        **overlap_report,
         "completed_group_n": int((diagnostics_table["status"] == "complete").sum()),
         "skipped_group_n": int((diagnostics_table["status"] != "complete").sum()),
         "unique_patient_n": int(long["patient_id"].nunique()),
