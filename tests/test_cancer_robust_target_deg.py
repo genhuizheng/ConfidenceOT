@@ -10,6 +10,21 @@ import numpy as np
 import pandas as pd
 
 
+def test_human_gsea_collection_names():
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "cancer_metastasis" / "15_run_pydeseq2_gseapy.py"
+    spec = spec_from_file_location("cancer_gsea", path)
+    module = module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert module.collection_name("HALLMARK_INTERFERON_GAMMA_RESPONSE") == "Hallmark"
+    assert module.collection_name("GOBP_CELL_MIGRATION") == "GO Biological Process"
+    assert module.collection_name("REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION") == "Reactome"
+    assert module.collection_name("WP_OVARIAN_CANCER") == "WikiPathways"
+
+
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "cancer_metastasis"))
 
@@ -35,12 +50,17 @@ class CancerRobustTargetDegTest(unittest.TestCase):
                 group = root / "groups" / f"{index:03d}_P1__{target}"
                 group.mkdir(parents=True)
                 (group / "PSEUDOBULK_READY").write_text("ready\n")
+                contrasts = [
+                    "rejected_vs_retained",
+                    "robust_rejected_vs_all_other_cells",
+                    "robust_retained_vs_all_other_cells",
+                ]
                 samples = [
-                    f"P1__{target}__robust_rejected",
-                    f"P1__{target}__robust_retained",
+                    f"P1__{target}__{contrast}__{status}"
+                    for contrast in contrasts for status in ("case", "reference")
                 ]
                 pd.DataFrame(
-                    [[10, 1], [2, 8]], index=samples, columns=["G1", "G2"]
+                    [[10, 1], [2, 8]] * 3, index=samples, columns=["G1", "G2"]
                 ).rename_axis("sample_id").to_csv(
                     group / "pseudobulk_raw_counts.csv.gz", compression="gzip"
                 )
@@ -49,8 +69,10 @@ class CancerRobustTargetDegTest(unittest.TestCase):
                     "group_id": f"P1__{target}",
                     "patient_id": "P1",
                     "target_sample": target,
-                    "confidence_status": ["robust_rejected", "robust_retained"],
-                    "cell_n": [15, 15],
+                    "contrast": [contrast for contrast in contrasts for _ in range(2)],
+                    "comparison_status": ["case", "reference"] * 3,
+                    "cell_set": ["focal", "reference"] * 3,
+                    "cell_n": [15, 15] * 3,
                 }).to_csv(group / "pseudobulk_sample_metadata.csv", index=False)
                 pd.DataFrame({
                     "gene": ["G1", "G2"], "used_for_ot": [True, False]
@@ -59,9 +81,11 @@ class CancerRobustTargetDegTest(unittest.TestCase):
                     index=False, compression="gzip",
                 )
             counts, metadata, genes = PYDESEQ2.load_patient_pseudobulk(root, 20)
-            self.assertEqual(counts.shape, (2, 2))
-            self.assertEqual(counts.loc["P1__robust_rejected", "G1"], 20)
-            self.assertEqual(metadata.loc["P1__robust_retained", "cell_n"], 30)
+            self.assertEqual(counts.shape, (6, 2))
+            case = "P1__rejected_vs_retained__case"
+            reference = "P1__rejected_vs_retained__reference"
+            self.assertEqual(counts.loc[case, "G1"], 20)
+            self.assertEqual(metadata.loc[reference, "cell_n"], 30)
             self.assertTrue(genes.set_index("gene").loc["G1", "used_for_ot_anywhere"])
 
     def test_analysis_groups_include_single_and_multi_primary_targets(self):

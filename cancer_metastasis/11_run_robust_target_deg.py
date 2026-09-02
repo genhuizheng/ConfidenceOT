@@ -1,10 +1,11 @@
-"""Within-target DEG for cap-robust ConfidenceOT malignant-cell states.
+"""Prepare three within-target DEG contrasts for robust ConfidenceOT states.
 
 For one patient/target group, target malignant cells rejected in both the
-baseline fit and the source-cap sensitivity fit are compared with cells
-retained in both fits. Multi-primary groups use the independently selected
-winner at each cap; single-primary groups use their only verified pair.
-Discordant gates are excluded.
+baseline fit and the source-cap sensitivity fit define robust rejected and
+robust retained sets. Raw-count pseudobulks support rejected versus retained,
+rejected versus every other target cell, and retained versus every other
+target cell. Multi-primary groups use the independently selected winner at
+each cap; single-primary groups use their only verified pair.
 The all-gene result is exploratory; genes used in either OT representation are
 flagged and excluded from the primary non-circular validation table.
 """
@@ -327,7 +328,8 @@ def main() -> None:
             break
     if annotations is None:
         raise KeyError("Target H5AD has no cell-type annotation column")
-    data = data[annotations == args.malignant_annotation].copy()
+    all_data = data
+    data = all_data[annotations == args.malignant_annotation].copy()
     lookup = {str(value): index for index, value in enumerate(data.obs_names)}
     missing = cells.loc[~cells["observation_id"].astype(str).isin(lookup), "observation_id"]
     if len(missing):
@@ -380,16 +382,39 @@ def main() -> None:
             "PyDESeq2 pseudobulk requires non-negative integer raw counts; "
             f"declared expression kind was {expression_kind(data)!r}"
         )
+    all_lookup = {str(value): index for index, value in enumerate(all_data.obs_names)}
+    rejected_all_indices = np.asarray([all_lookup[value] for value in rejected_ids], dtype=np.int64)
+    retained_all_indices = np.asarray([all_lookup[value] for value in retained_ids], dtype=np.int64)
+    all_matrix = sparse.csr_matrix(expression_matrix(all_data), dtype=np.float64)
+    all_matrix, all_genes, all_used_for_ot = aggregate_gene_symbols(
+        all_matrix, all_data, ot_features
+    )
+    if all_matrix.data.size and (
+        all_matrix.data.min() < 0 or not np.allclose(all_matrix.data, np.round(all_matrix.data))
+    ):
+        raise ValueError(
+            "PyDESeq2 pseudobulk requires non-negative integer raw counts; "
+            f"declared expression kind was {expression_kind(all_data)!r}"
+        )
+    rejected_counts = np.asarray(all_matrix[rejected_all_indices].sum(axis=0)).ravel()
+    retained_counts = np.asarray(all_matrix[retained_all_indices].sum(axis=0)).ravel()
+    total_counts = np.asarray(all_matrix.sum(axis=0)).ravel()
+    pseudobulk_records = [
+        ("rejected_vs_retained", "case", "robust_rejected", rejected_counts, len(rejected_ids)),
+        ("rejected_vs_retained", "reference", "robust_retained", retained_counts, len(retained_ids)),
+        ("robust_rejected_vs_all_other_cells", "case", "robust_rejected", rejected_counts, len(rejected_ids)),
+        ("robust_rejected_vs_all_other_cells", "reference", "all_other_cells", total_counts - rejected_counts, all_data.n_obs - len(rejected_ids)),
+        ("robust_retained_vs_all_other_cells", "case", "robust_retained", retained_counts, len(retained_ids)),
+        ("robust_retained_vs_all_other_cells", "reference", "all_other_cells", total_counts - retained_counts, all_data.n_obs - len(retained_ids)),
+    ]
+    sample_ids = [
+        f"{group_id}__{contrast}__{comparison_status}"
+        for contrast, comparison_status, _, _, _ in pseudobulk_records
+    ]
     pseudobulk = pd.DataFrame(
-        np.vstack([
-            np.asarray(matrix[:len(rejected_ids)].sum(axis=0)).ravel(),
-            np.asarray(matrix[len(rejected_ids):].sum(axis=0)).ravel(),
-        ]).astype(np.int64),
-        index=pd.Index(
-            [f"{group_id}__robust_rejected", f"{group_id}__robust_retained"],
-            name="sample_id",
-        ),
-        columns=genes,
+        np.vstack([record[3] for record in pseudobulk_records]).astype(np.int64),
+        index=pd.Index(sample_ids, name="sample_id"),
+        columns=all_genes,
     )
     pseudobulk.to_csv(output / "pseudobulk_raw_counts.csv.gz", compression="gzip")
     pd.DataFrame({
@@ -397,15 +422,25 @@ def main() -> None:
         "group_id": group_id,
         "patient_id": patient,
         "target_sample": target,
-        "confidence_status": ["robust_rejected", "robust_retained"],
-        "cell_n": [len(rejected_ids), len(retained_ids)],
+        "contrast": [record[0] for record in pseudobulk_records],
+        "comparison_status": [record[1] for record in pseudobulk_records],
+        "cell_set": [record[2] for record in pseudobulk_records],
+        "cell_n": [record[4] for record in pseudobulk_records],
     }).to_csv(output / "pseudobulk_sample_metadata.csv", index=False)
     pd.DataFrame({
-        "gene": genes,
-        "used_for_ot": used_for_ot,
+        "gene": all_genes,
+        "used_for_ot": all_used_for_ot,
     }).to_csv(output / "pseudobulk_gene_metadata.csv.gz", index=False, compression="gzip")
     diagnostics["pseudobulk_status"] = "ready"
-    diagnostics["pseudobulk_engine"] = "raw integer count summation within patient target and confidence status"
+    diagnostics["pseudobulk_engine"] = "raw integer count summation within patient target and contrast status"
+    diagnostics["pseudobulk_contrasts"] = [
+        "rejected_vs_retained",
+        "robust_rejected_vs_all_other_cells",
+        "robust_retained_vs_all_other_cells",
+    ]
+    diagnostics["all_other_cells_definition"] = (
+        "all cells from the same exact target sample except the focal robust cell set"
+    )
     (output / "PSEUDOBULK_READY").write_text("ready\n", encoding="utf-8")
     if (
         len(rejected_ids) < args.minimum_rejected_cells

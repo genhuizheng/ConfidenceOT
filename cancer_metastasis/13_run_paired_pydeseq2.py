@@ -1,4 +1,4 @@
-"""Paired patient-level PyDESeq2 for cap-robust metastatic malignant states."""
+"""Paired patient-level PyDESeq2 for three robust target-cell contrasts."""
 
 from __future__ import annotations
 
@@ -38,30 +38,40 @@ def load_patient_pseudobulk(
     )
     metadata = pd.concat(metadata_tables, ignore_index=True).set_index("sample_id")
     metadata = metadata.loc[counts.index]
+    required = {"contrast", "comparison_status"}
+    missing = required.difference(metadata.columns)
+    if missing:
+        raise RuntimeError(
+            "Pseudobulk metadata predates the three-contrast workflow; rerun "
+            f"cancer_metastasis/11_run_robust_target_deg.py. Missing: {sorted(missing)}"
+        )
     counts = counts.groupby(
-        [metadata["patient_id"], metadata["confidence_status"]], sort=True
+        [metadata["patient_id"], metadata["contrast"], metadata["comparison_status"]],
+        sort=True,
     ).sum()
-    counts.index.names = ["patient_id", "confidence_status"]
+    counts.index.names = ["patient_id", "contrast", "comparison_status"]
     cell_counts = metadata.groupby(
-        ["patient_id", "confidence_status"], sort=True
+        ["patient_id", "contrast", "comparison_status"], sort=True
     ).agg(cell_n=("cell_n", "sum"), target_group_n=("group_id", "nunique"))
-    eligible = cell_counts["cell_n"].ge(minimum_cells_per_status).groupby(
-        level="patient_id"
-    ).all()
-    complete_status = cell_counts.groupby(level="patient_id").size().eq(2)
-    eligible_patients = eligible.index[eligible & complete_status]
-    counts = counts.loc[
-        counts.index.get_level_values("patient_id").isin(eligible_patients)
+    pair_levels = ["patient_id", "contrast"]
+    eligible = cell_counts["cell_n"].ge(minimum_cells_per_status).groupby(level=pair_levels).all()
+    complete_status = cell_counts.groupby(level=pair_levels).size().eq(2)
+    eligible_pairs = set(eligible.index[eligible & complete_status])
+    keep_rows = [
+        (patient, contrast) in eligible_pairs
+        for patient, contrast, _ in counts.index
     ]
-    cell_counts = cell_counts.loc[
-        cell_counts.index.get_level_values("patient_id").isin(eligible_patients)
+    counts = counts.loc[keep_rows]
+    cell_counts = cell_counts.loc[keep_rows]
+    counts.index = [
+        f"{patient}__{contrast}__{status}" for patient, contrast, status in counts.index
     ]
-    counts.index = [f"{patient}__{status}" for patient, status in counts.index]
     sample_metadata = cell_counts.reset_index()
     sample_metadata.index = [
-        f"{patient}__{status}"
-        for patient, status in zip(
-            sample_metadata["patient_id"], sample_metadata["confidence_status"]
+        f"{patient}__{contrast}__{status}"
+        for patient, contrast, status in zip(
+            sample_metadata["patient_id"], sample_metadata["contrast"],
+            sample_metadata["comparison_status"]
         )
     ]
     sample_metadata = sample_metadata.loc[counts.index]
@@ -90,14 +100,13 @@ def run_pydeseq2(
     inference = DefaultInference(n_cpus=n_cpus)
     metadata = metadata.copy()
     metadata["patient_id"] = metadata["patient_id"].astype("category")
-    metadata["confidence_status"] = pd.Categorical(
-        metadata["confidence_status"],
-        categories=["robust_retained", "robust_rejected"],
+    metadata["comparison_status"] = pd.Categorical(
+        metadata["comparison_status"], categories=["reference", "case"],
     )
     dds = DeseqDataSet(
         counts=counts,
         metadata=metadata,
-        design="~patient_id + confidence_status",
+        design="~patient_id + comparison_status",
         refit_cooks=True,
         inference=inference,
         quiet=False,
@@ -105,7 +114,7 @@ def run_pydeseq2(
     dds.deseq2()
     statistics = DeseqStats(
         dds,
-        contrast=["confidence_status", "robust_rejected", "robust_retained"],
+        contrast=["comparison_status", "case", "reference"],
         alpha=0.05,
         cooks_filter=True,
         independent_filter=True,
@@ -145,36 +154,42 @@ def main() -> None:
     metadata.to_csv(args.output_dir / "pseudobulk_sample_metadata.csv")
     counts.to_csv(args.output_dir / "pseudobulk_raw_counts.csv.gz", compression="gzip")
 
-    result = run_pydeseq2(counts, metadata, n_cpus=args.n_cpus).merge(
-        ot_genes, on="gene", how="left", validate="one_to_one"
-    )
-    result["used_for_ot_anywhere"] = result["used_for_ot_anywhere"].fillna(False)
-    result.to_csv(args.output_dir / "pydeseq2_all_gene_discovery.csv", index=False)
-    non_ot = result[~result["used_for_ot_anywhere"]].copy()
-    non_ot.to_csv(args.output_dir / "pydeseq2_non_ot_gene_validation.csv", index=False)
-    result[["gene", "wald_statistic"]].dropna().sort_values(
-        "wald_statistic", ascending=False
-    ).to_csv(
-        args.output_dir / "pydeseq2_all_gene_wald.rnk",
-        sep="\t", header=False, index=False,
-    )
-    non_ot[["gene", "wald_statistic"]].dropna().sort_values(
-        "wald_statistic", ascending=False
-    ).to_csv(
-        args.output_dir / "pydeseq2_non_ot_gene_wald.rnk",
-        sep="\t", header=False, index=False,
-    )
+    contrast_reports = []
+    contrasts_root = args.output_dir / "contrasts"
+    contrasts_root.mkdir(exist_ok=True)
+    for contrast, contrast_metadata in metadata.groupby("contrast", sort=True, observed=True):
+        contrast_metadata = contrast_metadata.copy()
+        contrast_counts = counts.loc[contrast_metadata.index]
+        destination = contrasts_root / str(contrast)
+        destination.mkdir(exist_ok=True)
+        result = run_pydeseq2(
+            contrast_counts, contrast_metadata, n_cpus=args.n_cpus
+        ).merge(ot_genes, on="gene", how="left", validate="one_to_one")
+        result["used_for_ot_anywhere"] = result["used_for_ot_anywhere"].fillna(False)
+        result.to_csv(destination / "pydeseq2_all_gene_discovery.csv", index=False)
+        non_ot = result[~result["used_for_ot_anywhere"]].copy()
+        non_ot.to_csv(destination / "pydeseq2_non_ot_gene_validation.csv", index=False)
+        for label, table in (("all_gene", result), ("non_ot_gene", non_ot)):
+            table[["gene", "wald_statistic"]].dropna().sort_values(
+                "wald_statistic", ascending=False
+            ).to_csv(destination / f"pydeseq2_{label}_wald.rnk",
+                     sep="\t", header=False, index=False)
+        contrast_metadata.to_csv(destination / "pseudobulk_sample_metadata.csv")
+        contrast_counts.to_csv(destination / "pseudobulk_raw_counts.csv.gz", compression="gzip")
+        contrast_reports.append({
+            "contrast": str(contrast),
+            "patient_n": int(contrast_metadata["patient_id"].nunique()),
+            "pseudobulk_sample_n": len(contrast_metadata),
+            "tested_gene_n": len(result),
+            "non_ot_validation_gene_n": len(non_ot),
+            "fdr_005_all_gene_n": int(result["fdr"].lt(0.05).sum()),
+            "fdr_005_non_ot_gene_n": int(non_ot["fdr"].lt(0.05).sum()),
+        })
     report = {
         "deg_engine": "PyDESeq2",
-        "design": "~patient_id + confidence_status",
-        "contrast": "robust_rejected versus robust_retained",
-        "count_input": "raw integer counts summed across target groups within patient and confidence status",
-        "patient_n": int(metadata["patient_id"].nunique()),
-        "pseudobulk_sample_n": len(metadata),
-        "tested_gene_n": len(result),
-        "non_ot_validation_gene_n": len(non_ot),
-        "fdr_005_all_gene_n": int(result["fdr"].lt(0.05).sum()),
-        "fdr_005_non_ot_gene_n": int(non_ot["fdr"].lt(0.05).sum()),
+        "design": "~patient_id + comparison_status",
+        "contrasts": contrast_reports,
+        "count_input": "raw integer counts summed across target groups within patient, contrast, and comparison status",
         "gsea_rank": "PyDESeq2 Wald statistic",
     }
     (args.output_dir / "pydeseq2_report.json").write_text(
