@@ -212,6 +212,7 @@ def pair_deltas(metrics: pd.DataFrame, baseline_label: str) -> pd.DataFrame:
         compared[f"delta_{column}"] = (
             compared[column] - compared[f"baseline_{column}"]
         )
+        compared[f"absolute_delta_{column}"] = compared[f"delta_{column}"].abs()
     return compared
 
 
@@ -369,7 +370,13 @@ def make_figures(
         alt_delta.loc[alt_delta["run_label"].eq(label), "delta_target_final_rejection_rate"] * 100
         for label in alt_delta["run_label"].unique()
     ]
-    ax.boxplot(values, labels=alt_delta["run_label"].unique(), showfliers=False)
+    boxplot_labels = alt_delta["run_label"].unique()
+    try:
+        # Matplotlib >=3.9 renamed ``labels`` to ``tick_labels``.
+        ax.boxplot(values, tick_labels=boxplot_labels, showfliers=False)
+    except TypeError:
+        # Retain compatibility with older TACC environments.
+        ax.boxplot(values, labels=boxplot_labels, showfliers=False)
     ax.axhline(0, color="0.3", linewidth=1)
     ax.set(
         ylabel="Pair-level target rejection change (percentage points)",
@@ -475,6 +482,14 @@ def main() -> None:
     stability.to_csv(args.output_dir / "origin_winner_stability_long.csv", index=False)
     robustness.to_csv(args.output_dir / "origin_group_robustness.csv", index=False)
     delta.to_csv(args.output_dir / "pair_level_cap_deltas.csv", index=False)
+    gates.sort_values(
+        ["gate_changed_fraction", "run_label", "side"],
+        ascending=[False, True, True],
+    ).to_csv(args.output_dir / "most_sensitive_cell_gate_pairs.csv", index=False)
+    delta[delta["run_label"].ne(baseline_label)].sort_values(
+        ["absolute_delta_target_final_rejection_rate", "run_label"],
+        ascending=[False, True],
+    ).to_csv(args.output_dir / "most_sensitive_target_metric_pairs.csv", index=False)
     stability[
         stability["run_label"].ne(baseline_label)
         & ~stability["exact_winner_matches_baseline"]
