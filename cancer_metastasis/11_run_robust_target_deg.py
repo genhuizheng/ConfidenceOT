@@ -1,8 +1,10 @@
 """Within-target DEG for cap-robust ConfidenceOT malignant-cell states.
 
-For one multi-primary patient/target group, target malignant cells rejected in
-both the baseline-winning fit and the source-cap sensitivity-winning fit are
-compared with cells retained in both fits.  Discordant gates are excluded.
+For one patient/target group, target malignant cells rejected in both the
+baseline fit and the source-cap sensitivity fit are compared with cells
+retained in both fits. Multi-primary groups use the independently selected
+winner at each cap; single-primary groups use their only verified pair.
+Discordant gates are excluded.
 The all-gene result is exploratory; genes used in either OT representation are
 flagged and excluded from the primary non-circular validation table.
 """
@@ -41,6 +43,61 @@ def parse_args() -> argparse.Namespace:
 
 def pair_id(patient: str, source: str, target: str) -> str:
     return f"{patient}__{source}__{target}"
+
+
+def analysis_groups(
+    manifest: pd.DataFrame,
+    robustness: pd.DataFrame,
+    sensitivity_label: str,
+) -> pd.DataFrame:
+    """Return every evaluable patient-target group, including single primaries."""
+    keys = ["dataset_id", "patient_id", "target_sample"]
+    sensitivity_column = (
+        f"{re.sub(r'[^A-Za-z0-9]+', '_', sensitivity_label).lower()}_winner"
+    )
+    rows = []
+    for values, table in manifest.groupby(keys, sort=True, dropna=False):
+        sources = sorted(table["source_sample"].astype(str).unique())
+        record = dict(zip(keys, values))
+        record["candidate_primary_n"] = len(sources)
+        if len(sources) == 1:
+            record.update({
+                "baseline_winner": sources[0],
+                sensitivity_column: sources[0],
+                "recommended_range_exact_robust": True,
+                "recommended_range_laterality_robust": True,
+                "origin_group_type": "single_primary_compatibility",
+            })
+        else:
+            match = robustness.copy()
+            for key, value in record.items():
+                if key in keys:
+                    match = match[match[key].astype(str).eq(str(value))]
+            if len(match) != 1:
+                raise RuntimeError(
+                    f"Robustness table did not uniquely resolve multi-primary group {record}"
+                )
+            selected = match.iloc[0]
+            if sensitivity_column not in selected.index:
+                raise KeyError(f"Missing robustness column: {sensitivity_column}")
+            record.update({
+                "baseline_winner": str(selected["baseline_winner"]),
+                sensitivity_column: str(selected[sensitivity_column]),
+                "recommended_range_exact_robust": bool(
+                    selected["recommended_range_exact_robust"]
+                ),
+                "recommended_range_laterality_robust": bool(
+                    selected["recommended_range_laterality_robust"]
+                ),
+                "origin_group_type": "multi_primary_origin_ranking",
+            })
+        for column in ("baseline_winner", sensitivity_column):
+            if record[column] not in sources:
+                raise RuntimeError(
+                    f"Selected source {record[column]!r} is absent from manifest group {record}"
+                )
+        rows.append(record)
+    return pd.DataFrame(rows).sort_values(keys, kind="stable").reset_index(drop=True)
 
 
 def one_result_file(root: Path, pair: str, name: str) -> Path:
@@ -82,17 +139,58 @@ def valid_symbol(values: np.ndarray) -> np.ndarray:
     return ~pd.Series(values.astype(str)).str.strip().str.lower().isin(missing).to_numpy()
 
 
+def gene_symbols(data) -> np.ndarray:
+    symbols = np.asarray(data.var_names.astype(str), dtype=str)
+    if "gene_symbol" in data.var:
+        candidate = data.var["gene_symbol"].astype(str).str.strip().to_numpy(dtype=str)
+        symbols = np.where(valid_symbol(candidate), candidate, symbols)
+    return np.asarray([value.strip() for value in symbols], dtype=str)
+
+
+def scanpy_qc(
+    matrix: sparse.csr_matrix,
+    data,
+    observation_ids: list[str],
+    rejected_n: int,
+) -> pd.DataFrame:
+    """Calculate cell-level technical covariates with Scanpy."""
+    try:
+        import scanpy as sc
+    except (ImportError, AttributeError) as error:
+        raise RuntimeError("scanpy>=1.10,<2 is required for malignant-cell QC") from error
+    symbols = gene_symbols(data)
+    qc = ad.AnnData(
+        X=matrix,
+        obs=pd.DataFrame(index=pd.Index(observation_ids, name="observation_id")),
+        var=pd.DataFrame(index=pd.Index(symbols, name="gene")),
+    )
+    upper = pd.Index(symbols).str.upper()
+    qc.var["mitochondrial"] = upper.str.startswith("MT-")
+    qc.var["ribosomal"] = upper.str.match(r"^RP[SL]")
+    sc.pp.calculate_qc_metrics(
+        qc,
+        qc_vars=["mitochondrial", "ribosomal"],
+        percent_top=None,
+        log1p=False,
+        inplace=True,
+    )
+    result = qc.obs[[
+        "total_counts", "n_genes_by_counts",
+        "pct_counts_mitochondrial", "pct_counts_ribosomal",
+    ]].reset_index()
+    result["confidence_status"] = np.where(
+        np.arange(len(result)) < rejected_n, "robust_rejected", "robust_retained"
+    )
+    return result
+
+
 def aggregate_gene_symbols(
     matrix: sparse.csr_matrix,
     data,
     ot_features: set[str],
 ) -> tuple[sparse.csr_matrix, np.ndarray, np.ndarray]:
     keys = gene_keys(data)
-    symbols = np.asarray(data.var_names.astype(str), dtype=str)
-    if "gene_symbol" in data.var:
-        candidate = data.var["gene_symbol"].astype(str).str.strip().to_numpy(dtype=str)
-        symbols = np.where(valid_symbol(candidate), candidate, symbols)
-    symbols = np.asarray([value.strip() for value in symbols], dtype=str)
+    symbols = gene_symbols(data)
     # Stable first-seen ordering, while summing duplicate symbols rather than
     # silently dropping their counts.
     lookup: dict[str, int] = {}
@@ -178,12 +276,12 @@ def scanpy_deg(
 
 def main() -> None:
     args = parse_args()
-    robustness = pd.read_csv(args.robustness_csv).sort_values(
-        ["dataset_id", "patient_id", "target_sample"], kind="stable"
-    ).reset_index(drop=True)
-    if args.index < 0 or args.index >= len(robustness):
-        raise IndexError(f"--index {args.index} outside 0..{len(robustness) - 1}")
-    row = robustness.iloc[args.index]
+    manifest = pd.read_csv(args.manifest_csv)
+    robustness = pd.read_csv(args.robustness_csv)
+    groups = analysis_groups(manifest, robustness, args.sensitivity_label)
+    if args.index < 0 or args.index >= len(groups):
+        raise IndexError(f"--index {args.index} outside 0..{len(groups) - 1}")
+    row = groups.iloc[args.index]
     sensitivity_column = f"{re.sub(r'[^A-Za-z0-9]+', '_', args.sensitivity_label).lower()}_winner"
     if sensitivity_column not in row.index:
         raise KeyError(f"Missing robustness column: {sensitivity_column}")
@@ -216,7 +314,6 @@ def main() -> None:
         default="cap_discordant",
     )
 
-    manifest = pd.read_csv(args.manifest_csv)
     match = manifest[manifest["pair_id"].eq(baseline_pair)]
     if len(match) != 1:
         raise RuntimeError(f"Manifest did not uniquely resolve {baseline_pair}")
@@ -248,6 +345,8 @@ def main() -> None:
         "dataset_id": str(row["dataset_id"]),
         "patient_id": patient,
         "target_sample": target,
+        "candidate_primary_n": int(row["candidate_primary_n"]),
+        "origin_group_type": str(row["origin_group_type"]),
         "baseline_winner": baseline_source,
         "sensitivity_winner": sensitivity_source,
         "baseline_pair_id": baseline_pair,
@@ -262,25 +361,67 @@ def main() -> None:
         "laterality_robust": bool(row["recommended_range_laterality_robust"]),
     }
     cells.to_csv(output / "target_cell_robust_classification.csv.gz", index=False)
-    if (
-        len(rejected_ids) < args.minimum_rejected_cells
-        or len(retained_ids) < args.minimum_retained_cells
-    ):
-        diagnostics["status"] = "insufficient_robust_cells"
-        (output / "diagnostics.json").write_text(
-            json.dumps(diagnostics, indent=2), encoding="utf-8"
-        )
-        (output / "SKIPPED").write_text("insufficient robust cells\n", encoding="utf-8")
-        print(diagnostics, flush=True)
-        return
-
     ordered_ids = rejected_ids + retained_ids
     indices = np.asarray([lookup[value] for value in ordered_ids], dtype=np.int64)
     matrix = sparse.csr_matrix(expression_matrix(data)[indices], dtype=np.float64)
+    qc = scanpy_qc(matrix, data, ordered_ids, len(rejected_ids))
+    qc.insert(0, "group_id", group_id)
+    qc.insert(1, "patient_id", patient)
+    qc.insert(2, "target_sample", target)
+    qc.to_csv(output / "cell_qc_metrics.csv.gz", index=False, compression="gzip")
     ot_features = read_hvg(args.baseline_root, baseline_pair) | read_hvg(
         args.sensitivity_root, sensitivity_pair
     )
     matrix, genes, used_for_ot = aggregate_gene_symbols(matrix, data, ot_features)
+    if matrix.data.size and (
+        matrix.data.min() < 0 or not np.allclose(matrix.data, np.round(matrix.data))
+    ):
+        raise ValueError(
+            "PyDESeq2 pseudobulk requires non-negative integer raw counts; "
+            f"declared expression kind was {expression_kind(data)!r}"
+        )
+    pseudobulk = pd.DataFrame(
+        np.vstack([
+            np.asarray(matrix[:len(rejected_ids)].sum(axis=0)).ravel(),
+            np.asarray(matrix[len(rejected_ids):].sum(axis=0)).ravel(),
+        ]).astype(np.int64),
+        index=pd.Index(
+            [f"{group_id}__robust_rejected", f"{group_id}__robust_retained"],
+            name="sample_id",
+        ),
+        columns=genes,
+    )
+    pseudobulk.to_csv(output / "pseudobulk_raw_counts.csv.gz", compression="gzip")
+    pd.DataFrame({
+        "sample_id": pseudobulk.index,
+        "group_id": group_id,
+        "patient_id": patient,
+        "target_sample": target,
+        "confidence_status": ["robust_rejected", "robust_retained"],
+        "cell_n": [len(rejected_ids), len(retained_ids)],
+    }).to_csv(output / "pseudobulk_sample_metadata.csv", index=False)
+    pd.DataFrame({
+        "gene": genes,
+        "used_for_ot": used_for_ot,
+    }).to_csv(output / "pseudobulk_gene_metadata.csv.gz", index=False, compression="gzip")
+    diagnostics["pseudobulk_status"] = "ready"
+    diagnostics["pseudobulk_engine"] = "raw integer count summation within patient target and confidence status"
+    (output / "PSEUDOBULK_READY").write_text("ready\n", encoding="utf-8")
+    if (
+        len(rejected_ids) < args.minimum_rejected_cells
+        or len(retained_ids) < args.minimum_retained_cells
+    ):
+        diagnostics["status"] = "pseudobulk_only_insufficient_group_cells_for_scanpy_deg"
+        (output / "diagnostics.json").write_text(
+            json.dumps(diagnostics, indent=2), encoding="utf-8"
+        )
+        (output / "SKIPPED").write_text(
+            "pseudobulk saved; insufficient group cells for Scanpy DEG\n",
+            encoding="utf-8",
+        )
+        print(diagnostics, flush=True)
+        return
+
     detected = np.asarray(matrix.getnnz(axis=0)).ravel()
     keep = detected >= args.minimum_gene_cells
     matrix, genes, used_for_ot = matrix[:, keep], genes[keep], used_for_ot[keep]
@@ -329,6 +470,8 @@ def main() -> None:
         "non_ot_validation_gene_n": len(validation),
         "ot_feature_symbol_n": int(used_for_ot.sum()),
         "normalization": normalization,
+        "qc_engine": "scanpy.pp.calculate_qc_metrics",
+        "qc_expression_kind": expression_kind(data),
         "primary_validation": "non-OT genes; rejected versus retained within the same target",
         "all_gene_result": "exploratory because OT feature reuse can induce selection circularity",
     })

@@ -20,8 +20,8 @@ manifest=${CONFIDENCEOT_MANIFEST:-$result/manifest/GSE180661_malignant/pair_mani
 baseline=${CONFIDENCEOT_BASELINE_ROOT:-$result/malignant_full_GSE180661}
 sensitivity=${CONFIDENCEOT_SENSITIVITY_ROOT:-$result/malignant_sourcecap_0p90_targetcap_0p95_GSE180661}
 robustness=${CONFIDENCEOT_ROBUSTNESS_CSV:-$result/source_cap_sensitivity_GSE180661_comprehensive/origin_group_robustness.csv}
-output=${CONFIDENCEOT_DEG_ROOT:-$result/robust_target_malignant_deg_GSE180661}
-group_count=${CONFIDENCEOT_DEG_GROUP_COUNT:-34}
+output=${CONFIDENCEOT_DEG_ROOT:-$result/robust_target_malignant_deg_all_pairs_GSE180661}
+group_count=${CONFIDENCEOT_DEG_GROUP_COUNT:-$(python -c 'import pandas as pd, sys; x=pd.read_csv(sys.argv[1]); print(x[["dataset_id", "patient_id", "target_sample"]].drop_duplicates().shape[0])' "$manifest")}
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"

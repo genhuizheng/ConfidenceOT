@@ -13,25 +13,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 
 
 def bh_adjust(values: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg adjustment delegated to statsmodels."""
     values = np.asarray(values, dtype=float)
     result = np.full(values.shape, np.nan)
-    valid = np.flatnonzero(np.isfinite(values))
-    if not len(valid):
+    valid = np.isfinite(values)
+    if not valid.any():
         return result
-    order = valid[np.argsort(values[valid], kind="stable")]
-    adjusted = values[order] * len(order) / np.arange(1, len(order) + 1)
-    adjusted = np.minimum.accumulate(adjusted[::-1])[::-1]
-    result[order] = np.minimum(adjusted, 1.0)
+    result[valid] = multipletests(values[valid], method="fdr_bh")[1]
     return result
 
 
-def meta_table(patient_contrasts: pd.DataFrame, minimum_patients: int) -> pd.DataFrame:
+def meta_table(patient_effects: pd.DataFrame, minimum_patients: int) -> pd.DataFrame:
+    """Patient-level Wilcoxon meta-analysis using SciPy and statsmodels."""
     rows = []
-    for gene, table in patient_contrasts.groupby("gene", sort=False):
-        values = table["mean_log_expression_difference"].to_numpy(dtype=float)
+    for gene, table in patient_effects.groupby("gene", sort=False):
+        values = table["log2_fold_change"].to_numpy(dtype=float)
         values = values[np.isfinite(values)]
         patient_n = len(values)
         p_value = np.nan
@@ -46,8 +46,8 @@ def meta_table(patient_contrasts: pd.DataFrame, minimum_patients: int) -> pd.Dat
         rows.append({
             "gene": gene,
             "patient_n": patient_n,
-            "median_mean_log_expression_difference": median,
-            "mean_mean_log_expression_difference": float(np.mean(values)) if patient_n else np.nan,
+            "median_patient_log2_fold_change": median,
+            "mean_patient_log2_fold_change": float(np.mean(values)) if patient_n else np.nan,
             "direction_consistency": consistency,
             "patient_level_wilcoxon_p_value": p_value,
         })
@@ -55,21 +55,21 @@ def meta_table(patient_contrasts: pd.DataFrame, minimum_patients: int) -> pd.Dat
     result["fdr"] = bh_adjust(result["patient_level_wilcoxon_p_value"].to_numpy())
     signed_significance = -np.log10(np.maximum(result["fdr"], 1e-300))
     result["gsea_rank_score"] = (
-        np.sign(result["median_mean_log_expression_difference"])
+        result["median_patient_log2_fold_change"]
         * signed_significance
         * result["direction_consistency"]
     )
     result["inference_unit"] = "patient"
     result["interpretation"] = "robust_rejected_minus_robust_retained_target_malignant_state"
     return result.sort_values(
-        ["fdr", "direction_consistency", "median_mean_log_expression_difference"],
+        ["fdr", "direction_consistency", "median_patient_log2_fold_change"],
         ascending=[True, False, False], kind="stable",
     )
 
 
 def volcano(table: pd.DataFrame, output: Path) -> None:
     plot = table[np.isfinite(table["fdr"])].copy()
-    x = plot["median_mean_log_expression_difference"].to_numpy()
+    x = plot["median_patient_log2_fold_change"].to_numpy()
     y = -np.log10(np.maximum(plot["fdr"].to_numpy(), 1e-300))
     significant = (plot["fdr"] < 0.05) & (plot["direction_consistency"] >= 0.70)
     fig, ax = plt.subplots(figsize=(8, 5.5))
@@ -78,14 +78,14 @@ def volcano(table: pd.DataFrame, output: Path) -> None:
     candidates = plot.assign(abs_rank=plot["gsea_rank_score"].abs()).nlargest(14, "abs_rank")
     for _, row in candidates.iterrows():
         ax.text(
-            row["median_mean_log_expression_difference"],
+            row["median_patient_log2_fold_change"],
             -np.log10(max(row["fdr"], 1e-300)),
             row["gene"], fontsize=7,
         )
     ax.axvline(0, color="0.3", linewidth=1)
     ax.axhline(-np.log10(0.05), color="0.5", linewidth=1, linestyle="--")
     ax.set(
-        xlabel="Median patient-level mean log-expression difference\n(rejected − retained)",
+        xlabel="Median patient-level Scanpy log2 fold change\n(rejected − retained)",
         ylabel="−log10(FDR)",
         title="Cap-robust metastatic malignant-state meta-DEG",
     )
@@ -261,6 +261,7 @@ def main() -> None:
     diagnostics = []
     contrasts = []
     individual_degs = []
+    cell_qc = []
     for path in sorted(args.group_output_root.glob("groups/*/diagnostics.json")):
         with path.open(encoding="utf-8") as handle:
             record = json.load(handle)
@@ -273,11 +274,29 @@ def main() -> None:
             if not deg_path.is_file():
                 raise FileNotFoundError(f"Missing individual DEG table: {deg_path}")
             individual_degs.append(pd.read_csv(deg_path))
+            qc_path = path.parent / "cell_qc_metrics.csv.gz"
+            if not qc_path.is_file():
+                raise FileNotFoundError(f"Missing Scanpy QC table: {qc_path}")
+            cell_qc.append(pd.read_csv(qc_path))
     diagnostics_table = pd.DataFrame(diagnostics)
     diagnostics_table.to_csv(args.output_dir / "group_deg_diagnostics.csv", index=False)
     if not contrasts:
         raise RuntimeError("No completed non-OT gene contrast tables were found")
     individual = pd.concat(individual_degs, ignore_index=True)
+    qc_long = pd.concat(cell_qc, ignore_index=True)
+    qc_long.to_csv(
+        args.output_dir / "cell_qc_all_groups.csv.gz", index=False, compression="gzip"
+    )
+    qc_summary = qc_long.groupby(
+        ["group_id", "patient_id", "target_sample", "confidence_status"], as_index=False
+    ).agg(
+        cell_n=("observation_id", "size"),
+        median_total_counts=("total_counts", "median"),
+        median_detected_genes=("n_genes_by_counts", "median"),
+        median_mitochondrial_percent=("pct_counts_mitochondrial", "median"),
+        median_ribosomal_percent=("pct_counts_ribosomal", "median"),
+    )
+    qc_summary.to_csv(args.output_dir / "cell_qc_group_summary.csv", index=False)
     overlap_report = overlap_outputs(
         individual,
         args.output_dir,
@@ -292,10 +311,11 @@ def main() -> None:
         index=False, compression="gzip",
     )
 
-    # Each patient receives equal weight. Multiple target samples from one
-    # patient are median-collapsed before the pan-metastatic signed-rank test.
-    patient = long.groupby(["patient_id", "gene"], as_index=False).agg(
-        mean_log_expression_difference=("mean_log_expression_difference", "median"),
+    # Scanpy performs each within-target DEG. Each patient then receives equal
+    # weight: multiple metastatic targets are median-collapsed before SciPy's
+    # patient-level Wilcoxon signed-rank test.
+    patient = individual.groupby(["patient_id", "gene"], as_index=False).agg(
+        log2_fold_change=("log2_fold_change", "median"),
         target_group_n=("group_id", "nunique"),
     )
     overall = meta_table(patient, args.minimum_patients)
@@ -315,9 +335,9 @@ def main() -> None:
     for site, patient_n in site_counts.items():
         if patient_n < args.minimum_site_patients:
             continue
-        use = long[long["target_sample"].eq(site)].groupby(
+        use = individual[individual["target_sample"].eq(site)].groupby(
             ["patient_id", "gene"], as_index=False
-        ).agg(mean_log_expression_difference=("mean_log_expression_difference", "median"))
+        ).agg(log2_fold_change=("log2_fold_change", "median"))
         table = meta_table(use, args.minimum_site_patients)
         table.insert(0, "target_sample", site)
         site_tables.append(table)
@@ -338,6 +358,12 @@ def main() -> None:
         **overlap_report,
         "completed_group_n": int((diagnostics_table["status"] == "complete").sum()),
         "skipped_group_n": int((diagnostics_table["status"] != "complete").sum()),
+        "multi_primary_group_n": int(
+            diagnostics_table["origin_group_type"].eq("multi_primary_origin_ranking").sum()
+        ),
+        "single_primary_compatibility_group_n": int(
+            diagnostics_table["origin_group_type"].eq("single_primary_compatibility").sum()
+        ),
         "unique_patient_n": int(long["patient_id"].nunique()),
         "target_group_n": int(long["group_id"].nunique()),
         "tested_non_ot_gene_n": len(overall),
@@ -345,6 +371,10 @@ def main() -> None:
             ((overall["fdr"] < 0.05) & (overall["direction_consistency"] >= 0.70)).sum()
         ),
         "primary_inference_unit": "patient; multiple metastatic targets median-collapsed within patient",
+        "deg_engine": "scanpy.tl.rank_genes_groups(method=wilcoxon, tie_correct=True)",
+        "meta_engine": "scipy.stats.wilcoxon with statsmodels Benjamini-Hochberg FDR",
+        "gsea_rank_definition": "median patient Scanpy log2FC * -log10(FDR) * direction consistency",
+        "qc_engine": "scanpy.pp.calculate_qc_metrics",
         "primary_gene_scope": "genes not used in either baseline or source090 winner OT representation",
         "biological_claim": "genes enriched or depleted in cap-robust target malignant cells not explained by the selected primary expression state",
     }
