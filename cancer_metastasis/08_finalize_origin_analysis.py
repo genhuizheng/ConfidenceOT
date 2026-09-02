@@ -133,6 +133,21 @@ def finalize_origin_analysis(
         )
         m4e.to_csv(output_dir / "m4e_origin_candidates.csv", index=False)
         m4e_winners = m4e[m4e["primary_rank"].eq(1)].copy()
+        m4e_second = m4e[m4e["primary_rank"].eq(2)][
+            GROUP + ["target_final_rejection_rate", "target_mean_rejection_score"]
+        ].rename(columns={
+            "target_final_rejection_rate": "second_target_rejection_rate",
+            "target_mean_rejection_score": "second_target_rejection_score",
+        })
+        m4e_winners = m4e_winners.merge(m4e_second, on=GROUP, how="left")
+        m4e_winners["margin_to_second_target_rejection_rate"] = (
+            m4e_winners["second_target_rejection_rate"]
+            - m4e_winners["target_final_rejection_rate"]
+        )
+        m4e_winners["margin_to_second_target_rejection_score"] = (
+            m4e_winners["second_target_rejection_score"]
+            - m4e_winners["target_mean_rejection_score"]
+        )
         m4e_winners["inference_valid"] = m4e_winners[
             "group_all_candidates_certified"
         ]

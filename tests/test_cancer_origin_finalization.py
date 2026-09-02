@@ -112,6 +112,12 @@ class CancerOriginFinalizationTest(unittest.TestCase):
             winner = pd.read_csv(output / "m4e_origin_group_winners.csv").iloc[0]
             self.assertEqual(winner["source_sample"], "left")
             self.assertTrue(bool(winner["inference_valid"]))
+            self.assertAlmostEqual(
+                winner["margin_to_second_target_rejection_rate"], 0.3
+            )
+            self.assertAlmostEqual(
+                winner["margin_to_second_target_rejection_score"], 0.3
+            )
 
     def test_incomplete_pair_stops_finalization(self):
         with tempfile.TemporaryDirectory() as temporary:
