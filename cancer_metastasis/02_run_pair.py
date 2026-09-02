@@ -20,6 +20,12 @@ def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return np.maximum(value, 0.0)
 
 
+def budget_tag(source_budget: float, target_budget: float) -> str:
+    if np.isclose(source_budget, target_budget, rtol=0.0, atol=5e-12):
+        return f"budget_{source_budget:.2f}"
+    return f"budget_source_{source_budget:.2f}_target_{target_budget:.2f}"
+
+
 def labels(data) -> np.ndarray:
     for column in ("cell_type", "annotation", "celltype", "cell_type_final"):
         if column in data.obs:
@@ -69,7 +75,12 @@ def main() -> None:
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("output_root", type=Path)
     parser.add_argument("--index", type=int, required=True, help="Zero-based row in the eligible manifest")
-    parser.add_argument("--rejection-budget", type=float, default=0.95, help="Safety cap, not a biological target")
+    parser.add_argument(
+        "--rejection-budget", type=float, default=None,
+        help="Legacy shared safety cap; side-specific options override it",
+    )
+    parser.add_argument("--source-rejection-budget", type=float, default=None)
+    parser.add_argument("--target-rejection-budget", type=float, default=None)
     parser.add_argument("--analysis-scope", choices=("all", "malignant"), default="all")
     parser.add_argument("--include-annotation", action="append", default=[],
                         help="Cell-type value retained in malignant scope; may be repeated")
@@ -93,14 +104,30 @@ def main() -> None:
     parser.add_argument("--skip-completed", action="store_true",
                         help="Return immediately when the pair output already contains SUCCESS")
     args = parser.parse_args()
-    if not 0 <= args.rejection_budget < 1:
-        raise ValueError("rejection-budget must be in [0,1)")
+    shared_budget = 0.95 if args.rejection_budget is None else args.rejection_budget
+    source_budget = (
+        shared_budget if args.source_rejection_budget is None
+        else args.source_rejection_budget
+    )
+    target_budget = (
+        shared_budget if args.target_rejection_budget is None
+        else args.target_rejection_budget
+    )
+    for name, value in (
+        ("source-rejection-budget", source_budget),
+        ("target-rejection-budget", target_budget),
+    ):
+        if not 0 <= value < 1:
+            raise ValueError(f"{name} must be in [0,1)")
     manifest = pd.read_csv(args.manifest_csv)
     row = manifest.iloc[args.index]
     if "eligible" in row and not bool(row["eligible"]):
         raise ValueError(f"Ineligible pair: {row.get('skip_reason', '')}")
     pair_id = str(row["pair_id"])
-    output = args.output_root / pair_id / f"scope_{args.analysis_scope}" / f"budget_{args.rejection_budget:.2f}"
+    output = (
+        args.output_root / pair_id / f"scope_{args.analysis_scope}"
+        / budget_tag(source_budget, target_budget)
+    )
     if args.skip_completed and (output / "SUCCESS").is_file():
         print(f"SKIP completed index={args.index} pair_id={pair_id} output={output}")
         return
@@ -155,7 +182,7 @@ def main() -> None:
     calibration = calibrate_confidence_cost(
         source_nulls[:split] + target_nulls[:split], source_nulls[split:] + target_nulls[split:],
         backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
-        source_rejection_budget=args.rejection_budget, target_rejection_budget=args.rejection_budget,
+        source_rejection_budget=source_budget, target_rejection_budget=target_budget,
         tolerance=args.tolerance, grid_size=args.calibration_grid_size, device=args.device,
         workers=args.workers, fallback_to_cpu=False,
     )
@@ -168,8 +195,8 @@ def main() -> None:
         model = ConfidenceOT(
             backbone="uot", variant=variant, rejection_cost=calibration.rejection_cost,
             epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
-            source_rejection_budget=args.rejection_budget,
-            target_rejection_budget=args.rejection_budget,
+            source_rejection_budget=source_budget,
+            target_rejection_budget=target_budget,
             tolerance=args.tolerance, device=args.device,
         )
         fit_started = time.perf_counter()
@@ -192,7 +219,11 @@ def main() -> None:
             "included_annotations": "|".join(args.include_annotation),
             "source_scope_n": source_scope_n, "target_scope_n": target_scope_n,
             "source_analyzed_n": source.n_obs, "target_analyzed_n": target.n_obs,
-            "rejection_budget_cap": args.rejection_budget,
+            "rejection_budget_cap": (
+                source_budget if np.isclose(source_budget, target_budget) else np.nan
+            ),
+            "source_rejection_budget_cap": source_budget,
+            "target_rejection_budget_cap": target_budget,
             "rejection_cost": calibration.rejection_cost,
             "calibration_valid_for_m4r": calibration.calibration_valid,
             "source_raw_rejection_rate": float(np.mean(~result.source_raw_gate)),
@@ -236,6 +267,8 @@ def main() -> None:
     (output / "run.json").write_text(json.dumps({
         "pair_id": pair_id, "dataset_id": row["dataset_id"],
         "patient_id": row["patient_id"], "analysis_scope": args.analysis_scope,
+        "source_rejection_budget_cap": source_budget,
+        "target_rejection_budget_cap": target_budget,
         "rejection_cost": calibration.rejection_cost,
         "calibration_valid_for_m4r": calibration.calibration_valid,
         "pipeline_seconds": pipeline_seconds, "methods": metric_rows,

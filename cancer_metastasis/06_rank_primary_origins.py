@@ -11,7 +11,7 @@ import pandas as pd
 
 GROUP = [
     "dataset_id", "patient_id", "target_sample", "analysis_scope",
-    "rejection_budget_cap",
+    "source_rejection_budget_cap", "target_rejection_budget_cap",
 ]
 
 
@@ -19,7 +19,11 @@ def _load_metrics(result_root: Path) -> pd.DataFrame:
     files = sorted(result_root.glob("*/scope_*/budget_*/pair_metrics.csv"))
     if not files:
         raise FileNotFoundError(f"No pair metrics under {result_root}")
-    return pd.concat([pd.read_csv(path) for path in files], ignore_index=True)
+    metrics = pd.concat([pd.read_csv(path) for path in files], ignore_index=True)
+    for column in ("source_rejection_budget_cap", "target_rejection_budget_cap"):
+        if column not in metrics:
+            metrics[column] = metrics["rejection_budget_cap"]
+    return metrics
 
 
 def _load_mean_rejection_scores(result_root: Path) -> pd.DataFrame:

@@ -16,7 +16,8 @@ GROUP = [
     "patient_id",
     "target_sample",
     "analysis_scope",
-    "rejection_budget_cap",
+    "source_rejection_budget_cap",
+    "target_rejection_budget_cap",
 ]
 
 
@@ -33,12 +34,19 @@ AUDIT = load_script("cancer_calibration_audit", "05_audit_calibration_certificat
 RANK = load_script("cancer_origin_rank", "06_rank_primary_origins.py")
 
 
+def budget_tag(source_budget: float, target_budget: float) -> str:
+    if abs(source_budget - target_budget) <= 5e-12:
+        return f"budget_{source_budget:.2f}"
+    return f"budget_source_{source_budget:.2f}_target_{target_budget:.2f}"
+
+
 def completion_table(
     manifest_csv: Path,
     result_root: Path,
     *,
     analysis_scope: str,
-    budget: float,
+    source_budget: float,
+    target_budget: float,
 ) -> pd.DataFrame:
     manifest = pd.read_csv(manifest_csv)
     if "pair_id" not in manifest:
@@ -46,7 +54,7 @@ def completion_table(
     if manifest["pair_id"].duplicated().any():
         raise ValueError("Manifest contains duplicate pair_id values")
     rows: list[dict] = []
-    budget_dir = f"budget_{budget:.2f}"
+    budget_dir = budget_tag(source_budget, target_budget)
     for pair_id in manifest["pair_id"].astype(str):
         run = result_root / pair_id / f"scope_{analysis_scope}" / budget_dir
         metric_path = run / "pair_metrics.csv"
@@ -89,11 +97,19 @@ def finalize_origin_analysis(
     *,
     analysis_scope: str = "malignant",
     budget: float = 0.95,
+    source_budget: float | None = None,
+    target_budget: float | None = None,
     allow_incomplete: bool = False,
 ) -> dict:
+    source_budget = budget if source_budget is None else source_budget
+    target_budget = budget if target_budget is None else target_budget
     output_dir.mkdir(parents=True, exist_ok=True)
     completion = completion_table(
-        manifest_csv, result_root, analysis_scope=analysis_scope, budget=budget
+        manifest_csv,
+        result_root,
+        analysis_scope=analysis_scope,
+        source_budget=source_budget,
+        target_budget=target_budget,
     )
     completion.to_csv(output_dir / "pair_completion_audit.csv", index=False)
     incomplete = completion[~completion["complete"]]
@@ -179,7 +195,9 @@ def finalize_origin_analysis(
         "complete_pair_n": int(completion["complete"].sum()),
         "incomplete_pair_n": int((~completion["complete"]).sum()),
         "analysis_scope": analysis_scope,
-        "rejection_budget_cap": budget,
+        "rejection_budget_cap": budget if source_budget == target_budget else None,
+        "source_rejection_budget_cap": source_budget,
+        "target_rejection_budget_cap": target_budget,
         "multi_primary_group_n": int(m4e_winners[GROUP].drop_duplicates().shape[0]),
         "m4e_valid_origin_group_n": int(
             m4e_winners.get("inference_valid", pd.Series(dtype=bool)).fillna(False).sum()
@@ -205,6 +223,8 @@ def main() -> None:
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--analysis-scope", choices=("all", "malignant"), default="malignant")
     parser.add_argument("--rejection-budget", type=float, default=0.95)
+    parser.add_argument("--source-rejection-budget", type=float, default=None)
+    parser.add_argument("--target-rejection-budget", type=float, default=None)
     parser.add_argument("--allow-incomplete", action="store_true")
     args = parser.parse_args()
     finalize_origin_analysis(
@@ -213,6 +233,8 @@ def main() -> None:
         args.output_dir,
         analysis_scope=args.analysis_scope,
         budget=args.rejection_budget,
+        source_budget=args.source_rejection_budget,
+        target_budget=args.target_rejection_budget,
         allow_incomplete=args.allow_incomplete,
     )
 

@@ -22,7 +22,9 @@ eligible=${CONFIDENCEOT_MANIFEST:-$result/manifest/pair_manifest_eligible.csv}
 output_root=${CONFIDENCEOT_OUTPUT_ROOT:-$result/full}
 analysis_scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-all}
 annotation_spec=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
-budget=${CONFIDENCEOT_REJECTION_BUDGET:?Set CONFIDENCEOT_REJECTION_BUDGET after reviewing the pilot}
+shared_budget=${CONFIDENCEOT_REJECTION_BUDGET:-0.95}
+source_budget=${CONFIDENCEOT_SOURCE_REJECTION_BUDGET:-$shared_budget}
+target_budget=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-$shared_budget}
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -65,6 +67,7 @@ failure_file="$result/logs/failed_${SLURM_ARRAY_JOB_ID:-manual}_${task_id}_resta
 failures=0
 
 echo "Worker $task_id/$task_count processing $pair_count manifest rows"
+echo "Rejection caps: source=$source_budget target=$target_budget"
 scope_args=(--analysis-scope "$analysis_scope")
 if [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
@@ -81,7 +84,8 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
   if python cancer_metastasis/02_run_pair.py "$eligible" "$output_root" \
     --index "$index" \
     "${scope_args[@]}" \
-    --rejection-budget "$budget" \
+    --source-rejection-budget "$source_budget" \
+    --target-rejection-budget "$target_budget" \
     --null-calibration-replicates 5 \
     --null-validation-replicates 5 \
     --calibration-grid-size 5 \

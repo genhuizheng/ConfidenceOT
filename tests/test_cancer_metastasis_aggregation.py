@@ -63,6 +63,8 @@ class CancerAggregationTest(unittest.TestCase):
 
             patient = pd.read_csv(output / "patient_level_metrics.csv")
             self.assertEqual(set(patient["method"]), {"M4-E", "M4-R"})
+            self.assertTrue((patient["source_rejection_budget_cap"] == 0.95).all())
+            self.assertTrue((patient["target_rejection_budget_cap"] == 0.95).all())
 
             timing = pd.read_csv(output / "dataset_run_timing.csv")
             self.assertEqual(int(timing.loc[0, "run_n"]), 1)

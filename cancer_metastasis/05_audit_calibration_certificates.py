@@ -19,6 +19,12 @@ def audit_calibrations(result_root: Path, output_dir: Path) -> pd.DataFrame:
         if not metric_path.is_file():
             continue
         metric = pd.read_csv(metric_path).iloc[0]
+        source_budget = metric.get(
+            "source_rejection_budget_cap", metric.get("rejection_budget_cap")
+        )
+        target_budget = metric.get(
+            "target_rejection_budget_cap", metric.get("rejection_budget_cap")
+        )
         warnings = [str(value) for value in calibration.get("warning_messages", [])]
         validation = calibration.get("validation", [])
         m4e_terminal_warning = any("M4-E" in value for value in warnings)
@@ -46,6 +52,8 @@ def audit_calibrations(result_root: Path, output_dir: Path) -> pd.DataFrame:
             "target_sample": metric["target_sample"],
             "analysis_scope": metric["analysis_scope"],
             "rejection_budget_cap": metric["rejection_budget_cap"],
+            "source_rejection_budget_cap": source_budget,
+            "target_rejection_budget_cap": target_budget,
             "rejection_cost": calibration.get("rejection_cost"),
             "selection_status": calibration.get("selection_status"),
             "source_monotone": calibration.get("source_monotone"),
@@ -74,7 +82,10 @@ def audit_calibrations(result_root: Path, output_dir: Path) -> pd.DataFrame:
     certificates = pd.DataFrame(rows)
     certificates.to_csv(output_dir / "pair_calibration_certificates.csv", index=False)
     summary = certificates.groupby(
-        ["dataset_id", "analysis_scope", "rejection_budget_cap"], as_index=False
+        [
+            "dataset_id", "analysis_scope", "source_rejection_budget_cap",
+            "target_rejection_budget_cap",
+        ], as_index=False
     ).agg(
         pair_n=("pair_id", "size"),
         m4e_cost_selection_valid_n=("m4e_cost_selection_valid", "sum"),
