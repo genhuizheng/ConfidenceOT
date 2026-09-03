@@ -8,7 +8,7 @@
 #SBATCH -c 32
 #SBATCH -t 24:00:00
 #SBATCH -A MCB26031
-# Submit a small worker array and set CONFIDENCEOT_PAIR_COUNT. Each worker
+# Submit a small worker array. Each worker
 # processes indices task_id, task_id + task_count, ... to avoid QOS array limits.
 #SBATCH --mail-user=genhuizheng@utexas.edu
 #SBATCH --mail-type=END,FAIL
@@ -25,6 +25,7 @@ annotation_spec=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
 shared_budget=${CONFIDENCEOT_REJECTION_BUDGET:-0.95}
 source_budget=${CONFIDENCEOT_SOURCE_REJECTION_BUDGET:-$shared_budget}
 target_budget=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-$shared_budget}
+maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -35,14 +36,6 @@ export NUMEXPR_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
 
 pair_count=${CONFIDENCEOT_PAIR_COUNT:-}
-if [[ -z "$pair_count" ]]; then
-  echo "CONFIDENCEOT_PAIR_COUNT must be set to the eligible manifest row count" >&2
-  exit 2
-fi
-if ! [[ "$pair_count" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Invalid CONFIDENCEOT_PAIR_COUNT=$pair_count" >&2
-  exit 2
-fi
 if [[ ! -f "$eligible" ]]; then
   echo "Manifest does not exist: $eligible" >&2
   exit 2
@@ -55,6 +48,13 @@ with open(sys.argv[1], newline="", encoding="utf-8-sig") as handle:
     print(sum(1 for _ in csv.DictReader(handle)))
 PY
 )
+if [[ -z "$pair_count" ]]; then
+  pair_count=$manifest_count
+fi
+if ! [[ "$pair_count" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Invalid CONFIDENCEOT_PAIR_COUNT=$pair_count" >&2
+  exit 2
+fi
 if [[ "$manifest_count" -ne "$pair_count" ]]; then
   echo "Manifest row count ($manifest_count) != CONFIDENCEOT_PAIR_COUNT ($pair_count)" >&2
   exit 2
@@ -68,6 +68,7 @@ failures=0
 
 echo "Worker $task_id/$task_count processing $pair_count manifest rows"
 echo "Rejection caps: source=$source_budget target=$target_budget"
+echo "Maximum observed cells per side: $maximum_observed_cells"
 scope_args=(--analysis-scope "$analysis_scope")
 if [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
@@ -86,6 +87,7 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
     "${scope_args[@]}" \
     --source-rejection-budget "$source_budget" \
     --target-rejection-budget "$target_budget" \
+    --max-observed-cells-per-side "$maximum_observed_cells" \
     --null-calibration-replicates 5 \
     --null-validation-replicates 5 \
     --calibration-grid-size 5 \
