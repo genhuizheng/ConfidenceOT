@@ -23,7 +23,8 @@ QC_COLUMNS = [
 ]
 MARKER_SETS = {
     "epithelial_ovarian": ["EPCAM", "KRT7", "KRT8", "KRT18", "KRT19", "MUC1", "MSLN", "PAX8", "WFDC2"],
-    "immune": ["PTPRC", "LST1", "TYROBP", "FCER1G", "CD3D", "CD3E", "CD74", "HLA-DRA"],
+    "leukocyte_lineage": ["PTPRC", "LST1", "TYROBP", "FCER1G", "CD3D", "CD3E"],
+    "antigen_presentation": ["CD74", "HLA-DRA"],
 }
 
 
