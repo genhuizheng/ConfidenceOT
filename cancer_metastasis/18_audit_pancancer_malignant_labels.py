@@ -19,9 +19,15 @@ MALIGNANT_NAME_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 EPITHELIAL_PATTERN = re.compile(r"epithel", flags=re.IGNORECASE)
+AUTHOR_TUMOR_CLUSTER_PATTERN = re.compile(r"^Tu\d+(?:_|$)", flags=re.IGNORECASE)
+AUTHOR_BACKGROUND_CLUSTER_PATTERN = re.compile(
+    r"^(?:T|B|M|F|E)\d+(?:_|$)", flags=re.IGNORECASE
+)
 BACKGROUND_PATTERN = re.compile(
-    r"(^|[^a-z])(t[ -]?cell|b[ -]?cell|myeloid|macrophage|monocyte|dendritic|"
-    r"mast|plasma|endothelial|fibroblast|stromal|neutrophil|lymphocyte)([^a-z]|$)",
+    r"(^|[^a-z])(t[ ._-]?cells?|b[ ._-]?cells?|cd4\+?[ ._-]*t|cd8\+?[ ._-]*t|"
+    r"treg|gdt|nkt?|ilc\d*|myeloid|macrophages?|monocytes?|dendritic|dcs?|pdc|"
+    r"mast|plasma|endothelial|fibroblasts?|fibrblast|stromal|neutrophils?|"
+    r"lymphocytes?|cafs?|tams?|myofib|myocytes?|tecs?)([^a-z]|$)",
     flags=re.IGNORECASE,
 )
 
@@ -30,9 +36,9 @@ def classify_annotation(label: str) -> str:
     value = str(label).strip()
     if not value or value.lower() in {"nan", "none", "unknown", "unannotated"}:
         return "missing_or_unannotated"
-    if BACKGROUND_PATTERN.search(value):
+    if AUTHOR_BACKGROUND_CLUSTER_PATTERN.search(value) or BACKGROUND_PATTERN.search(value):
         return "named_background"
-    if MALIGNANT_NAME_PATTERN.search(value):
+    if AUTHOR_TUMOR_CLUSTER_PATTERN.search(value) or MALIGNANT_NAME_PATTERN.search(value):
         return "name_supported_malignant_candidate"
     if EPITHELIAL_PATTERN.search(value):
         return "ambiguous_epithelial"

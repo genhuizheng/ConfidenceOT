@@ -189,7 +189,7 @@ def summarize(manifest_csv: Path, result_root: Path, output_root: Path) -> None:
         "pair_n": int(pairs["pair_id"].nunique()),
         "dataset_n": int(pairs["dataset_id"].nunique()),
         "counting_unit": "pair-wise cell occurrence",
-        "malignant_definition": "explicit malignant=True when available; otherwise annotation names containing tumor, tumour, cancer, malignant, carcinoma, or neoplastic",
+        "malignant_definition": "explicit malignant=True when available; otherwise annotation names containing tumor, tumour, cancer, malignant, carcinoma, or neoplastic, plus author-defined GSE225857 Tu##_* tumor clusters",
         "important_limit": "Name-supported malignant status is an annotation audit aid. Unannotated and generic epithelial cells are not declared malignant.",
     }
     (output_root / "all_cell_rejection_composition_report.json").write_text(
