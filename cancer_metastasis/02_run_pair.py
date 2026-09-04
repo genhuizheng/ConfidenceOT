@@ -70,6 +70,50 @@ def transition_table(method, coupling, source_labels, target_labels, source_gate
     ])
 
 
+def reciprocal_dominant_pairs(
+    method: str,
+    coupling: np.ndarray,
+    source_ids: np.ndarray,
+    target_ids: np.ndarray,
+    source_gate: np.ndarray,
+    target_gate: np.ndarray,
+) -> pd.DataFrame:
+    """Extract a non-forced one-to-one visualization layer from a soft coupling."""
+    coupling = np.asarray(coupling, dtype=float)
+    source_gate = np.asarray(source_gate, dtype=bool)
+    target_gate = np.asarray(target_gate, dtype=bool)
+    if coupling.shape != (len(source_ids), len(target_ids)):
+        raise ValueError("Coupling and observation identifiers have inconsistent shapes")
+    accepted = coupling.copy()
+    accepted[~source_gate, :] = 0.0
+    accepted[:, ~target_gate] = 0.0
+    row_total = accepted.sum(axis=1)
+    column_total = accepted.sum(axis=0)
+    if not np.any(row_total > 0) or not np.any(column_total > 0):
+        return pd.DataFrame(columns=[
+            "method", "source_observation_id", "target_observation_id",
+            "transport_mass", "source_conditional_weight",
+            "target_conditional_weight", "reciprocal_dominant",
+        ])
+    row_partner = np.argmax(accepted, axis=1)
+    column_partner = np.argmax(accepted, axis=0)
+    rows = []
+    for source_index, target_index in enumerate(row_partner):
+        mass = float(accepted[source_index, target_index])
+        if mass <= 0 or column_partner[target_index] != source_index:
+            continue
+        rows.append({
+            "method": method,
+            "source_observation_id": str(source_ids[source_index]),
+            "target_observation_id": str(target_ids[target_index]),
+            "transport_mass": mass,
+            "source_conditional_weight": mass / float(row_total[source_index]),
+            "target_conditional_weight": mass / float(column_total[target_index]),
+            "reciprocal_dominant": True,
+        })
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest_csv", type=Path)
@@ -101,6 +145,10 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cuda")
     parser.add_argument("--save-coupling", action="store_true")
+    parser.add_argument(
+        "--save-pairing-edges", action="store_true",
+        help="Save reciprocal dominant cell pairs and joint PCA coordinates",
+    )
     parser.add_argument("--skip-completed", action="store_true",
                         help="Return immediately when the pair output already contains SUCCESS")
     args = parser.parse_args()
@@ -190,6 +238,7 @@ def main() -> None:
     source_labels, target_labels = labels(source), labels(target)
     cell_tables = []
     transition_tables = []
+    pairing_tables = []
     metric_rows = []
     for method, variant in (("M4-E", "exact"), ("M4-R", "reversible")):
         model = ConfidenceOT(
@@ -210,6 +259,15 @@ def main() -> None:
             method, result.coupling, source_labels, target_labels,
             result.source_gate, result.target_gate,
         ))
+        if args.save_pairing_edges:
+            pairing_tables.append(reciprocal_dominant_pairs(
+                method,
+                result.coupling,
+                source.obs_names.astype(str).to_numpy(),
+                target.obs_names.astype(str).to_numpy(),
+                result.source_gate,
+                result.target_gate,
+            ))
         metric_rows.append({
             "pair_id": pair_id, "dataset_id": row["dataset_id"],
             "patient_id": row["patient_id"], "source_sample": row["source_sample"],
@@ -259,6 +317,25 @@ def main() -> None:
     populations.to_csv(output / "population_rejection.csv", index=False)
     pd.concat(transition_tables, ignore_index=True).to_csv(
         output / "population_transitions.csv", index=False)
+    if args.save_pairing_edges:
+        pd.concat(pairing_tables, ignore_index=True).to_csv(
+            output / "reciprocal_cell_pairs.csv.gz", index=False,
+            compression="gzip",
+        )
+        pca_columns = [f"PC{index + 1}" for index in range(source_pca.shape[1])]
+        coordinates = pd.concat([
+            pd.DataFrame(source_pca, columns=pca_columns).assign(
+                side="primary", observation_id=source.obs_names.astype(str).to_numpy(),
+                sample_id=str(row["source_sample"]), annotation=source_labels,
+            ),
+            pd.DataFrame(target_pca, columns=pca_columns).assign(
+                side="metastasis", observation_id=target.obs_names.astype(str).to_numpy(),
+                sample_id=str(row["target_sample"]), annotation=target_labels,
+            ),
+        ], ignore_index=True)
+        coordinates.to_csv(
+            output / "joint_pca_coordinates.csv.gz", index=False, compression="gzip"
+        )
     pipeline_seconds = time.perf_counter() - started
     for metrics in metric_rows:
         metrics["pipeline_seconds_shared"] = pipeline_seconds
