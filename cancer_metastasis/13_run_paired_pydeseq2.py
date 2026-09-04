@@ -1,4 +1,4 @@
-"""Paired patient-level PyDESeq2 for three robust target-cell contrasts."""
+"""Paired patient-level PyDESeq2 for prepared ConfidenceOT contrasts."""
 
 from __future__ import annotations
 
@@ -39,7 +39,9 @@ def load_patient_pseudobulk(
     count_tables = []
     metadata_tables = []
     ot_gene_tables = []
-    for ready in sorted(group_root.glob("groups/*/PSEUDOBULK_READY")):
+    ready_files = sorted(group_root.glob("groups/*/PSEUDOBULK_READY"))
+    ready_files += sorted(group_root.glob("patients/*/PSEUDOBULK_READY"))
+    for ready in ready_files:
         directory = ready.parent
         counts = pd.read_csv(directory / "pseudobulk_raw_counts.csv.gz", index_col=0)
         metadata = pd.read_csv(directory / "pseudobulk_sample_metadata.csv")
@@ -64,8 +66,8 @@ def load_patient_pseudobulk(
     missing = required.difference(metadata.columns)
     if missing:
         raise RuntimeError(
-            "Pseudobulk metadata predates the three-contrast workflow; rerun "
-            f"cancer_metastasis/11_run_robust_target_deg.py. Missing: {sorted(missing)}"
+            "Pseudobulk metadata lacks contrast definitions. Missing: "
+            f"{sorted(missing)}"
         )
     counts = counts.groupby(
         [metadata["patient_id"], metadata["contrast"], metadata["comparison_status"]],
@@ -254,7 +256,7 @@ def main() -> None:
         "deg_engine": "PyDESeq2",
         "design": "~patient_id + comparison_status",
         "contrasts": contrast_reports,
-        "count_input": "raw integer counts summed across target groups within patient, contrast, and comparison status",
+        "count_input": "raw integer counts aggregated once per biological cell and summed within patient, contrast, and comparison status",
         "gsea_rank": "PyDESeq2 Wald statistic",
         "gsea_prefilter": "none; all finite Wald statistics are retained for preranked GSEA",
     }

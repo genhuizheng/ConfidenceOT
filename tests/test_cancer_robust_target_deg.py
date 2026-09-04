@@ -43,6 +43,12 @@ def test_human_gsea_contrast_direction_labels():
     assert module.CONTRAST_LABELS["robust_retained_vs_all_other_cells"] == (
         "robust_retained", "all_other_cells"
     )
+    assert module.CONTRAST_LABELS["primary_rejected_vs_primary_retained"] == (
+        "primary_rejected", "primary_retained"
+    )
+    assert module.CONTRAST_LABELS[
+        "metastasis_rejected_vs_metastasis_nonmalignant"
+    ] == ("metastasis_rejected", "metastasis_nonmalignant")
 
 
 ROOT = Path(__file__).parents[1]

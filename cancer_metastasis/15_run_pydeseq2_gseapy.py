@@ -15,6 +15,34 @@ CONTRAST_LABELS = {
     "rejected_vs_retained": ("robust_rejected", "robust_retained"),
     "robust_rejected_vs_all_other_cells": ("robust_rejected", "all_other_cells"),
     "robust_retained_vs_all_other_cells": ("robust_retained", "all_other_cells"),
+    "primary_rejected_vs_primary_retained": ("primary_rejected", "primary_retained"),
+    "metastasis_rejected_vs_metastasis_retained": (
+        "metastasis_rejected", "metastasis_retained"
+    ),
+    "metastasis_retained_vs_primary_retained": (
+        "metastasis_retained", "primary_retained"
+    ),
+    "metastasis_rejected_vs_primary_retained": (
+        "metastasis_rejected", "primary_retained"
+    ),
+    "metastasis_rejected_vs_primary_rejected": (
+        "metastasis_rejected", "primary_rejected"
+    ),
+    "metastasis_retained_vs_primary_rejected": (
+        "metastasis_retained", "primary_rejected"
+    ),
+    "primary_retained_vs_primary_nonmalignant": (
+        "primary_retained", "primary_nonmalignant"
+    ),
+    "primary_rejected_vs_primary_nonmalignant": (
+        "primary_rejected", "primary_nonmalignant"
+    ),
+    "metastasis_retained_vs_metastasis_nonmalignant": (
+        "metastasis_retained", "metastasis_nonmalignant"
+    ),
+    "metastasis_rejected_vs_metastasis_nonmalignant": (
+        "metastasis_rejected", "metastasis_nonmalignant"
+    ),
 }
 
 
