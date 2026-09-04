@@ -24,7 +24,7 @@ progress_report7/
 mouse_embryo/results/
 /mouse_embryo_results/
 tmp/
-slurm/
+/slurm/
 scripts/
 *.inspect.ndjson
 *.zip
