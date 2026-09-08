@@ -96,3 +96,21 @@ def test_human_hallmark_gmt_uses_h_collection_name():
     ).read_text(encoding="utf-8")
     assert "h.all.v2025.1.Hs.symbols.gmt" in slurm
     assert "mh.all.v2025.1.Hs.symbols.gmt" not in slurm
+
+
+def test_source_cap_gene_stability_requires_every_cap():
+    module = load(
+        "source_cap_deg_sensitivity",
+        ROOT / "cancer_metastasis" / "gse180661" / "source_cap_deg_sensitivity.py",
+    )
+    table = pd.DataFrame({
+        "gene": ["STABLE", "STABLE", "UNSTABLE", "UNSTABLE"],
+        "source_cap": [0.5, 0.9, 0.5, 0.9],
+        "fdr": [0.01, 0.02, 0.01, 0.01],
+        "log2_fold_change": [1.2, 1.1, 1.2, -1.1],
+        "detected_patient_fraction": [0.8] * 4,
+        "patient_direction_consistency": [0.8] * 4,
+    })
+    result = module.gene_stability(table, [0.5, 0.9]).set_index("gene")
+    assert bool(result.loc["STABLE", "strict_lfc_0p5_all_caps"])
+    assert not bool(result.loc["UNSTABLE", "strict_lfc_0p5_all_caps"])

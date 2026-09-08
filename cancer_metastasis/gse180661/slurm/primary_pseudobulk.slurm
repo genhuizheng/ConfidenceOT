@@ -19,6 +19,7 @@ result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confi
 manifest=${CONFIDENCEOT_MANIFEST:-$result/manifest/GSE180661_malignant/pair_manifest_malignant_eligible.csv}
 ot_root=${CONFIDENCEOT_MALIGNANT_OT_ROOT:-$result/malignant_full_GSE180661}
 output=${CONFIDENCEOT_PRIMARY_PSEUDOBULK_ROOT:-$result/pairwise_primary_pseudobulk_GSE180661}
+budget_tag=${CONFIDENCEOT_BUDGET_TAG:-}
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
@@ -38,9 +39,13 @@ task_count=${SLURM_ARRAY_TASK_COUNT:-1}
 failures=0
 for ((index=task_id; index<pair_count; index+=task_count)); do
   echo "===== PRIMARY PSEUDOBULK START index=$index $(date --iso-8601=seconds) ====="
+  budget_args=()
+  if [[ -n "$budget_tag" ]]; then
+    budget_args+=(--budget-tag "$budget_tag")
+  fi
   if python -m cancer_metastasis.gse180661.primary_pseudobulk \
       "$manifest" "$ot_root" "$output" --index "$index" \
-      --minimum-cells-per-state 20; then
+      "${budget_args[@]}" --minimum-cells-per-state 20; then
     echo "===== PRIMARY PSEUDOBULK COMPLETE index=$index $(date --iso-8601=seconds) ====="
   else
     failures=$((failures + 1))
