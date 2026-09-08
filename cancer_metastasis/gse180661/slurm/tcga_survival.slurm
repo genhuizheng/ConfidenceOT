@@ -29,7 +29,7 @@ survival=$data/Survival_SupplementalTable_S1_20171025_xena_sp
 gene_map=$data/gencode.v36.annotation.gtf.gene.probemap
 deg_table=$deg/primary_compatible_vs_restricted_all_genes.csv.gz
 gsea_table=$gsea/primary_compatible_vs_restricted_gsea_all.csv.gz
-hallmark_gmt=$gmt_root/mh.all.v2025.1.Hs.symbols.gmt
+hallmark_gmt=$gmt_root/h.all.v2025.1.Hs.symbols.gmt
 
 mkdir -p "$data" "$output" "$result/logs"
 

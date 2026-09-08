@@ -88,3 +88,11 @@ def test_tcga_expression_scale_is_not_double_logged():
     transformed = module.expression_on_log2_tpm_scale(raw_tpm, "raw_tpm")
     assert transformed.loc["A", "P1"] == 0.0
     assert transformed.loc["B", "P1"] == 2.0
+
+
+def test_human_hallmark_gmt_uses_h_collection_name():
+    slurm = (
+        ROOT / "cancer_metastasis" / "gse180661" / "slurm" / "tcga_survival.slurm"
+    ).read_text(encoding="utf-8")
+    assert "h.all.v2025.1.Hs.symbols.gmt" in slurm
+    assert "mh.all.v2025.1.Hs.symbols.gmt" not in slurm

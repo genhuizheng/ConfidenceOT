@@ -99,6 +99,7 @@ def gate_panel(axis, table: pd.DataFrame):
         ],
         ["Primary compatible", "Primary restricted",
          "Metastasis retained", "Metastasis rejected"],
+        default="Other",
     )
     styles = {
         "Primary compatible": ("#1B9E77", "o"),
