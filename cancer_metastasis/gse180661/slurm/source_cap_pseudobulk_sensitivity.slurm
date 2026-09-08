@@ -54,7 +54,17 @@ for ((linear=task_id; linear<total; linear+=task_count)); do
   cap_slug=${cap_slug/./p}
   ot_root="$ot_base/source_cap_$cap_slug"
   output="$output_base/source_cap_$cap_slug"
-  budget_tag=$(printf "budget_source_%.2f_target_%.2f" "$source_cap" "$target_cap")
+  budget_tag=$(python - "$source_cap" "$target_cap" <<'PY'
+import math
+import sys
+source = float(sys.argv[1])
+target = float(sys.argv[2])
+if math.isclose(source, target, rel_tol=0.0, abs_tol=5e-12):
+    print(f"budget_{source:.2f}")
+else:
+    print(f"budget_source_{source:.2f}_target_{target:.2f}")
+PY
+  )
   mkdir -p "$output"
   if python -m cancer_metastasis.gse180661.primary_pseudobulk \
       "$manifest" "$ot_root" "$output" --index "$pair_index" \

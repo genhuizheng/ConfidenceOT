@@ -84,6 +84,13 @@ def one_result_directory(root: Path, pair_id: str, budget_tag: str | None) -> Pa
     scope = root / pair_id / "scope_malignant"
     if budget_tag:
         candidates = [scope / budget_tag]
+        match = re.fullmatch(
+            r"budget_source_([0-9.]+)_target_([0-9.]+)", budget_tag
+        )
+        if match and np.isclose(
+            float(match.group(1)), float(match.group(2)), rtol=0.0, atol=5e-12
+        ):
+            candidates.append(scope / f"budget_{float(match.group(1)):.2f}")
     else:
         candidates = sorted(path.parent for path in scope.glob("*/SUCCESS"))
     candidates = [path for path in candidates if (path / "SUCCESS").is_file()]

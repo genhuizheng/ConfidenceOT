@@ -123,3 +123,17 @@ def test_source_cap_submit_encoding_is_slurm_export_safe():
     ).read_text(encoding="utf-8")
     assert '"0.50:0.70:0.75:0.85:0.90:0.95"' in script
     assert '"0.50,0.70,0.75,0.85,0.90,0.95"' not in script
+
+
+def test_symmetric_budget_tag_falls_back_to_shared_directory(tmp_path):
+    module = load(
+        "primary_pseudobulk_budget",
+        ROOT / "cancer_metastasis" / "gse180661" / "primary_pseudobulk.py",
+    )
+    run = tmp_path / "pair_a" / "scope_malignant" / "budget_0.95"
+    run.mkdir(parents=True)
+    (run / "SUCCESS").write_text("success\n", encoding="utf-8")
+    observed = module.one_result_directory(
+        tmp_path, "pair_a", "budget_source_0.95_target_0.95"
+    )
+    assert observed == run
