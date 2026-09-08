@@ -20,14 +20,14 @@ ot_base=${CONFIDENCEOT_SOURCE_CAP_OT_BASE:-$result/gse180661_source_cap_sensitiv
 pseudobulk_base=${CONFIDENCEOT_SOURCE_CAP_PSEUDOBULK_BASE:-$result/gse180661_source_cap_sensitivity_pseudobulk}
 deg_base=${CONFIDENCEOT_SOURCE_CAP_DEG_BASE:-$result/gse180661_source_cap_sensitivity_pydeseq2}
 output=${CONFIDENCEOT_SOURCE_CAP_SUMMARY_ROOT:-$result/gse180661_source_cap_sensitivity_summary}
-source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50,0.70,0.75,0.85,0.90,0.95"}
+source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50:0.70:0.75:0.85:0.90:0.95"}
 target_cap=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-0.95}
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 MKL_NUM_THREADS=8 NUMEXPR_NUM_THREADS=8
 export PYTHONUNBUFFERED=1
-read -r -a caps <<< "${source_caps//,/ }"
+read -r -a caps <<< "${source_caps//[:,]/ }"
 python -m cancer_metastasis.gse180661.source_cap_deg_sensitivity \
   "$ot_base" "$pseudobulk_base" "$deg_base" "$output" \
   --source-caps "${caps[@]}" --target-cap "$target_cap"

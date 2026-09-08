@@ -3,15 +3,16 @@ set -euo pipefail
 
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 manifest=${CONFIDENCEOT_MANIFEST:-$result/manifest/GSE180661_malignant/pair_manifest_malignant_eligible.csv}
-source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50,0.70,0.75,0.85,0.90,0.95"}
+source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50:0.70:0.75:0.85:0.90:0.95"}
 target_cap=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-0.95}
+resume=${CONFIDENCEOT_RESUME:-0}
 ot_base=${CONFIDENCEOT_SOURCE_CAP_OT_BASE:-$result/gse180661_source_cap_sensitivity_ot_20260908}
 pseudobulk_base=${CONFIDENCEOT_SOURCE_CAP_PSEUDOBULK_BASE:-$result/gse180661_source_cap_sensitivity_pseudobulk_20260908}
 deg_base=${CONFIDENCEOT_SOURCE_CAP_DEG_BASE:-$result/gse180661_source_cap_sensitivity_pydeseq2_20260908}
 summary_root=${CONFIDENCEOT_SOURCE_CAP_SUMMARY_ROOT:-$result/gse180661_source_cap_sensitivity_summary_20260908}
 
 for path in "$ot_base" "$pseudobulk_base" "$deg_base" "$summary_root"; do
-  if [[ -e "$path" ]]; then
+  if [[ -e "$path" && "$resume" != "1" ]]; then
     echo "STOP: output already exists: $path" >&2
     exit 1
   fi

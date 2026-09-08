@@ -18,7 +18,7 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 manifest=${CONFIDENCEOT_MANIFEST:-$result/manifest/GSE180661_malignant/pair_manifest_malignant_eligible.csv}
 output_base=${CONFIDENCEOT_SOURCE_CAP_OT_BASE:-$result/gse180661_source_cap_sensitivity_ot}
-source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50,0.70,0.75,0.85,0.90,0.95"}
+source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50:0.70:0.75:0.85:0.90:0.95"}
 target_cap=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-0.95}
 pair_count=${CONFIDENCEOT_PAIR_COUNT:-}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
@@ -42,7 +42,7 @@ if [[ "$pair_count" -ne "$manifest_count" ]]; then
   exit 2
 fi
 
-read -r -a caps <<< "${source_caps//,/ }"
+read -r -a caps <<< "${source_caps//[:,]/ }"
 cap_count=${#caps[@]}
 total=$((pair_count * cap_count))
 task_id=${SLURM_ARRAY_TASK_ID:-0}

@@ -18,7 +18,7 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 pseudobulk_base=${CONFIDENCEOT_SOURCE_CAP_PSEUDOBULK_BASE:-$result/gse180661_source_cap_sensitivity_pseudobulk}
 output_base=${CONFIDENCEOT_SOURCE_CAP_DEG_BASE:-$result/gse180661_source_cap_sensitivity_pydeseq2}
-source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50,0.70,0.75,0.85,0.90,0.95"}
+source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50:0.70:0.75:0.85:0.90:0.95"}
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
@@ -26,7 +26,7 @@ export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16 NUMEXPR_NUM
 export PYTHONUNBUFFERED=1
 mkdir -p "$output_base" "$result/logs"
 
-read -r -a caps <<< "${source_caps//,/ }"
+read -r -a caps <<< "${source_caps//[:,]/ }"
 task_id=${SLURM_ARRAY_TASK_ID:-0}
 task_count=${SLURM_ARRAY_TASK_COUNT:-1}
 failures=0

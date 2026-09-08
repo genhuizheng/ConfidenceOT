@@ -114,3 +114,12 @@ def test_source_cap_gene_stability_requires_every_cap():
     result = module.gene_stability(table, [0.5, 0.9]).set_index("gene")
     assert bool(result.loc["STABLE", "strict_lfc_0p5_all_caps"])
     assert not bool(result.loc["UNSTABLE", "strict_lfc_0p5_all_caps"])
+
+
+def test_source_cap_submit_encoding_is_slurm_export_safe():
+    script = (
+        ROOT / "cancer_metastasis" / "gse180661"
+        / "submit_source_cap_sensitivity.sh"
+    ).read_text(encoding="utf-8")
+    assert '"0.50:0.70:0.75:0.85:0.90:0.95"' in script
+    assert '"0.50,0.70,0.75,0.85,0.90,0.95"' not in script
