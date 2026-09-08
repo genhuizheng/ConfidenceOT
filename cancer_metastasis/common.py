@@ -227,6 +227,64 @@ def expression_kind(data: Any) -> str:
     return "unknown"
 
 
+def cell_qc_table(
+    data: Any,
+    *,
+    minimum_total_counts: int,
+    minimum_detected_genes: int,
+    maximum_mitochondrial_percent: float,
+) -> pd.DataFrame:
+    """Calculate label-blind cell QC metrics and a transparent pass/fail call."""
+    matrix = sparse.csr_matrix(expression_matrix(data), dtype=np.float64)
+    if matrix.data.size and np.min(matrix.data) < 0:
+        raise ValueError("Cell QC requires non-negative expression values")
+    total_counts = np.asarray(matrix.sum(axis=1)).ravel()
+    detected_genes = np.asarray((matrix > 0).sum(axis=1)).ravel()
+    symbols = np.asarray(data.var_names.astype(str), dtype=str)
+    if "gene_symbol" in data.var:
+        candidate = data.var["gene_symbol"].astype(str).str.strip().to_numpy(dtype=str)
+        valid = ~pd.Series(candidate).str.lower().isin(
+            {"", "na", "n/a", "nan", "none", "null", "<na>"}
+        ).to_numpy()
+        symbols = np.where(valid, candidate, symbols)
+    mitochondrial = np.char.startswith(np.char.upper(symbols), "MT-")
+    mitochondrial_counts = (
+        np.asarray(matrix[:, mitochondrial].sum(axis=1)).ravel()
+        if np.any(mitochondrial)
+        else np.zeros(data.n_obs, dtype=float)
+    )
+    mitochondrial_percent = np.divide(
+        100.0 * mitochondrial_counts,
+        total_counts,
+        out=np.zeros_like(total_counts, dtype=float),
+        where=total_counts > 0,
+    )
+    low_counts = total_counts < minimum_total_counts
+    low_features = detected_genes < minimum_detected_genes
+    high_mitochondrial = mitochondrial_percent > maximum_mitochondrial_percent
+    passed = ~(low_counts | low_features | high_mitochondrial)
+    reasons = []
+    for count_fail, feature_fail, mitochondrial_fail in zip(
+        low_counts, low_features, high_mitochondrial
+    ):
+        values = []
+        if count_fail:
+            values.append("low_total_counts")
+        if feature_fail:
+            values.append("low_detected_genes")
+        if mitochondrial_fail:
+            values.append("high_mitochondrial_percent")
+        reasons.append(";".join(values))
+    return pd.DataFrame({
+        "observation_id": data.obs_names.astype(str),
+        "total_counts": total_counts,
+        "n_genes_by_counts": detected_genes,
+        "pct_counts_mitochondrial": mitochondrial_percent,
+        "qc_pass": passed,
+        "qc_failure_reason": reasons,
+    })
+
+
 def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int):
     source_keys, target_keys = gene_keys(source), gene_keys(target)
     source_first: dict[str, int] = {}

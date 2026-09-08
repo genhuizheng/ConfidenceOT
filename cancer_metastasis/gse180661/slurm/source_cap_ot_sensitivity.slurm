@@ -22,6 +22,10 @@ source_caps=${CONFIDENCEOT_SOURCE_CAPS:-"0.50:0.70:0.75:0.85:0.90:0.95"}
 target_cap=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-0.95}
 pair_count=${CONFIDENCEOT_PAIR_COUNT:-}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
+cell_qc=${CONFIDENCEOT_CELL_QC:-0}
+minimum_total_counts=${CONFIDENCEOT_MINIMUM_TOTAL_COUNTS:-1000}
+minimum_detected_genes=${CONFIDENCEOT_MINIMUM_DETECTED_GENES:-500}
+maximum_mitochondrial_percent=${CONFIDENCEOT_MAXIMUM_MITOCHONDRIAL_PERCENT:-20}
 
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -56,6 +60,15 @@ for ((linear=task_id; linear<total; linear+=task_count)); do
   cap_slug=$(printf "%.2f" "$source_cap")
   cap_slug=${cap_slug/./p}
   output="$output_base/source_cap_$cap_slug"
+  qc_args=()
+  if [[ "$cell_qc" == "1" ]]; then
+    qc_args=(
+      --cell-qc
+      --minimum-total-counts "$minimum_total_counts"
+      --minimum-detected-genes "$minimum_detected_genes"
+      --maximum-mitochondrial-percent "$maximum_mitochondrial_percent"
+    )
+  fi
   mkdir -p "$output"
   echo "===== START cap=$source_cap pair_index=$pair_index $(date --iso-8601=seconds) ====="
   if python cancer_metastasis/02_run_pair.py "$manifest" "$output" \
@@ -71,6 +84,7 @@ for ((linear=task_id; linear<total; linear+=task_count)); do
       --tolerance 1e-4 \
       --workers 1 \
       --device cuda \
+      "${qc_args[@]}" \
       --skip-completed; then
     echo "===== COMPLETE cap=$source_cap pair_index=$pair_index $(date --iso-8601=seconds) ====="
   else

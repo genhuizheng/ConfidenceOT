@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from confidenceot import ConfidenceOT, calibrate_confidence_cost, rotation_null_costs
-from common import json_ready, load_exact_side, prepare_joint_representation
+from common import cell_qc_table, json_ready, load_exact_side, prepare_joint_representation
 
 
 def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -129,6 +129,11 @@ def main() -> None:
     parser.add_argument("--include-annotation", action="append", default=[],
                         help="Cell-type value retained in malignant scope; may be repeated")
     parser.add_argument("--minimum-scope-cells", type=int, default=20)
+    parser.add_argument("--cell-qc", action="store_true",
+                        help="Apply label-blind cell QC before representation learning and OT")
+    parser.add_argument("--minimum-total-counts", type=int, default=1000)
+    parser.add_argument("--minimum-detected-genes", type=int, default=500)
+    parser.add_argument("--maximum-mitochondrial-percent", type=float, default=20.0)
     parser.add_argument("--n-hvg", type=int, default=2000)
     parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--calibration-max-cells", type=int, default=2000)
@@ -198,10 +203,34 @@ def main() -> None:
         source = source[np.isin(source_label, args.include_annotation)].copy()
         target = target[np.isin(target_label, args.include_annotation)].copy()
     source_scope_n, target_scope_n = source.n_obs, target.n_obs
-    if source_scope_n < args.minimum_scope_cells or target_scope_n < args.minimum_scope_cells:
+    qc_tables = []
+    if args.cell_qc:
+        for side, data in (("source", source), ("target", target)):
+            table = cell_qc_table(
+                data,
+                minimum_total_counts=args.minimum_total_counts,
+                minimum_detected_genes=args.minimum_detected_genes,
+                maximum_mitochondrial_percent=args.maximum_mitochondrial_percent,
+            )
+            table.insert(0, "side", side)
+            qc_tables.append(table)
+        source = source[qc_tables[0]["qc_pass"].to_numpy()].copy()
+        target = target[qc_tables[1]["qc_pass"].to_numpy()].copy()
+    else:
+        for side, data in (("source", source), ("target", target)):
+            table = pd.DataFrame({
+                "side": side,
+                "observation_id": data.obs_names.astype(str),
+                "qc_pass": True,
+                "qc_failure_reason": "",
+            })
+            qc_tables.append(table)
+    source_qc_pass_n, target_qc_pass_n = source.n_obs, target.n_obs
+    if source_qc_pass_n < args.minimum_scope_cells or target_qc_pass_n < args.minimum_scope_cells:
         raise ValueError(
-            f"scope={args.analysis_scope} is not evaluable: source={source_scope_n}, "
-            f"target={target_scope_n}, minimum={args.minimum_scope_cells}"
+            f"scope={args.analysis_scope} after_qc is not evaluable: "
+            f"source={source_qc_pass_n}, target={target_qc_pass_n}, "
+            f"minimum={args.minimum_scope_cells}"
         )
     sample_rng = np.random.default_rng(args.seed + args.index * 65537)
     if args.max_observed_cells_per_side > 0 and source.n_obs > args.max_observed_cells_per_side:
@@ -276,6 +305,11 @@ def main() -> None:
             "analysis_scope": args.analysis_scope,
             "included_annotations": "|".join(args.include_annotation),
             "source_scope_n": source_scope_n, "target_scope_n": target_scope_n,
+            "cell_qc_applied": args.cell_qc,
+            "source_qc_pass_n": source_qc_pass_n,
+            "target_qc_pass_n": target_qc_pass_n,
+            "source_qc_removed_n": source_scope_n - source_qc_pass_n,
+            "target_qc_removed_n": target_scope_n - target_qc_pass_n,
             "source_analyzed_n": source.n_obs, "target_analyzed_n": target.n_obs,
             "rejection_budget_cap": (
                 source_budget if np.isclose(source_budget, target_budget) else np.nan
@@ -308,6 +342,18 @@ def main() -> None:
         gc.collect()
 
     cells = pd.concat(cell_tables, ignore_index=True)
+    qc = pd.concat(qc_tables, ignore_index=True)
+    qc.to_csv(output / "cell_qc.csv.gz", index=False, compression="gzip")
+    available_qc = [
+        column for column in (
+            "total_counts", "n_genes_by_counts", "pct_counts_mitochondrial",
+            "qc_pass", "qc_failure_reason",
+        ) if column in qc
+    ]
+    cells = cells.merge(
+        qc[["side", "observation_id", *available_qc]],
+        on=["side", "observation_id"], how="left", validate="many_to_one",
+    )
     cells.to_csv(output / "cell_confidence.csv", index=False)
     populations = cells.groupby(["method", "side", "annotation"], dropna=False).agg(
         n=("rejected", "size"), raw_rejection_rate=("raw_rejected", "mean"),
@@ -348,6 +394,16 @@ def main() -> None:
         "target_rejection_budget_cap": target_budget,
         "rejection_cost": calibration.rejection_cost,
         "calibration_valid_for_m4r": calibration.calibration_valid,
+        "cell_qc": {
+            "applied": args.cell_qc,
+            "minimum_total_counts": args.minimum_total_counts,
+            "minimum_detected_genes": args.minimum_detected_genes,
+            "maximum_mitochondrial_percent": args.maximum_mitochondrial_percent,
+            "source_before_n": source_scope_n,
+            "source_after_n": source_qc_pass_n,
+            "target_before_n": target_scope_n,
+            "target_after_n": target_qc_pass_n,
+        },
         "pipeline_seconds": pipeline_seconds, "methods": metric_rows,
         "hvg_n": len(hvg), "hvg": hvg, "preprocessing": preprocessing,
     }, indent=2), encoding="utf-8")
