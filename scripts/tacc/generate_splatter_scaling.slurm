@@ -12,7 +12,7 @@
 set -euo pipefail
 
 source /home1/10119/ghzheng/.bashrc
-conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+conda activate "${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}"
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_SCALING_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_scaling}
@@ -42,4 +42,3 @@ cd "$repo"
 Rscript scripts/generate_splatter_population_benchmark.R \
     "$output" 2 1000 7300 "1000,5000,10000,20000" \
     "$batch_fac_loc" "$batch_fac_scale"
-

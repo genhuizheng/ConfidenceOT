@@ -4,8 +4,15 @@ set -euo pipefail
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_SCALING_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_scaling}
+python_env=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
+r_env=${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}
 worker_count=${CONFIDENCEOT_WORKER_COUNT:-8}
 max_parallel=${CONFIDENCEOT_MAX_PARALLEL:-4}
+
+conda run -p "$python_env" python -c \
+    "import matplotlib, numpy, pandas, scipy, sklearn, torch; print('Python dependencies available')"
+conda run -p "$r_env" Rscript -e \
+    ".libPaths(c(file.path('$repo', '.r-library'), .libPaths())); stopifnot(requireNamespace('splatter', quietly=TRUE), requireNamespace('SingleCellExperiment', quietly=TRUE), requireNamespace('SummarizedExperiment', quietly=TRUE), requireNamespace('Matrix', quietly=TRUE)); cat('R dependencies available\\n')"
 
 if [[ -e "$root" ]]; then
     echo "STOP: benchmark root already exists: $root" >&2
@@ -26,7 +33,7 @@ submit_id() {
     printf '%s' "$job_id"
 }
 
-common_export="ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_SCALING_ROOT=$root,CONFIDENCEOT_WORKER_COUNT=$worker_count"
+common_export="ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_SCALING_ROOT=$root,CONFIDENCEOT_ENV=$python_env,CONFIDENCEOT_R_ENV=$r_env,CONFIDENCEOT_WORKER_COUNT=$worker_count"
 data_job=$(submit_id \
     --array=0-1%2 \
     --export="$common_export" \
@@ -56,4 +63,3 @@ echo "N=10000:     ${fit_jobs[2]}"
 echo "N=20000:     ${fit_jobs[3]}"
 echo "Final report: $final_job"
 squeue -j "$data_job,${fit_jobs[0]},${fit_jobs[1]},${fit_jobs[2]},${fit_jobs[3]},$final_job"
-
