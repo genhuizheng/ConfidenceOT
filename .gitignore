@@ -26,6 +26,25 @@ mouse_embryo/results/
 tmp/
 /slurm/
 scripts/
+# Track the reproducible Splatter scaling workflow while continuing to ignore
+# unrelated local scripts and all generated benchmark outputs.
+!scripts/
+scripts/*
+!scripts/benchmark_logging.py
+!scripts/generate_splatter_population_benchmark.R
+!scripts/run_splatter_population_uot_benchmark.py
+!scripts/run_splatter_gene_perturbation_benchmark.py
+!scripts/run_splatter_dual_backbone_calibrated_case.py
+!scripts/run_splatter_partial_ot_comparator_case.py
+!scripts/build_n1000_combined_mass_deficit_f1_report.py
+!scripts/aggregate_confidenceot_grid.py
+!scripts/finalize_splatter_scaling_benchmark.py
+!scripts/tacc/
+scripts/tacc/*
+!scripts/tacc/generate_splatter_scaling.slurm
+!scripts/tacc/run_splatter_scaling_array.slurm
+!scripts/tacc/finalize_splatter_scaling.slurm
+!scripts/tacc/submit_splatter_scaling.sh
 *.inspect.ndjson
 *.zip
 
