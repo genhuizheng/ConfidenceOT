@@ -59,7 +59,8 @@ def leading_edge_n(value) -> int:
 
 
 def plot_volcano(deg: pd.DataFrame, leading: pd.DataFrame, output: Path,
-                 patient_n: int, pair_n: int) -> None:
+                 patient_n: int, pair_n: int, *, axis_label: str,
+                 title: str) -> None:
     table = deg.copy()
     table["plot_fdr"] = table["fdr"].clip(lower=np.nextafter(0, 1))
     table["minus_log10_fdr"] = -np.log10(table["plot_fdr"])
@@ -82,9 +83,9 @@ def plot_volcano(deg: pd.DataFrame, leading: pd.DataFrame, output: Path,
         axis.annotate(str(row["gene"]),
                       (row["log2_fold_change"], -np.log10(max(row["fdr"], 1e-300))),
                       xytext=(3, 3), textcoords="offset points", fontsize=7)
-    axis.set_xlabel("log2 fold change: metastasis-compatible / primary-restricted")
+    axis.set_xlabel(axis_label)
     axis.set_ylabel("-log10(FDR)")
-    axis.set_title("Primary malignant-cell programs associated with metastasis compatibility")
+    axis.set_title(title)
     axis.text(0.01, 0.99, f"{patient_n} patients · {pair_n} primary–metastasis pairs",
               transform=axis.transAxes, va="top", fontsize=9)
     figure.tight_layout()
@@ -93,7 +94,8 @@ def plot_volcano(deg: pd.DataFrame, leading: pd.DataFrame, output: Path,
     plt.close(figure)
 
 
-def plot_gsea(result: pd.DataFrame, output: Path, top_n: int) -> pd.DataFrame:
+def plot_gsea(result: pd.DataFrame, output: Path, top_n: int, *, title: str,
+              direction_label: str) -> pd.DataFrame:
     significant = result[result["fdr"].lt(0.05)].copy()
     positive = significant[significant["NES"].gt(0)].sort_values(
         ["fdr", "NES"], ascending=[True, False]
@@ -122,8 +124,8 @@ def plot_gsea(result: pd.DataFrame, output: Path, top_n: int) -> pd.DataFrame:
     axis.axvline(0, color="#555555", linewidth=0.8)
     axis.set_yticks(y, selected["display_pathway"])
     axis.set_xlabel("Normalized enrichment score (NES)")
-    axis.set_title("Pathways associated with primary-tumor metastasis compatibility")
-    axis.text(0.01, 1.01, "Primary-restricted enriched ←    → Metastasis-compatible enriched",
+    axis.set_title(title)
+    axis.text(0.01, 1.01, direction_label,
               transform=axis.transAxes, fontsize=9)
     colorbar = figure.colorbar(scatter, ax=axis, pad=0.02)
     colorbar.set_label("-log10(GSEA FDR)")
@@ -155,6 +157,23 @@ def main() -> None:
         args.pydeseq2_root / "primary_compatible_vs_restricted_leading_lfc_1.csv"
     )
     leading = pd.read_csv(leading_path) if leading_path.exists() else deg.iloc[0:0]
+    report_path = args.pydeseq2_root / "pydeseq2_report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    second_stage = report.get("ot_input_gate_states") == ["rejected"]
+    if second_stage:
+        positive_name = "second_stage_retained_enriched"
+        negative_name = "second_stage_rejected_enriched"
+        volcano_axis = "log2 fold change: second-stage retained / second-stage rejected"
+        volcano_title = "Programs within prior-rejected primary malignant cells"
+        gsea_title = "Pathways within prior-rejected primary malignant cells"
+        direction_label = "Second-stage rejected enriched ←    → Second-stage retained enriched"
+    else:
+        positive_name = "metastasis_compatible_enriched"
+        negative_name = "primary_restricted_enriched"
+        volcano_axis = "log2 fold change: metastasis-compatible / primary-restricted"
+        volcano_title = "Primary malignant-cell programs associated with metastasis compatibility"
+        gsea_title = "Pathways associated with primary-tumor metastasis compatibility"
+        direction_label = "Primary-restricted enriched ←    → Metastasis-compatible enriched"
     rank = deg[["gene", "wald_statistic"]].replace([np.inf, -np.inf], np.nan).dropna()
     rank = rank.drop_duplicates("gene").sort_values(
         ["wald_statistic", "gene"], ascending=[False, True], kind="stable"
@@ -176,8 +195,7 @@ def main() -> None:
         result[column] = pd.to_numeric(result[column], errors="coerce")
     result["collection"] = result["pathway"].map(collection_name)
     result["direction"] = np.where(
-        result["NES"].ge(0), "metastasis_compatible_enriched",
-        "primary_restricted_enriched",
+        result["NES"].ge(0), positive_name, negative_name,
     )
     result["leading_edge_n"] = result.get(
         "tag_fraction", result.get("leading_edge_genes", "")
@@ -186,11 +204,13 @@ def main() -> None:
     result.to_csv(args.output_root / "primary_compatible_vs_restricted_gsea_all.csv.gz",
                   index=False, compression="gzip")
 
-    report_path = args.pydeseq2_root / "pydeseq2_report.json"
-    report = json.loads(report_path.read_text(encoding="utf-8"))
     plot_volcano(deg, leading, args.output_root,
-                 patient_n=int(report["patient_n"]), pair_n=int(report["pair_n"]))
-    selected = plot_gsea(result, args.output_root, args.top_pathways_per_direction)
+                 patient_n=int(report["patient_n"]), pair_n=int(report["pair_n"]),
+                 axis_label=volcano_axis, title=volcano_title)
+    selected = plot_gsea(
+        result, args.output_root, args.top_pathways_per_direction,
+        title=gsea_title, direction_label=direction_label,
+    )
     selected.to_csv(args.output_root / "primary_compatible_vs_restricted_gsea_display.csv",
                     index=False)
     summary = {
@@ -199,8 +219,9 @@ def main() -> None:
         "ranked_gene_n": len(rank),
         "tested_pathway_n": len(result),
         "fdr_005_pathway_n": int(result["fdr"].lt(0.05).sum()),
-        "positive_direction": "putative metastasis-compatible primary malignant cells",
-        "negative_direction": "putative primary-restricted primary malignant cells",
+        "positive_direction": report["positive_direction"],
+        "negative_direction": report["negative_direction"],
+        "ot_input_gate_states": report.get("ot_input_gate_states", []),
         "ot_genes_filtered": False,
     }
     (args.output_root / "gsea_report.json").write_text(

@@ -137,3 +137,49 @@ def test_symmetric_budget_tag_falls_back_to_shared_directory(tmp_path):
         tmp_path, "pair_a", "budget_source_0.95_target_0.95"
     )
     assert observed == run
+
+
+def test_largest_balanced_pair_selection_is_one_pair_per_patient():
+    module = load(
+        "independent_manifests",
+        ROOT / "cancer_metastasis" / "gse180661" / "independent_manifests.py",
+    )
+    manifest = pd.DataFrame({
+        "patient_id": ["P1", "P1", "P2"],
+        "pair_id": ["small", "balanced", "only"],
+        "source_malignant_n": [1000, 500, 80],
+        "target_malignant_n": [100, 400, 90],
+    })
+    ranked = module.select_largest_balanced_pair_per_patient(manifest)
+    selected = ranked[ranked["selected_for_one_pair_analysis"]]
+    assert set(selected["pair_id"]) == {"balanced", "only"}
+    assert selected["patient_id"].is_unique
+    assert ranked.loc[ranked["pair_id"].eq("balanced"), "minimum_malignant_cell_n"].item() == 400
+
+
+def test_prior_rejected_audit_requires_minimum_on_both_sides(tmp_path):
+    module = load(
+        "independent_manifests_prior",
+        ROOT / "cancer_metastasis" / "gse180661" / "independent_manifests.py",
+    )
+    manifest = pd.DataFrame({
+        "patient_id": ["P1", "P2"],
+        "pair_id": ["pair_a", "pair_b"],
+    })
+    for pair, source_n, target_n in (("pair_a", 25, 21), ("pair_b", 19, 30)):
+        result = tmp_path / pair / "scope_malignant" / "budget_source_0.85_target_0.95"
+        result.mkdir(parents=True)
+        (result / "SUCCESS").write_text("success\n", encoding="utf-8")
+        rows = []
+        for side, rejected_n in (("source", source_n), ("target", target_n)):
+            rows.extend({
+                "method": "M4-E", "side": side, "observation_id": f"{side}_{i}",
+                "rejected": i < rejected_n,
+            } for i in range(35))
+        pd.DataFrame(rows).to_csv(result / "cell_confidence.csv", index=False)
+    audited = module.audit_prior_rejected_pairs(
+        manifest, tmp_path, budget_tag="budget_source_0.85_target_0.95",
+        minimum_cells=20,
+    ).set_index("pair_id")
+    assert bool(audited.loc["pair_a", "prior_rejected_evaluable"])
+    assert not bool(audited.loc["pair_b", "prior_rejected_evaluable"])

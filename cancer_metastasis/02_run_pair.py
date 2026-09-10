@@ -33,6 +33,29 @@ def labels(data) -> np.ndarray:
     return np.repeat("unannotated", data.n_obs)
 
 
+def prior_result_directory(root: Path, pair_id: str, budget_tag: str) -> Path:
+    path = root / pair_id / "scope_malignant" / budget_tag
+    if not (path / "SUCCESS").is_file():
+        raise FileNotFoundError(f"Prior completed OT result is missing: {path}")
+    return path
+
+
+def subset_from_prior_gate(data, confidence: pd.DataFrame, *, side: str,
+                           method: str, state: str):
+    table = confidence[
+        confidence["method"].eq(method) & confidence["side"].eq(side)
+    ].copy()
+    if table.empty or table["observation_id"].duplicated().any():
+        raise RuntimeError(f"Invalid prior confidence rows for side={side}")
+    selected = table[state].astype(bool)
+    identifiers = set(table.loc[selected, "observation_id"].astype(str))
+    keep = np.asarray([str(value) in identifiers for value in data.obs_names], dtype=bool)
+    missing = identifiers.difference(data.obs_names.astype(str))
+    if missing:
+        raise KeyError(f"{len(missing)} prior-gate cells are absent from side={side}")
+    return data[keep].copy()
+
+
 def confidence_frame(method: str, side: str, data, sample: str, result) -> pd.DataFrame:
     value = result.source_confidence if side == "source" else result.target_confidence
     gate = result.source_gate if side == "source" else result.target_gate
@@ -142,6 +165,17 @@ def main() -> None:
     parser.add_argument("--null-calibration-replicates", type=int, default=5)
     parser.add_argument("--null-validation-replicates", type=int, default=5)
     parser.add_argument("--calibration-grid-size", type=int, default=5)
+    parser.add_argument(
+        "--fixed-rejection-cost", type=float,
+        help="Skip null calibration and use this positive rejection cost",
+    )
+    parser.add_argument(
+        "--input-gate-root", type=Path,
+        help="Restrict both sides to a completed prior OT gate before fitting",
+    )
+    parser.add_argument("--input-gate-budget-tag", default="budget_source_0.85_target_0.95")
+    parser.add_argument("--input-gate-method", default="M4-E")
+    parser.add_argument("--input-gate-state", choices=("retained", "rejected"))
     parser.add_argument("--epsilon", type=float, default=0.1)
     parser.add_argument("--lambda-a", type=float, default=1.0)
     parser.add_argument("--lambda-b", type=float, default=1.0)
@@ -172,6 +206,12 @@ def main() -> None:
     ):
         if not 0 <= value < 1:
             raise ValueError(f"{name} must be in [0,1)")
+    if args.fixed_rejection_cost is not None and (
+        not np.isfinite(args.fixed_rejection_cost) or args.fixed_rejection_cost <= 0
+    ):
+        raise ValueError("fixed-rejection-cost must be positive and finite")
+    if (args.input_gate_root is None) != (args.input_gate_state is None):
+        raise ValueError("input-gate-root and input-gate-state must be provided together")
     manifest = pd.read_csv(args.manifest_csv)
     row = manifest.iloc[args.index]
     if "eligible" in row and not bool(row["eligible"]):
@@ -226,10 +266,24 @@ def main() -> None:
             })
             qc_tables.append(table)
     source_qc_pass_n, target_qc_pass_n = source.n_obs, target.n_obs
-    if source_qc_pass_n < args.minimum_scope_cells or target_qc_pass_n < args.minimum_scope_cells:
+    if args.input_gate_root is not None:
+        prior = prior_result_directory(
+            args.input_gate_root, pair_id, args.input_gate_budget_tag
+        )
+        prior_confidence = pd.read_csv(prior / "cell_confidence.csv")
+        source = subset_from_prior_gate(
+            source, prior_confidence, side="source", method=args.input_gate_method,
+            state=args.input_gate_state,
+        )
+        target = subset_from_prior_gate(
+            target, prior_confidence, side="target", method=args.input_gate_method,
+            state=args.input_gate_state,
+        )
+    source_input_n, target_input_n = source.n_obs, target.n_obs
+    if source_input_n < args.minimum_scope_cells or target_input_n < args.minimum_scope_cells:
         raise ValueError(
-            f"scope={args.analysis_scope} after_qc is not evaluable: "
-            f"source={source_qc_pass_n}, target={target_qc_pass_n}, "
+            f"scope={args.analysis_scope} input subset is not evaluable: "
+            f"source={source_input_n}, target={target_input_n}, "
             f"minimum={args.minimum_scope_cells}"
         )
     sample_rng = np.random.default_rng(args.seed + args.index * 65537)
@@ -247,23 +301,41 @@ def main() -> None:
     sampled = np.sum((source_pca[rng.integers(len(source_pca), size=pairs)] - target_pca[rng.integers(len(target_pca), size=pairs)]) ** 2, axis=1)
     scale = float(np.median(sampled[sampled > 0]))
     cost = squared_euclidean(source_pca, target_pca) / scale
-    source_index = np.sort(rng.choice(len(source_pca), min(args.calibration_max_cells, len(source_pca)), replace=False))
-    target_index = np.sort(rng.choice(len(target_pca), min(args.calibration_max_cells, len(target_pca)), replace=False))
-    total_nulls = args.null_calibration_replicates + args.null_validation_replicates
-    source_nulls, target_nulls = rotation_null_costs(
-        source_pca[source_index], target_pca[target_index], observed_scale=scale,
-        seed=args.seed + args.index, n_replicates=total_nulls,
-    )
-    split = args.null_calibration_replicates
-    calibration_started = time.perf_counter()
-    calibration = calibrate_confidence_cost(
-        source_nulls[:split] + target_nulls[:split], source_nulls[split:] + target_nulls[split:],
-        backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
-        source_rejection_budget=source_budget, target_rejection_budget=target_budget,
-        tolerance=args.tolerance, grid_size=args.calibration_grid_size, device=args.device,
-        workers=args.workers, fallback_to_cpu=False,
-    )
-    calibration_seconds = time.perf_counter() - calibration_started
+    if args.fixed_rejection_cost is None:
+        source_index = np.sort(rng.choice(len(source_pca), min(args.calibration_max_cells, len(source_pca)), replace=False))
+        target_index = np.sort(rng.choice(len(target_pca), min(args.calibration_max_cells, len(target_pca)), replace=False))
+        total_nulls = args.null_calibration_replicates + args.null_validation_replicates
+        source_nulls, target_nulls = rotation_null_costs(
+            source_pca[source_index], target_pca[target_index], observed_scale=scale,
+            seed=args.seed + args.index, n_replicates=total_nulls,
+        )
+        split = args.null_calibration_replicates
+        calibration_started = time.perf_counter()
+        calibration = calibrate_confidence_cost(
+            source_nulls[:split] + target_nulls[:split], source_nulls[split:] + target_nulls[split:],
+            backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+            source_rejection_budget=source_budget, target_rejection_budget=target_budget,
+            tolerance=args.tolerance, grid_size=args.calibration_grid_size, device=args.device,
+            workers=args.workers, fallback_to_cpu=False,
+        )
+        calibration_seconds = time.perf_counter() - calibration_started
+        rejection_cost = float(calibration.rejection_cost)
+        calibration_valid = bool(calibration.calibration_valid)
+        calibration_payload = json_ready(calibration)
+        rejection_cost_mode = "null_calibrated"
+    else:
+        rejection_cost = float(args.fixed_rejection_cost)
+        calibration_seconds = 0.0
+        calibration_valid = False
+        rejection_cost_mode = "fixed_sensitivity"
+        calibration_payload = {
+            "rejection_cost": rejection_cost,
+            "selection_status": "fixed_user_supplied",
+            "calibration_valid": False,
+            "warning_messages": [
+                "Null calibration was intentionally skipped for fixed-cost sensitivity analysis."
+            ],
+        }
     source_labels, target_labels = labels(source), labels(target)
     cell_tables = []
     transition_tables = []
@@ -271,7 +343,7 @@ def main() -> None:
     metric_rows = []
     for method, variant in (("M4-E", "exact"), ("M4-R", "reversible")):
         model = ConfidenceOT(
-            backbone="uot", variant=variant, rejection_cost=calibration.rejection_cost,
+            backbone="uot", variant=variant, rejection_cost=rejection_cost,
             epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
             source_rejection_budget=source_budget,
             target_rejection_budget=target_budget,
@@ -310,14 +382,18 @@ def main() -> None:
             "target_qc_pass_n": target_qc_pass_n,
             "source_qc_removed_n": source_scope_n - source_qc_pass_n,
             "target_qc_removed_n": target_scope_n - target_qc_pass_n,
+            "source_input_subset_n": source_input_n,
+            "target_input_subset_n": target_input_n,
+            "input_gate_state": args.input_gate_state or "all",
             "source_analyzed_n": source.n_obs, "target_analyzed_n": target.n_obs,
             "rejection_budget_cap": (
                 source_budget if np.isclose(source_budget, target_budget) else np.nan
             ),
             "source_rejection_budget_cap": source_budget,
             "target_rejection_budget_cap": target_budget,
-            "rejection_cost": calibration.rejection_cost,
-            "calibration_valid_for_m4r": calibration.calibration_valid,
+            "rejection_cost": rejection_cost,
+            "rejection_cost_mode": rejection_cost_mode,
+            "calibration_valid_for_m4r": calibration_valid,
             "source_raw_rejection_rate": float(np.mean(~result.source_raw_gate)),
             "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
             "source_final_rejection_rate": float(np.mean(~result.source_gate)),
@@ -386,14 +462,23 @@ def main() -> None:
     for metrics in metric_rows:
         metrics["pipeline_seconds_shared"] = pipeline_seconds
     pd.DataFrame(metric_rows).to_csv(output / "pair_metrics.csv", index=False)
-    (output / "calibration.json").write_text(json.dumps(json_ready(calibration), indent=2), encoding="utf-8")
+    (output / "calibration.json").write_text(json.dumps(calibration_payload, indent=2), encoding="utf-8")
     (output / "run.json").write_text(json.dumps({
         "pair_id": pair_id, "dataset_id": row["dataset_id"],
         "patient_id": row["patient_id"], "analysis_scope": args.analysis_scope,
         "source_rejection_budget_cap": source_budget,
         "target_rejection_budget_cap": target_budget,
-        "rejection_cost": calibration.rejection_cost,
-        "calibration_valid_for_m4r": calibration.calibration_valid,
+        "rejection_cost": rejection_cost,
+        "rejection_cost_mode": rejection_cost_mode,
+        "calibration_valid_for_m4r": calibration_valid,
+        "input_gate": {
+            "root": str(args.input_gate_root) if args.input_gate_root else None,
+            "budget_tag": args.input_gate_budget_tag if args.input_gate_root else None,
+            "method": args.input_gate_method if args.input_gate_root else None,
+            "state": args.input_gate_state,
+            "source_selected_n": source_input_n,
+            "target_selected_n": target_input_n,
+        },
         "cell_qc": {
             "applied": args.cell_qc,
             "minimum_total_counts": args.minimum_total_counts,

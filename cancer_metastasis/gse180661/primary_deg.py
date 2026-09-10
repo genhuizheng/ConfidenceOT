@@ -199,15 +199,35 @@ def main() -> None:
              sep="\t", header=False, index=False)
     counts.to_csv(args.output_root / "pseudobulk_raw_counts.csv.gz", compression="gzip")
     metadata.to_csv(args.output_root / "pseudobulk_sample_metadata.csv")
+    input_gate_states = sorted(
+        metadata.get("ot_input_gate_state", pd.Series(dtype=str))
+        .dropna().astype(str).unique().tolist()
+    )
+    if input_gate_states == ["rejected"]:
+        positive_direction = "second-stage retained cells within prior-rejected primary malignant cells"
+        negative_direction = "second-stage rejected cells within prior-rejected primary malignant cells"
+    else:
+        positive_direction = "putative metastasis-compatible primary malignant cells"
+        negative_direction = "putative primary-restricted primary malignant cells"
     report = {
         "contrast": CONTRAST,
         "engine": "PyDESeq2",
         "design": "~pair_id + comparison_status",
-        "positive_direction": "putative metastasis-compatible primary malignant cells",
-        "negative_direction": "putative primary-restricted primary malignant cells",
+        "positive_direction": positive_direction,
+        "negative_direction": negative_direction,
         "pair_n": int(metadata["pair_id"].nunique()),
         "patient_n": int(metadata["patient_id"].nunique()),
         "pseudobulk_column_n": len(metadata),
+        "ot_input_gate_states": input_gate_states,
+        "rejection_cost_modes": sorted(
+            metadata.get("rejection_cost_mode", pd.Series(dtype=str))
+            .dropna().astype(str).unique().tolist()
+        ),
+        "rejection_costs": sorted(
+            pd.to_numeric(
+                metadata.get("rejection_cost", pd.Series(dtype=float)), errors="coerce"
+            ).dropna().unique().tolist()
+        ),
         "tested_gene_n": len(result),
         "all_genes_including_ot_representation_genes": True,
         "metastatic_cells_in_pseudobulk": False,

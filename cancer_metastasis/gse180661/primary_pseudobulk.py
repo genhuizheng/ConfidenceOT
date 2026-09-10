@@ -135,6 +135,7 @@ def main() -> None:
     with (result_dir / "run.json").open(encoding="utf-8") as handle:
         run = json.load(handle)
     ot_features = {str(value) for value in run.get("hvg", [])}
+    input_gate = run.get("input_gate", {}) or {}
     source = load_exact_side(paths_for(row, "source"), str(row["source_sample"]))
     malignant = annotation_values(source) == args.malignant_annotation
     source = source[malignant].copy()
@@ -146,10 +147,16 @@ def main() -> None:
     if missing:
         raise KeyError(f"{len(missing)} ConfidenceOT source IDs absent from primary H5AD")
 
-    definitions = [
-        ("case", "putative_metastasis_compatible_primary", True),
-        ("reference", "putative_primary_restricted", False),
-    ]
+    if input_gate.get("state") == "rejected":
+        definitions = [
+            ("case", "second_stage_retained_within_prior_rejected", True),
+            ("reference", "second_stage_rejected_within_prior_rejected", False),
+        ]
+    else:
+        definitions = [
+            ("case", "putative_metastasis_compatible_primary", True),
+            ("reference", "putative_primary_restricted", False),
+        ]
     count_rows = []
     metadata_rows = []
     for comparison_status, state, retained in definitions:
@@ -183,6 +190,9 @@ def main() -> None:
             "cell_n": len(indices),
             "library_size": int(values.sum()),
             "analysis_compartment": "primary_malignant_cells_only",
+            "ot_input_gate_state": input_gate.get("state") or "all_malignant",
+            "rejection_cost_mode": run.get("rejection_cost_mode", "legacy_unspecified"),
+            "rejection_cost": run.get("rejection_cost"),
         })
 
     counts = pd.DataFrame(count_rows).fillna(0).astype(np.int64)
@@ -208,6 +218,11 @@ def main() -> None:
         "state_cell_n": state_cells,
         "primary_malignant_h5ad_n": int(source.n_obs),
         "confidenceot_analyzed_source_n": int(len(confidence)),
+        "ot_input_gate": input_gate,
+        "rejection_cost_mode": run.get("rejection_cost_mode", "legacy_unspecified"),
+        "rejection_cost": run.get("rejection_cost"),
+        "source_rejection_budget_cap": run.get("source_rejection_budget_cap"),
+        "target_rejection_budget_cap": run.get("target_rejection_budget_cap"),
         "all_genes_preserved": True,
         "metastatic_cells_in_pseudobulk": False,
         "ready": ready,
