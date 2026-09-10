@@ -2,16 +2,17 @@
 #SBATCH -J cot_init
 #SBATCH -o /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/init_%A_%a.out
 #SBATCH -e /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/init_%A_%a.err
-#SBATCH -p gh
+#SBATCH -p gh-dev
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 32
-#SBATCH -t 24:00:00
+#SBATCH -t 02:00:00
 #SBATCH -A MCB26031
 
-set -euo pipefail
+set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 manifest=${CONFIDENCEOT_MANIFEST:?Set CONFIDENCEOT_MANIFEST}

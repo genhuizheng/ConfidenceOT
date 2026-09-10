@@ -9,9 +9,10 @@
 #SBATCH -t 02:00:00
 #SBATCH -A MCB26031
 
-set -euo pipefail
+set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 input=${CONFIDENCEOT_INIT_ROOT:?Set CONFIDENCEOT_INIT_ROOT}
