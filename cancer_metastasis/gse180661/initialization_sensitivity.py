@@ -249,6 +249,33 @@ def main() -> None:
     nondefault = [item for item in fitted if item[0] != "all_one"]
     source_matrix = np.vstack([item[2] for item in nondefault])
     target_matrix = np.vstack([item[3] for item in nondefault])
+    source_gate_runs = []
+    target_gate_runs = []
+    for strategy, replicate, source_gate, target_gate in fitted:
+        source_gate_runs.append(pd.DataFrame({
+            "pair_id": pair_id,
+            "observation_id": source_ids,
+            "strategy": strategy,
+            "replicate": replicate,
+            "retained": source_gate,
+        }))
+        target_gate_runs.append(pd.DataFrame({
+            "pair_id": pair_id,
+            "observation_id": target_ids,
+            "strategy": strategy,
+            "replicate": replicate,
+            "retained": target_gate,
+        }))
+    pd.concat(source_gate_runs, ignore_index=True).to_csv(
+        output / "source_initialization_gates.csv.gz",
+        index=False,
+        compression="gzip",
+    )
+    pd.concat(target_gate_runs, ignore_index=True).to_csv(
+        output / "target_initialization_gates.csv.gz",
+        index=False,
+        compression="gzip",
+    )
     pd.DataFrame({
         "pair_id": pair_id,
         "observation_id": source_ids,
