@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J cot_splat_plot
-#SBATCH -p gh
+#SBATCH -p gg
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 16
@@ -10,10 +10,10 @@
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/finalize_%j.out
 #SBATCH -e /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/finalize_%j.err
 
-set -euo pipefail
-
+set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_SCALING_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_scaling}
@@ -37,4 +37,3 @@ python scripts/finalize_splatter_scaling_benchmark.py \
 cd "$root"
 tar -czf "$bundle" report
 sha256sum "$bundle"
-

@@ -1,18 +1,19 @@
 #!/bin/bash
 #SBATCH -J cot_splat_scale
-#SBATCH -p gh
+#SBATCH -p gg
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 32
+#SBATCH --mem=64G
 #SBATCH -t 48:00:00
 #SBATCH -A MCB26031
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/fit_%A_%a.out
 #SBATCH -e /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/fit_%A_%a.err
 
-set -euo pipefail
-
+set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_SCALING_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_scaling}
@@ -30,11 +31,11 @@ if (( worker_id < 0 || worker_id >= worker_count )); then
 fi
 
 export PYTHONPATH="$repo/src:$repo/scripts${PYTHONPATH:+:$PYTHONPATH}"
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+thread_count=${SLURM_CPUS_PER_TASK:-32}
+export OMP_NUM_THREADS=$thread_count
+export OPENBLAS_NUM_THREADS=$thread_count
+export MKL_NUM_THREADS=$thread_count
+export NUMEXPR_NUM_THREADS=$thread_count
 
 scenarios=(S1_extinction S2_emergence S3_source_outlier S4_bifurcation S5_abundance_shift)
 printf -v size_dir "n_%04d" "$n_cells"
@@ -83,7 +84,7 @@ for ((case_index=worker_id; case_index<20; case_index+=worker_count)); do
             --workers 1 \
             --calibration-workers 1 \
             --calibration-backbone-workers 1 \
-            --device cuda --cuda-dtype float32 \
+            --device cpu \
             --skip-soft-gate \
             --skip-coupling-stability
     fi

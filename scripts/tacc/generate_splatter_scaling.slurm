@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J cot_splat_data
-#SBATCH -p gh
+#SBATCH -p gg
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 16
@@ -9,10 +9,10 @@
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/data_%A_%a.out
 #SBATCH -e /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/data_%A_%a.err
 
-set -euo pipefail
-
+set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}"
+set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_SCALING_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_scaling}
