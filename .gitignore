@@ -45,6 +45,7 @@ scripts/tacc/*
 !scripts/tacc/run_splatter_scaling_array.slurm
 !scripts/tacc/finalize_splatter_scaling.slurm
 !scripts/tacc/submit_splatter_scaling.sh
+!scripts/tacc/install_splatter_dependencies.slurm
 *.inspect.ndjson
 *.zip
 
