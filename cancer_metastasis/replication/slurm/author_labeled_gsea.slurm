@@ -11,9 +11,10 @@
 #SBATCH --mail-user=genhuizheng@utexas.edu
 #SBATCH --mail-type=END,FAIL
 
-set -euo pipefail
+set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
