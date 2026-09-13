@@ -139,6 +139,61 @@ def test_symmetric_budget_tag_falls_back_to_shared_directory(tmp_path):
     assert observed == run
 
 
+def test_primary_pseudobulk_accepts_multiple_author_malignant_labels():
+    module = load(
+        "primary_pseudobulk_multilabel",
+        ROOT / "cancer_metastasis" / "gse180661" / "primary_pseudobulk.py",
+    )
+
+    class Data:
+        obs = pd.DataFrame({"cell_type": ["Tu01_AREG", "T.cell", "Tu07_MKI67"]})
+
+    observed = module.malignant_annotation_mask(
+        Data(), ["Tu01_AREG", "Tu07_MKI67"]
+    )
+    np.testing.assert_array_equal(observed, [True, False, True])
+
+
+def test_leading_gene_table_supports_neutral_gate_labels():
+    module = load(
+        "primary_deg_gate_labels",
+        ROOT / "cancer_metastasis" / "gse180661" / "primary_deg.py",
+    )
+    table = pd.DataFrame({
+        "gene": ["POS", "NEG"],
+        "fdr": [0.01, 0.01],
+        "log2_fold_change": [1.2, -1.3],
+        "detected_patient_fraction": [1.0, 1.0],
+        "patient_direction_consistency": [0.8, 0.9],
+        "absolute_wald_statistic": [4.0, 5.0],
+        "absolute_log2_fold_change": [1.2, 1.3],
+    })
+    selected = module.leading_table(
+        table,
+        1.0,
+        positive_label="m4e_source_retained_enriched",
+        negative_label="m4e_source_rejected_enriched",
+    )
+    assert dict(zip(selected["gene"], selected["direction"])) == {
+        "NEG": "m4e_source_rejected_enriched",
+        "POS": "m4e_source_retained_enriched",
+    }
+
+
+def test_replication_workflow_uses_author_labels_and_gh_dev():
+    root = ROOT / "cancer_metastasis" / "replication"
+    audit = (root / "slurm" / "author_labeled_audit.slurm").read_text(
+        encoding="utf-8"
+    )
+    ot = (root / "slurm" / "author_labeled_ot.slurm").read_text(encoding="utf-8")
+    assert "GSE181919" in audit and "Malignant.cells" in audit
+    assert "GSE225857" in audit and "Tu11_PLA2G2A" in audit
+    assert "#SBATCH -p gh-dev" in ot
+    assert "--source-rejection-budget 0.85" in ot
+    assert "--target-rejection-budget 0.95" in ot
+    assert "--cell-qc" in ot
+
+
 def test_largest_balanced_pair_selection_is_one_pair_per_patient():
     module = load(
         "independent_manifests",

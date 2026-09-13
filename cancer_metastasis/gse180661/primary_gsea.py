@@ -160,6 +160,7 @@ def main() -> None:
     report_path = args.pydeseq2_root / "pydeseq2_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     second_stage = report.get("ot_input_gate_states") == ["rejected"]
+    gate_labels = bool(report.get("gate_label_mode", False))
     if second_stage:
         positive_name = "second_stage_retained_enriched"
         negative_name = "second_stage_rejected_enriched"
@@ -167,6 +168,13 @@ def main() -> None:
         volcano_title = "Programs within prior-rejected primary malignant cells"
         gsea_title = "Pathways within prior-rejected primary malignant cells"
         direction_label = "Second-stage rejected enriched ←    → Second-stage retained enriched"
+    elif gate_labels:
+        positive_name = "m4e_source_retained_enriched"
+        negative_name = "m4e_source_rejected_enriched"
+        volcano_axis = "log2 fold change: M4-E source-retained / source-rejected"
+        volcano_title = "Primary malignant-cell programs separated by the M4-E gate"
+        gsea_title = "Pathways separated by the primary malignant-cell M4-E gate"
+        direction_label = "M4-E rejected enriched ←    → M4-E retained enriched"
     else:
         positive_name = "metastasis_compatible_enriched"
         negative_name = "primary_restricted_enriched"

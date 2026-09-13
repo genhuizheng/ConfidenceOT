@@ -2,7 +2,7 @@
 #SBATCH -J cot_mal_ot
 #SBATCH -o /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/mal_ot_%A_%a.out
 #SBATCH -e /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/mal_ot_%A_%a.err
-#SBATCH -p gh
+#SBATCH -p gh-dev
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 32

@@ -39,6 +39,13 @@ def annotation_values(data) -> np.ndarray:
     raise KeyError("H5AD has no cell-type annotation column")
 
 
+def malignant_annotation_mask(data, annotations: list[str]) -> np.ndarray:
+    """Return cells matching any explicitly declared author malignant label."""
+    if not annotations:
+        raise ValueError("At least one malignant annotation is required")
+    return np.isin(annotation_values(data), np.asarray(annotations, dtype=str))
+
+
 def gene_symbols(data) -> np.ndarray:
     symbols = np.asarray(data.var_names.astype(str), dtype=str)
     if "gene_symbol" in data.var:
@@ -109,7 +116,8 @@ def main() -> None:
     parser.add_argument("--index", type=int, required=True)
     parser.add_argument("--budget-tag")
     parser.add_argument("--method", default="M4-E")
-    parser.add_argument("--malignant-annotation", default="Ovarian.cancer.cell")
+    parser.add_argument("--malignant-annotation", action="append", dest="malignant_annotations")
+    parser.add_argument("--gate-state-labels", action="store_true")
     parser.add_argument("--minimum-cells-per-state", type=int, default=20)
     args = parser.parse_args()
 
@@ -136,8 +144,9 @@ def main() -> None:
         run = json.load(handle)
     ot_features = {str(value) for value in run.get("hvg", [])}
     input_gate = run.get("input_gate", {}) or {}
+    malignant_annotations = args.malignant_annotations or ["Ovarian.cancer.cell"]
     source = load_exact_side(paths_for(row, "source"), str(row["source_sample"]))
-    malignant = annotation_values(source) == args.malignant_annotation
+    malignant = malignant_annotation_mask(source, malignant_annotations)
     source = source[malignant].copy()
     matrix, genes, used_for_ot = collapsed_raw_counts(source, ot_features)
     lookup = {str(value): index for index, value in enumerate(source.obs_names)}
@@ -151,6 +160,11 @@ def main() -> None:
         definitions = [
             ("case", "second_stage_retained_within_prior_rejected", True),
             ("reference", "second_stage_rejected_within_prior_rejected", False),
+        ]
+    elif args.gate_state_labels:
+        definitions = [
+            ("case", "m4e_source_retained", True),
+            ("reference", "m4e_source_rejected", False),
         ]
     else:
         definitions = [
@@ -214,6 +228,8 @@ def main() -> None:
         "primary_sample": str(row["source_sample"]),
         "metastatic_sample": str(row["target_sample"]),
         "method": args.method,
+        "malignant_annotations": malignant_annotations,
+        "gate_state_labels": bool(args.gate_state_labels),
         "contrast": CONTRAST,
         "state_cell_n": state_cells,
         "primary_malignant_h5ad_n": int(source.n_obs),

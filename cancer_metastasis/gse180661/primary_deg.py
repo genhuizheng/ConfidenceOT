@@ -129,7 +129,13 @@ def descriptive_metrics(counts: pd.DataFrame, metadata: pd.DataFrame) -> pd.Data
     })
 
 
-def leading_table(result: pd.DataFrame, threshold: float) -> pd.DataFrame:
+def leading_table(
+    result: pd.DataFrame,
+    threshold: float,
+    *,
+    positive_label: str = "metastasis_compatible_enriched",
+    negative_label: str = "primary_restricted_enriched",
+) -> pd.DataFrame:
     selected = result[
         result["fdr"].lt(0.05)
         & result["log2_fold_change"].abs().ge(threshold)
@@ -138,8 +144,8 @@ def leading_table(result: pd.DataFrame, threshold: float) -> pd.DataFrame:
     ].copy()
     selected["direction"] = np.where(
         selected["log2_fold_change"].gt(0),
-        "metastasis_compatible_enriched",
-        "primary_restricted_enriched",
+        positive_label,
+        negative_label,
     )
     return selected.sort_values(
         ["direction", "absolute_wald_statistic", "absolute_log2_fold_change"],
@@ -159,6 +165,10 @@ def main() -> None:
     parser.add_argument("--n-cpus", type=int, default=16)
     parser.add_argument("--absolute-log2-fold-change-thresholds", type=float,
                         nargs="+", default=[0.5, 1.0])
+    parser.add_argument(
+        "--gate-labels", action="store_true",
+        help="Use neutral M4-E retained/rejected labels instead of biological labels.",
+    )
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
 
@@ -172,9 +182,17 @@ def main() -> None:
     result["gene_used_in_ot_representation"] = result[
         "gene_used_in_ot_representation"
     ].fillna(False).astype(bool)
+    positive_label = (
+        "m4e_source_retained_enriched"
+        if args.gate_labels else "metastasis_compatible_enriched"
+    )
+    negative_label = (
+        "m4e_source_rejected_enriched"
+        if args.gate_labels else "primary_restricted_enriched"
+    )
     result["direction"] = np.select(
         [result["log2_fold_change"].gt(0), result["log2_fold_change"].lt(0)],
-        ["metastasis_compatible_enriched", "primary_restricted_enriched"],
+        [positive_label, negative_label],
         default="no_direction",
     )
     result["patient_direction_consistency"] = np.where(
@@ -188,7 +206,10 @@ def main() -> None:
     result.to_csv(args.output_root / "primary_compatible_vs_restricted_all_genes.csv.gz",
                   index=False, compression="gzip")
     for threshold in sorted(set(args.absolute_log2_fold_change_thresholds)):
-        selected = leading_table(result, threshold)
+        selected = leading_table(
+            result, threshold,
+            positive_label=positive_label, negative_label=negative_label,
+        )
         selected.to_csv(
             args.output_root / f"primary_compatible_vs_restricted_leading_lfc_{tag(threshold)}.csv",
             index=False,
@@ -206,6 +227,9 @@ def main() -> None:
     if input_gate_states == ["rejected"]:
         positive_direction = "second-stage retained cells within prior-rejected primary malignant cells"
         negative_direction = "second-stage rejected cells within prior-rejected primary malignant cells"
+    elif args.gate_labels:
+        positive_direction = "M4-E-retained primary malignant cells"
+        negative_direction = "M4-E-rejected primary malignant cells"
     else:
         positive_direction = "putative metastasis-compatible primary malignant cells"
         negative_direction = "putative primary-restricted primary malignant cells"
@@ -215,6 +239,7 @@ def main() -> None:
         "design": "~pair_id + comparison_status",
         "positive_direction": positive_direction,
         "negative_direction": negative_direction,
+        "gate_label_mode": bool(args.gate_labels),
         "pair_n": int(metadata["pair_id"].nunique()),
         "patient_n": int(metadata["patient_id"].nunique()),
         "pseudobulk_column_n": len(metadata),
