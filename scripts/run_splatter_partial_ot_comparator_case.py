@@ -208,8 +208,10 @@ def main() -> None:
             for index in indices
         )
 
+        fit_wall_start = time.perf_counter()
         fit_cpu_start = time.process_time()
         fit = partial_wasserstein_uniform(cost, transported_mass=transported_mass)
+        fit_wall_seconds = time.perf_counter() - fit_wall_start
         fit_cpu_seconds = time.process_time() - fit_cpu_start
         coupling = fit.coupling
         if fraction == 0.0:
@@ -230,9 +232,10 @@ def main() -> None:
             "algorithm_variant": "exact-cardinality",
             "status": fit.status,
             "numerical_warning": False,
-            "fit_seconds": fit_cpu_seconds,
+            "fit_seconds": fit_wall_seconds,
+            "fit_wall_seconds": fit_wall_seconds,
             "fit_cpu_seconds": fit_cpu_seconds,
-            "fit_time_basis": "process_cpu_seconds",
+            "fit_time_basis": "wall_seconds",
             "preprocessing_cpu_seconds": preprocessing_cpu_seconds,
             "dose_preparation_cpu_seconds": dose_preparation_cpu_seconds,
             "transition_alignment": alignment(

@@ -53,6 +53,7 @@ scripts/tacc/*
 *.md
 *.MD
 !/README.md
+!/CURRENT_WORK_SUMMARY_2026-09-13.md
 
 # OS/editor files
 .DS_Store

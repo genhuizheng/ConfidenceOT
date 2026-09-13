@@ -3,7 +3,7 @@
 #SBATCH -p gg
 #SBATCH -N 1
 #SBATCH -n 1
-#SBATCH -c 32
+#SBATCH -c 144
 #SBATCH -t 48:00:00
 #SBATCH -A MCB26031
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/fit_%A_%a.out
@@ -30,7 +30,7 @@ if (( worker_id < 0 || worker_id >= worker_count )); then
 fi
 
 export PYTHONPATH="$repo/src:$repo/scripts${PYTHONPATH:+:$PYTHONPATH}"
-thread_count=${SLURM_CPUS_PER_TASK:-32}
+thread_count=${SLURM_CPUS_PER_TASK:-144}
 export OMP_NUM_THREADS=$thread_count
 export OPENBLAS_NUM_THREADS=$thread_count
 export MKL_NUM_THREADS=$thread_count

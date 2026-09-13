@@ -89,6 +89,8 @@ def main() -> None:
         "parameter_mode",
         "method",
         "fit_seconds",
+        "fit_wall_seconds",
+        "fit_cpu_seconds",
         "fit_time_basis",
         "compute_device",
         "compute_backend",
@@ -193,8 +195,10 @@ def main() -> None:
         "runtime_definition": (
             "Every raw record is one method fit for one scenario, replicate, "
             "batch condition, perturbation dose, and parameter mode. Figure bars "
-            "show the arithmetic mean of these single-fit durations, never their sum."
+            "show the arithmetic mean of single-fit elapsed wall-clock durations, "
+            "never their sum."
         ),
+        "runtime_time_basis": "elapsed wall-clock seconds measured with time.perf_counter",
         "runtime_excludes": "PCA, cost construction, null calibration, file I/O, and scheduler wait",
         "figures": {
             "population_rejection_per_size": 8,

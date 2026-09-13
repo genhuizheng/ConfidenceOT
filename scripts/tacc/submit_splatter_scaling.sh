@@ -6,8 +6,8 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_SCALING_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_scaling}
 python_env=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
 r_env=${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}
-worker_count=${CONFIDENCEOT_WORKER_COUNT:-8}
-max_parallel=${CONFIDENCEOT_MAX_PARALLEL:-4}
+worker_count=${CONFIDENCEOT_WORKER_COUNT:-9}
+max_parallel=${CONFIDENCEOT_MAX_PARALLEL:-9}
 
 conda run -p "$python_env" python -c \
     "import matplotlib, numpy, pandas, scipy, sklearn, torch; print('Python dependencies available')"

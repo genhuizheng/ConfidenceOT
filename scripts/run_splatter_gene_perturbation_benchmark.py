@@ -278,25 +278,27 @@ def method_record(
     coupling: np.ndarray,
     source_gate: np.ndarray,
     target_gate: np.ndarray,
-    elapsed_seconds: float,
+    wall_seconds: float,
     warning: bool,
     status: str,
     *,
-    time_basis: str = "thread_cpu_seconds",
+    time_basis: str = "wall_seconds",
     cpu_seconds: float | None = None,
 ) -> dict[str, object]:
-    measured_cpu = elapsed_seconds if cpu_seconds is None else cpu_seconds
+    measured_cpu = wall_seconds if cpu_seconds is None else cpu_seconds
     return {
         "method": name,
         "fit": fit,
         "coupling": coupling,
         "source_gate": source_gate,
         "target_gate": target_gate,
-        # Keep fit_seconds as a compatibility alias, but its timing basis is
-        # now CPU time rather than elapsed wall time.
-        "fit_seconds": elapsed_seconds,
+        # Keep fit_seconds as the primary compatibility alias. For CPU scaling
+        # it is elapsed wall time; aggregate CPU consumption is stored
+        # separately in fit_cpu_seconds.
+        "fit_seconds": wall_seconds,
+        "fit_wall_seconds": wall_seconds,
         "fit_cpu_seconds": measured_cpu,
-        "fit_accelerator_seconds": elapsed_seconds if time_basis == "cuda_synchronized_wall_seconds" else np.nan,
+        "fit_accelerator_seconds": wall_seconds if time_basis == "cuda_synchronized_wall_seconds" else np.nan,
         "fit_time_basis": time_basis,
         "compute_device": getattr(fit, "device", "cpu"),
         "compute_backend": getattr(fit, "backend", "numpy"),
@@ -318,17 +320,20 @@ def fit_methods(
         raise ValueError("`--workers` must be a positive integer.")
 
     def balanced_baseline() -> list[dict[str, object]]:
-        start = time.thread_time()
+        wall_start = time.perf_counter()
+        cpu_start = time.process_time()
         fit = balanced_ot(cost, epsilon=args.epsilon, threshold=args.solver_tolerance, max_iterations=inner_cap)
-        return [method_record("Traditional OT", fit, fit.coupling, np.ones(cost.shape[0], bool), np.ones(cost.shape[1], bool), time.thread_time() - start, not fit.converged, "converged" if fit.converged else "iteration-capped")]
+        return [method_record("Traditional OT", fit, fit.coupling, np.ones(cost.shape[0], bool), np.ones(cost.shape[1], bool), time.perf_counter() - wall_start, not fit.converged, "converged" if fit.converged else "iteration-capped", cpu_seconds=time.process_time() - cpu_start)]
 
     def uot_baseline() -> list[dict[str, object]]:
-        start = time.thread_time()
+        wall_start = time.perf_counter()
+        cpu_start = time.process_time()
         fit = unbalanced_ot(cost, epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b, threshold=args.solver_tolerance, max_iterations=inner_cap)
-        return [method_record("Vanilla UOT", fit, fit.coupling, np.ones(cost.shape[0], bool), np.ones(cost.shape[1], bool), time.thread_time() - start, not fit.converged, "converged" if fit.converged else "iteration-capped")]
+        return [method_record("Vanilla UOT", fit, fit.coupling, np.ones(cost.shape[0], bool), np.ones(cost.shape[1], bool), time.perf_counter() - wall_start, not fit.converged, "converged" if fit.converged else "iteration-capped", cpu_seconds=time.process_time() - cpu_start)]
 
     def balanced_cost_matrix(variant: str, label: str) -> list[dict[str, object]]:
-        start = time.thread_time()
+        wall_start = time.perf_counter()
+        cpu_start = time.process_time()
         fit = ConfidenceOT(
             backbone="balanced", variant=variant,
             rejection_cost=prices["binary_balanced_c"], epsilon=args.epsilon,
@@ -341,17 +346,19 @@ def fit_methods(
         ).fit(cost)
         warning = not fit.outer_converged or not fit.inner_converged or fit.cycle_detected
         status = "converged" if fit.outer_converged and fit.inner_converged else "terminal-warning"
-        cpu_seconds = time.thread_time() - start
+        wall_seconds = time.perf_counter() - wall_start
+        cpu_seconds = time.process_time() - cpu_start
         is_cuda = getattr(fit, "device", "cpu") == "cuda"
         return [method_record(
             label, fit, fit.coupling, fit.source_gate, fit.target_gate,
-            fit.fit_seconds if is_cuda else cpu_seconds, warning, status,
-            time_basis="cuda_synchronized_wall_seconds" if is_cuda else "thread_cpu_seconds",
+            fit.fit_seconds if is_cuda else wall_seconds, warning, status,
+            time_basis="cuda_synchronized_wall_seconds" if is_cuda else "wall_seconds",
             cpu_seconds=cpu_seconds,
         )]
 
     def balanced_soft() -> list[dict[str, object]]:
-        start = time.thread_time()
+        wall_start = time.perf_counter()
+        cpu_start = time.process_time()
         multi = multi_start_soft_gate_balanced(
             cost, epsilon=args.epsilon,
             c_s=prices["soft_balanced_c_s"], c_t=prices["soft_balanced_c_t"],
@@ -363,10 +370,11 @@ def fit_methods(
         )
         selected = next((run for run in multi.runs if run.initialization == "escape-score"), multi.runs[0])
         fit = selected.result
-        return [method_record("Soft gate / Balanced", fit, fit.coupling, fit.source_gate, fit.target_gate, time.thread_time() - start, fit.status != "numerically-soft-stationary", fit.status)]
+        return [method_record("Soft gate / Balanced", fit, fit.coupling, fit.source_gate, fit.target_gate, time.perf_counter() - wall_start, fit.status != "numerically-soft-stationary", fit.status, cpu_seconds=time.process_time() - cpu_start)]
 
     def uot_cost_matrix(variant: str, label: str) -> list[dict[str, object]]:
-        start = time.thread_time()
+        wall_start = time.perf_counter()
+        cpu_start = time.process_time()
         fit = ConfidenceOT(
             backbone="uot", variant=variant,
             rejection_cost=prices["binary_uot_c"], epsilon=args.epsilon,
@@ -380,17 +388,19 @@ def fit_methods(
         ).fit(cost)
         warning = not fit.outer_converged or not fit.inner_converged or fit.cycle_detected
         status = "converged" if fit.outer_converged and fit.inner_converged else "terminal-warning"
-        cpu_seconds = time.thread_time() - start
+        wall_seconds = time.perf_counter() - wall_start
+        cpu_seconds = time.process_time() - cpu_start
         is_cuda = getattr(fit, "device", "cpu") == "cuda"
         return [method_record(
             label, fit, fit.coupling, fit.source_gate, fit.target_gate,
-            fit.fit_seconds if is_cuda else cpu_seconds, warning, status,
-            time_basis="cuda_synchronized_wall_seconds" if is_cuda else "thread_cpu_seconds",
+            fit.fit_seconds if is_cuda else wall_seconds, warning, status,
+            time_basis="cuda_synchronized_wall_seconds" if is_cuda else "wall_seconds",
             cpu_seconds=cpu_seconds,
         )]
 
     def uot_soft() -> list[dict[str, object]]:
-        start = time.thread_time()
+        wall_start = time.perf_counter()
+        cpu_start = time.process_time()
         multi = multi_start_soft_gate_uot(
             cost, epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
             c_s=prices["soft_uot_c_s"], c_t=prices["soft_uot_c_t"],
@@ -402,7 +412,7 @@ def fit_methods(
         )
         selected = next((run for run in multi.runs if run.initialization == "escape-score"), multi.runs[0])
         fit = selected.result
-        return [method_record("Soft gate / UOT", fit, fit.coupling, fit.source_gate, fit.target_gate, time.thread_time() - start, fit.status != "numerically-soft-stationary", fit.status)]
+        return [method_record("Soft gate / UOT", fit, fit.coupling, fit.source_gate, fit.target_gate, time.perf_counter() - wall_start, fit.status != "numerically-soft-stationary", fit.status, cpu_seconds=time.process_time() - cpu_start)]
 
     skip_soft_gate = bool(getattr(args, "skip_soft_gate", False))
     tasks = []
@@ -585,15 +595,19 @@ def main() -> None:
     summed_all_method_fit_seconds = float(sum(dose_summed_fit_seconds.values()))
     timing_rows = []
     for method, group in run_table.groupby("method", sort=False):
-        fit_seconds = float(group.fit_seconds.sum())
+        fit_wall_seconds = float(group.fit_wall_seconds.sum())
+        fit_cpu_seconds = float(group.fit_cpu_seconds.sum())
         timing_rows.append({
             "method": method,
             "shared_preprocessing_seconds": preprocessing_seconds,
             "shared_preprocessing_cpu_seconds": preprocessing_cpu_seconds,
             "all_dose_preparation_seconds": total_dose_preparation_seconds,
             "all_dose_preparation_cpu_seconds": total_dose_preparation_cpu_seconds,
-            "summed_fit_seconds": fit_seconds,
-            "isolated_method_workflow_cpu_seconds": preprocessing_cpu_seconds + total_dose_preparation_cpu_seconds + fit_seconds,
+            "summed_fit_seconds": fit_wall_seconds,
+            "summed_fit_wall_seconds": fit_wall_seconds,
+            "summed_fit_cpu_seconds": fit_cpu_seconds,
+            "isolated_method_workflow_wall_seconds": preprocessing_seconds + total_dose_preparation_seconds + fit_wall_seconds,
+            "isolated_method_workflow_cpu_seconds": preprocessing_cpu_seconds + total_dose_preparation_cpu_seconds + fit_cpu_seconds,
             "timing_scope": "hypothetical isolated run: clean preprocessing + every dose preparation + this method's fits",
         })
     pd.DataFrame(timing_rows).to_csv(args.output_dir / "timing_summary.csv", index=False)
