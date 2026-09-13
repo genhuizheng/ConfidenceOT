@@ -4,7 +4,6 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 16
-#SBATCH --mem=64G
 #SBATCH -t 04:00:00
 #SBATCH -A MCB26031
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_scaling/logs/finalize_%j.out
