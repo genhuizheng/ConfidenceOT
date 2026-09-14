@@ -257,6 +257,10 @@ def main() -> None:
             source_nulls[:split] + target_nulls[:split],
             source_nulls[split:] + target_nulls[split:],
             backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+            # Pinned to the rotation null that write_rotation_nulls builds above:
+            # this study's numbers were produced under it and it is not part of
+            # the cancer-workflow recalibration.
+            null_semantics="cross_side_rotation",
             source_rejection_budget=args.rejection_budget,
             target_rejection_budget=args.rejection_budget, tolerance=args.tolerance,
             grid_size=args.calibration_grid_size, device=args.device,

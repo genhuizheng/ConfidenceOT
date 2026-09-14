@@ -23,7 +23,11 @@ from sklearn.metrics import pairwise_distances
 
 from benchmark_logging import configure_run_logger, run_with_exception_logging
 from cellot import balanced_ot, multi_start_soft_gate_balanced, multi_start_soft_gate_uot, unbalanced_ot
-from confidenceot import calibrate_confidence_cost, rotation_null_costs
+from confidenceot import (
+    calibrate_confidence_cost,
+    rotation_null_costs,
+    within_side_null_costs,
+)
 from run_splatter_gene_perturbation_benchmark import (
     FrozenJointPCA,
     METHOD_TAXONOMY,
@@ -63,6 +67,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-null-replicates", type=int, default=2)
     parser.add_argument("--validation-null-replicates", type=int, default=2)
     parser.add_argument("--null-escape-fraction", type=float, default=0.10)
+    parser.add_argument(
+        "--calibration-null", default="within_side_split",
+        choices=("within_side_split", "cross_side_rotation"),
+        help="Null the rejection cost is calibrated against; rotation is the "
+             "pre-2026-09 behaviour retained for reproducing stored results",
+    )
+    parser.add_argument(
+        "--within-side-acceptance-minimum", type=float, default=0.90,
+        help="Minimum within-side null acceptance the rejection cost must reach",
+    )
     parser.add_argument("--fixed-binary-c", type=float, default=0.5)
     parser.add_argument("--fixed-soft-alpha", type=float, default=0.5)
     parser.add_argument("--workers", type=int, default=5)
@@ -377,10 +391,26 @@ def main() -> None:
     clean_cost = raw_cost / cost_scale
 
     total_nulls = args.calibration_null_replicates + args.validation_null_replicates
-    source_nulls, target_nulls = rotation_null_costs(
-        source_coordinates, target_coordinates, observed_scale=cost_scale,
-        seed=args.seed, n_replicates=total_nulls,
-    )
+    if args.calibration_null == "within_side_split":
+        # Two halves of one side contain no incompatible cells, so a specific
+        # rejection cost has to accept them.  A rotation null instead preserves
+        # each point's radial position, which is what the gate thresholds, so it
+        # cannot separate a homogeneous cloud from a real correspondence.  One
+        # subsample size keeps every null the same shape.
+        limit = min(len(source_coordinates), len(target_coordinates))
+        source_nulls = within_side_null_costs(
+            source_coordinates[:limit], observed_scale=cost_scale,
+            seed=args.seed, n_replicates=total_nulls,
+        )
+        target_nulls = within_side_null_costs(
+            target_coordinates[:limit], observed_scale=cost_scale,
+            seed=args.seed + 7, n_replicates=total_nulls,
+        )
+    else:
+        source_nulls, target_nulls = rotation_null_costs(
+            source_coordinates, target_coordinates, observed_scale=cost_scale,
+            seed=args.seed, n_replicates=total_nulls,
+        )
     split = args.calibration_null_replicates
     calibration_source = source_nulls[:split]
     calibration_target = target_nulls[:split]
@@ -412,8 +442,10 @@ def main() -> None:
         epsilon=args.epsilon,
         lambda_a=args.lambda_a,
         lambda_b=args.lambda_b,
+        null_semantics=args.calibration_null,
         source_raw_acceptance_target=args.null_escape_fraction,
         target_raw_acceptance_target=args.null_escape_fraction,
+        within_side_acceptance_minimum=args.within_side_acceptance_minimum,
         source_rejection_budget=args.source_budget,
         target_rejection_budget=args.target_budget,
         tolerance=args.solver_tolerance,

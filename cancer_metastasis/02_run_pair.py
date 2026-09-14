@@ -11,7 +11,12 @@ import time
 import numpy as np
 import pandas as pd
 
-from confidenceot import ConfidenceOT, calibrate_confidence_cost, rotation_null_costs
+from confidenceot import (
+    ConfidenceOT,
+    calibrate_confidence_cost,
+    rotation_null_costs,
+    within_side_null_costs,
+)
 from common import cell_qc_table, json_ready, load_exact_side, prepare_joint_representation
 
 
@@ -166,6 +171,13 @@ def main() -> None:
     parser.add_argument("--null-validation-replicates", type=int, default=5)
     parser.add_argument("--calibration-grid-size", type=int, default=5)
     parser.add_argument(
+        "--calibration-null", default="within_side_split",
+        choices=("within_side_split", "cross_side_rotation"),
+        help="Null the rejection cost is calibrated against; rotation is the "
+             "pre-2026-09 behaviour and cannot separate a homogeneous cloud "
+             "from a real correspondence",
+    )
+    parser.add_argument(
         "--fixed-rejection-cost", type=float,
         help="Skip null calibration and use this positive rejection cost",
     )
@@ -302,18 +314,36 @@ def main() -> None:
     scale = float(np.median(sampled[sampled > 0]))
     cost = squared_euclidean(source_pca, target_pca) / scale
     if args.fixed_rejection_cost is None:
-        source_index = np.sort(rng.choice(len(source_pca), min(args.calibration_max_cells, len(source_pca)), replace=False))
-        target_index = np.sort(rng.choice(len(target_pca), min(args.calibration_max_cells, len(target_pca)), replace=False))
+        # One subsample size for both sides so every null shares one shape, as
+        # calibrate_confidence_cost requires.
+        limit = min(args.calibration_max_cells, len(source_pca), len(target_pca))
+        source_index = np.sort(rng.choice(len(source_pca), limit, replace=False))
+        target_index = np.sort(rng.choice(len(target_pca), limit, replace=False))
         total_nulls = args.null_calibration_replicates + args.null_validation_replicates
-        source_nulls, target_nulls = rotation_null_costs(
-            source_pca[source_index], target_pca[target_index], observed_scale=scale,
-            seed=args.seed + args.index, n_replicates=total_nulls,
-        )
+        if args.calibration_null == "within_side_split":
+            # Two halves of one side contain no incompatible cells and carry
+            # that side's own depth heterogeneity, so the calibrated cost has
+            # to accept them.  Pooling both sides keeps the shared cost valid
+            # for the source and the target gate alike.
+            source_nulls = within_side_null_costs(
+                source_pca[source_index], observed_scale=scale,
+                seed=args.seed + args.index, n_replicates=total_nulls,
+            )
+            target_nulls = within_side_null_costs(
+                target_pca[target_index], observed_scale=scale,
+                seed=args.seed + args.index + 7, n_replicates=total_nulls,
+            )
+        else:
+            source_nulls, target_nulls = rotation_null_costs(
+                source_pca[source_index], target_pca[target_index], observed_scale=scale,
+                seed=args.seed + args.index, n_replicates=total_nulls,
+            )
         split = args.null_calibration_replicates
         calibration_started = time.perf_counter()
         calibration = calibrate_confidence_cost(
             source_nulls[:split] + target_nulls[:split], source_nulls[split:] + target_nulls[split:],
             backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+            null_semantics=args.calibration_null,
             source_rejection_budget=source_budget, target_rejection_budget=target_budget,
             tolerance=args.tolerance, grid_size=args.calibration_grid_size, device=args.device,
             workers=args.workers, fallback_to_cpu=False,
@@ -323,11 +353,13 @@ def main() -> None:
         calibration_valid = bool(calibration.calibration_valid)
         calibration_payload = json_ready(calibration)
         rejection_cost_mode = "null_calibrated"
+        calibration_null = args.calibration_null
     else:
         rejection_cost = float(args.fixed_rejection_cost)
         calibration_seconds = 0.0
         calibration_valid = False
         rejection_cost_mode = "fixed_sensitivity"
+        calibration_null = "none"
         calibration_payload = {
             "rejection_cost": rejection_cost,
             "selection_status": "fixed_user_supplied",
@@ -393,6 +425,7 @@ def main() -> None:
             "target_rejection_budget_cap": target_budget,
             "rejection_cost": rejection_cost,
             "rejection_cost_mode": rejection_cost_mode,
+            "calibration_null": calibration_null,
             "calibration_valid_for_m4r": calibration_valid,
             "source_raw_rejection_rate": float(np.mean(~result.source_raw_gate)),
             "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
@@ -470,6 +503,7 @@ def main() -> None:
         "target_rejection_budget_cap": target_budget,
         "rejection_cost": rejection_cost,
         "rejection_cost_mode": rejection_cost_mode,
+        "calibration_null": calibration_null,
         "calibration_valid_for_m4r": calibration_valid,
         "input_gate": {
             "root": str(args.input_gate_root) if args.input_gate_root else None,

@@ -11,6 +11,7 @@ from confidenceot.calibration import (
     NullValidationRecord,
     calibrate_confidence_cost,
     rotation_null_costs,
+    within_side_null_costs,
 )
 from confidenceot.cuda import CUDAUnavailableError, cuda_available, cuda_device_name
 from confidenceot.result import BinConfidence, ConfidenceOTResult
@@ -28,4 +29,5 @@ __all__ = [
     "NullValidationRecord",
     "calibrate_confidence_cost",
     "rotation_null_costs",
+    "within_side_null_costs",
 ]

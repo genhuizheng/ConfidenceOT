@@ -32,9 +32,14 @@ class NullValidationRecord:
     cycle_detected: bool
 
 
+NullSemantics = Literal["cross_side_rotation", "within_side_split"]
+
+
 @dataclass(frozen=True)
 class NullCalibrationResult:
     backbone: Literal["balanced", "uot"]
+    null_semantics: NullSemantics
+    acceptance_requirement: str
     rejection_cost: float
     curve_costs: NDArray[np.float64]
     source_raw_acceptance_curve: NDArray[np.float64]
@@ -88,6 +93,54 @@ def rotation_null_costs(
     return source_nulls, target_nulls
 
 
+def within_side_null_costs(
+    coordinates: ArrayLike,
+    *,
+    observed_scale: float,
+    seed: int,
+    n_replicates: int,
+) -> list[NDArray[np.float64]]:
+    """Create within-side split nulls: one half of a sample against the other.
+
+    A rotation null destroys cross-side correspondence but preserves every
+    point's distance to its own cloud centre, and radial position is what the
+    binary gate thresholds.  Such a null therefore cannot distinguish a
+    homogeneous cloud from a real correspondence, and calibrating against it
+    places the rejection cost below the median observed cost, so nearly every
+    cell is rejected even when no incompatible cell exists.
+
+    Two disjoint halves of one sample contain no incompatible cells by
+    construction, and they carry that sample's own technical heterogeneity --
+    sequencing depth, detection breadth, dropout dispersion.  Calibrating so
+    that these halves are *accepted* therefore absorbs both nuisances at once
+    and yields a threshold that a genuinely homogeneous population passes.
+
+    Every replicate splits at ``n // 2`` so all returned matrices share one
+    shape, as :func:`calibrate_confidence_cost` requires.
+    """
+    values = np.asarray(coordinates, dtype=np.float64)
+    if values.ndim != 2:
+        raise ValueError("coordinates must be a two-dimensional coordinate array.")
+    if not np.isfinite(observed_scale) or observed_scale <= 0:
+        raise ValueError("observed_scale must be positive and finite.")
+    if n_replicates <= 0:
+        raise ValueError("n_replicates must be positive.")
+    n = values.shape[0]
+    half = n // 2
+    if half < 2:
+        raise ValueError(
+            "within-side split nulls need at least four rows to halve."
+        )
+    nulls: list[NDArray[np.float64]] = []
+    for replicate in range(n_replicates):
+        rng = np.random.default_rng(seed * 1009 + replicate * 9173 + 41)
+        order = rng.permutation(n)
+        left = values[np.sort(order[:half])]
+        right = values[np.sort(order[half : 2 * half])]
+        nulls.append(_squared_euclidean(left, right) / observed_scale)
+    return nulls
+
+
 def _initial_grid(
     nulls: Sequence[NDArray[np.float64]],
     *,
@@ -138,8 +191,10 @@ def calibrate_confidence_cost(
     epsilon: float = 0.1,
     lambda_a: float = 1.0,
     lambda_b: float = 1.0,
+    null_semantics: NullSemantics = "within_side_split",
     source_raw_acceptance_target: float = 0.10,
     target_raw_acceptance_target: float = 0.10,
+    within_side_acceptance_minimum: float = 0.90,
     source_rejection_budget: float = 0.15,
     target_rejection_budget: float = 0.15,
     tolerance: float = 1e-3,
@@ -153,7 +208,28 @@ def calibrate_confidence_cost(
     workers: int = 1,
     emit_warnings: bool = True,
 ) -> NullCalibrationResult:
-    """Estimate a rejection cost with M4-E and validate it with M4-R."""
+    """Estimate a rejection cost with M4-E and validate it with M4-R.
+
+    ``null_semantics`` selects what the nulls mean, and therefore which way the
+    acceptance requirement points.  Raw acceptance rises monotonically with the
+    rejection cost under both.
+
+    ``within_side_split`` (default) expects nulls built by
+    :func:`within_side_null_costs`, which contain no incompatible cells at all,
+    so the requirement is that acceptance be *at least*
+    ``within_side_acceptance_minimum`` and the smallest qualifying cost is
+    chosen.  ``cross_side_rotation`` is the original behaviour, expecting
+    :func:`rotation_null_costs` and requiring acceptance be *at most* the
+    ``*_raw_acceptance_target`` values, with the largest qualifying cost chosen.
+    It is retained so that results produced before the default changed remain
+    reproducible; see :func:`within_side_null_costs` for why it cannot separate
+    a homogeneous cloud from a real correspondence.
+    """
+    if null_semantics not in ("cross_side_rotation", "within_side_split"):
+        raise ValueError(
+            "null_semantics must be 'cross_side_rotation' or 'within_side_split'."
+        )
+    within_side = null_semantics == "within_side_split"
     nulls = tuple(np.asarray(value, dtype=np.float64) for value in calibration_nulls)
     validation_values = tuple(np.asarray(value, dtype=np.float64) for value in validation_nulls)
     if not nulls:
@@ -203,31 +279,72 @@ def calibrate_confidence_cost(
     target_raw, target_projected = curve[:, 2], curve[:, 3]
     source_monotone = bool(np.all(np.diff(source_raw) >= -1e-12))
     target_monotone = bool(np.all(np.diff(target_raw) >= -1e-12))
-    feasible = (source_raw <= source_raw_acceptance_target) & (target_raw <= target_raw_acceptance_target)
-    if np.any(feasible):
-        index = int(np.flatnonzero(feasible)[-1])
-        c_star = float(curve_costs[index])
-        selection = "largest_jointly_feasible"
-    else:
-        violation = np.maximum(
-            np.maximum(source_raw - source_raw_acceptance_target, 0),
-            np.maximum(target_raw - target_raw_acceptance_target, 0),
+    def acceptable(source_value: float, target_value: float) -> bool:
+        if within_side:
+            return (
+                source_value >= within_side_acceptance_minimum
+                and target_value >= within_side_acceptance_minimum
+            )
+        return (
+            source_value <= source_raw_acceptance_target
+            and target_value <= target_raw_acceptance_target
         )
-        index = int(np.flatnonzero(np.isclose(violation, violation.min()))[-1])
+
+    feasible = np.asarray([
+        acceptable(float(sx), float(sy)) for sx, sy in zip(source_raw, target_raw)
+    ])
+    if np.any(feasible):
+        # Acceptance rises with the cost, so the qualifying set is an upper tail
+        # for the within-side null and a lower tail for the rotation null.  Both
+        # branches take the least extreme qualifying cost.
+        position = 0 if within_side else -1
+        index = int(np.flatnonzero(feasible)[position])
+        c_star = float(curve_costs[index])
+        selection = (
+            "smallest_jointly_feasible" if within_side
+            else "largest_jointly_feasible"
+        )
+    else:
+        if within_side:
+            violation = np.maximum(
+                np.maximum(within_side_acceptance_minimum - source_raw, 0),
+                np.maximum(within_side_acceptance_minimum - target_raw, 0),
+            )
+            # Larger costs accept more, so the least-violating tie is the last.
+            position = -1
+        else:
+            violation = np.maximum(
+                np.maximum(source_raw - source_raw_acceptance_target, 0),
+                np.maximum(target_raw - target_raw_acceptance_target, 0),
+            )
+            position = -1
+        index = int(np.flatnonzero(np.isclose(violation, violation.min()))[position])
         c_star = float(curve_costs[index])
         selection = "minimum_joint_violation_fallback"
         warning_set.add("No jointly feasible rejection cost was found; the least-violating value was retained.")
     refinement = "grid"
-    if np.any(feasible) and source_monotone and target_monotone and index + 1 < len(curve_costs):
-        low, high = c_star, float(curve_costs[index + 1])
+    # Bracket the boundary between the qualifying and non-qualifying costs: the
+    # non-qualifying neighbour sits below for the within-side null and above for
+    # the rotation null.
+    bracket = index - 1 if within_side else index + 1
+    if np.any(feasible) and source_monotone and target_monotone and 0 <= bracket < len(curve_costs):
+        if within_side:
+            low, high = float(curve_costs[bracket]), c_star
+        else:
+            low, high = c_star, float(curve_costs[bracket])
         while (high - low) / max(low, np.finfo(float).tiny) > refinement_relative_tolerance:
             middle = math.sqrt(low * high)
             sx, _, sy, _ = evaluate(middle)
-            if sx <= source_raw_acceptance_target and sy <= target_raw_acceptance_target:
+            if acceptable(sx, sy):
+                if within_side:
+                    high = middle
+                else:
+                    low = middle
+            elif within_side:
                 low = middle
             else:
                 high = middle
-        c_star = low
+        c_star = high if within_side else low
         refinement = "joint_bisection"
     elif not source_monotone or not target_monotone:
         warning_set.add("A raw-acceptance curve was nonmonotone; continuous refinement was skipped.")
@@ -258,12 +375,13 @@ def calibrate_confidence_cost(
     if validation_fits:
         validation_source_raw = float(np.mean([fit.source_raw_acceptance for fit in validation_fits]))
         validation_target_raw = float(np.mean([fit.target_raw_acceptance for fit in validation_fits]))
-        validation_aggregate_valid = bool(
-            validation_source_raw <= source_raw_acceptance_target
-            and validation_target_raw <= target_raw_acceptance_target
+        validation_aggregate_valid = acceptable(
+            validation_source_raw, validation_target_raw
         )
         if not validation_aggregate_valid:
             warning_set.add(
+                "The aggregate held-out M4-R raw-acceptance rate fell short of the "
+                "within-side minimum." if within_side else
                 "The aggregate held-out M4-R raw-acceptance rate exceeded a target."
             )
     else:
@@ -276,6 +394,13 @@ def calibrate_confidence_cost(
             warnings.warn(message, RuntimeWarning, stacklevel=2)
     return NullCalibrationResult(
         backbone=backbone,
+        null_semantics=null_semantics,
+        acceptance_requirement=(
+            f"within-side raw acceptance >= {within_side_acceptance_minimum:g}"
+            if within_side else
+            f"rotation-null raw acceptance <= source {source_raw_acceptance_target:g}"
+            f", target {target_raw_acceptance_target:g}"
+        ),
         rejection_cost=c_star,
         curve_costs=np.asarray(sorted(cache), dtype=np.float64),
         source_raw_acceptance_curve=np.asarray([cache[c][0] for c in sorted(cache)]),

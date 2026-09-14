@@ -249,6 +249,11 @@ def main() -> None:
         calibration, calibration_wall, calibration_cpu = timed(lambda: calibrate_confidence_cost(
             calibration_nulls, validation_nulls, backbone=args.confidence_backbone,
             epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+            # Pinned to the rotation null: this study's published numbers were
+            # produced under it, and it is not part of the cancer-workflow
+            # recalibration.  See within_side_null_costs for why the default
+            # changed.
+            null_semantics="cross_side_rotation",
             source_rejection_budget=args.rejection_budget,
             target_rejection_budget=args.rejection_budget, tolerance=args.tolerance,
             max_iterations=args.max_iterations, max_outer_iterations=args.max_outer_iterations,
