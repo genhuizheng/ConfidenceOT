@@ -48,6 +48,10 @@ class NullCalibrationResult:
     target_projected_acceptance_curve: NDArray[np.float64]
     selection_status: str
     calibration_valid: bool
+    feasible_cost_found: bool
+    m4e_calibration_clean: bool
+    m4r_validation_clean: bool
+    m4e_inference_valid: bool
     source_monotone: bool
     target_monotone: bool
     refinement_method: str
@@ -247,6 +251,13 @@ def calibrate_confidence_cost(
     )
     cache: dict[float, tuple[float, float, float, float]] = {}
     warning_set: set[str] = set()
+    # Warnings are tracked by provenance so a consumer can tell an unsound
+    # calibration from a sound one whose M4-R cross-check merely ran out of
+    # iterations.  M4-R is used here only as a second opinion on a cost fitted
+    # with M4-E, and its gate has no monotone-objective guarantee, so hitting
+    # the outer cap or cycling is expected rather than disqualifying.
+    m4e_clean = True
+    m4r_clean = True
 
     def evaluate(c_value: float) -> tuple[float, float, float, float]:
         key = float(c_value)
@@ -266,6 +277,7 @@ def calibrate_confidence_cost(
         for fit in fitted:
             if not fit.inner_converged or not fit.outer_converged or fit.cycle_detected:
                 warning_set.add("At least one M4-E calibration fit ended with a terminal warning.")
+                m4e_clean = False
         cache[key] = (
             float(np.mean([fit.source_raw_acceptance for fit in fitted])),
             float(np.mean([np.mean(fit.source_gate) for fit in fitted])),
@@ -348,6 +360,7 @@ def calibrate_confidence_cost(
         refinement = "joint_bisection"
     elif not source_monotone or not target_monotone:
         warning_set.add("A raw-acceptance curve was nonmonotone; continuous refinement was skipped.")
+        m4e_clean = False
 
     validation_records: list[NullValidationRecord] = []
     validation_model = ConfidenceOT(
@@ -372,6 +385,7 @@ def calibrate_confidence_cost(
         ))
         if not fit.inner_converged or not fit.outer_converged or fit.cycle_detected:
             warning_set.add("At least one held-out M4-R validation fit ended with a terminal warning.")
+            m4r_clean = False
     if validation_fits:
         validation_source_raw = float(np.mean([fit.source_raw_acceptance for fit in validation_fits]))
         validation_target_raw = float(np.mean([fit.target_raw_acceptance for fit in validation_fits]))
@@ -410,6 +424,12 @@ def calibrate_confidence_cost(
         selection_status=selection,
         calibration_valid=bool(
             np.any(feasible) and validation_aggregate_valid and not messages
+        ),
+        feasible_cost_found=bool(np.any(feasible)),
+        m4e_calibration_clean=bool(m4e_clean),
+        m4r_validation_clean=bool(m4r_clean),
+        m4e_inference_valid=bool(
+            np.any(feasible) and m4e_clean and validation_aggregate_valid
         ),
         source_monotone=source_monotone,
         target_monotone=target_monotone,

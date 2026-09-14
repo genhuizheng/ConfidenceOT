@@ -351,6 +351,15 @@ def main() -> None:
         calibration_seconds = time.perf_counter() - calibration_started
         rejection_cost = float(calibration.rejection_cost)
         calibration_valid = bool(calibration.calibration_valid)
+        # calibration_valid is a strict conjunction that any M4-R terminal
+        # warning zeroes.  M4-R only cross-checks a cost fitted with M4-E and
+        # its gate has no monotone-objective guarantee, so reaching the outer
+        # cap is expected and must not invalidate the M4-E calibration that
+        # the biological inference actually uses.
+        m4e_inference_valid = bool(calibration.m4e_inference_valid)
+        feasible_cost_found = bool(calibration.feasible_cost_found)
+        m4e_calibration_clean = bool(calibration.m4e_calibration_clean)
+        m4r_validation_clean = bool(calibration.m4r_validation_clean)
         calibration_payload = json_ready(calibration)
         rejection_cost_mode = "null_calibrated"
         calibration_null = args.calibration_null
@@ -358,6 +367,10 @@ def main() -> None:
         rejection_cost = float(args.fixed_rejection_cost)
         calibration_seconds = 0.0
         calibration_valid = False
+        m4e_inference_valid = False
+        feasible_cost_found = False
+        m4e_calibration_clean = False
+        m4r_validation_clean = False
         rejection_cost_mode = "fixed_sensitivity"
         calibration_null = "none"
         calibration_payload = {
@@ -427,6 +440,10 @@ def main() -> None:
             "rejection_cost_mode": rejection_cost_mode,
             "calibration_null": calibration_null,
             "calibration_valid_for_m4r": calibration_valid,
+            "calibration_m4e_inference_valid": m4e_inference_valid,
+            "calibration_feasible_cost_found": feasible_cost_found,
+            "calibration_m4e_clean": m4e_calibration_clean,
+            "calibration_m4r_clean": m4r_validation_clean,
             "source_raw_rejection_rate": float(np.mean(~result.source_raw_gate)),
             "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
             "source_final_rejection_rate": float(np.mean(~result.source_gate)),
@@ -505,6 +522,10 @@ def main() -> None:
         "rejection_cost_mode": rejection_cost_mode,
         "calibration_null": calibration_null,
         "calibration_valid_for_m4r": calibration_valid,
+        "calibration_m4e_inference_valid": m4e_inference_valid,
+        "calibration_feasible_cost_found": feasible_cost_found,
+        "calibration_m4e_clean": m4e_calibration_clean,
+        "calibration_m4r_clean": m4r_validation_clean,
         "input_gate": {
             "root": str(args.input_gate_root) if args.input_gate_root else None,
             "budget_tag": args.input_gate_budget_tag if args.input_gate_root else None,

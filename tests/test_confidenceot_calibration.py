@@ -124,6 +124,41 @@ class ConfidenceOTCalibrationTest(unittest.TestCase):
         self.assertGreater(within_acceptance, 0.8)
         self.assertGreater(within.rejection_cost, rotation.rejection_cost)
 
+    def test_m4r_hitting_its_cap_does_not_invalidate_the_m4e_cost(self) -> None:
+        """M4-R reaching the outer cap is expected, not a calibration failure.
+
+        The cost is fitted with M4-E; M4-R only cross-checks it, and its gate
+        is documented as having no monotone-objective guarantee, so cycling or
+        exhausting the outer loop is a property of that variant rather than
+        evidence against the cost. ``calibration_valid`` is a strict
+        conjunction that any such warning zeroes, so the decomposed flags have
+        to keep the two apart.
+        """
+        rng = np.random.default_rng(3)
+        cloud = rng.normal(size=(200, 8))
+        other = rng.normal(size=(200, 8))
+        observed = np.sum((cloud[:, None] - other[None, :]) ** 2, axis=2)
+        scale = float(np.median(observed[observed > 0]))
+        nulls = within_side_null_costs(
+            cloud, observed_scale=scale, seed=3, n_replicates=6
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            result = calibrate_confidence_cost(
+                nulls[:3], nulls[3:], backbone="uot",
+                null_semantics="within_side_split",
+                source_rejection_budget=0.85, target_rejection_budget=0.85,
+                tolerance=1e-4, grid_size=5, device="cpu", emit_warnings=False,
+            )
+        self.assertTrue(result.feasible_cost_found)
+        self.assertTrue(result.m4e_calibration_clean)
+        self.assertTrue(result.validation_aggregate_valid)
+        # This fixture reliably exhausts the M4-R outer loop.
+        self.assertFalse(result.m4r_validation_clean)
+        # The M4-E cost stays usable; only the strict conjunction fails.
+        self.assertTrue(result.m4e_inference_valid)
+        self.assertFalse(result.calibration_valid)
+
 
 if __name__ == "__main__":
     unittest.main()
