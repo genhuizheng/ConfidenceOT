@@ -72,6 +72,13 @@ ARMS = {
     "perturbed_depth_cv0": {"depth_sigma": 0.0, "perturbed_fraction": 0.2},
 }
 
+# Enabled only by --depth-source: the same two questions asked at the depth
+# distribution an actual dataset has, rather than at a chosen sigma.
+OBSERVED_ARMS = {
+    "homogeneous_depth_observed": {"depth_sigma": 0.0, "perturbed_fraction": 0.0},
+    "perturbed_depth_observed": {"depth_sigma": 0.0, "perturbed_fraction": 0.2},
+}
+
 
 def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     value = (
@@ -116,6 +123,7 @@ def simulate_counts(
     n_cells: int,
     median_depth: float,
     depth_sigma: float,
+    depth_pool: np.ndarray | None = None,
     dispersion: float,
     perturbed_fraction: float,
     perturbation_log2: float,
@@ -144,7 +152,14 @@ def simulate_counts(
         affected = rng.choice(n_genes, max(1, n_genes // 10), replace=False)
         rates[np.ix_(perturbed, affected)] *= 2.0 ** perturbation_log2
     rates /= rates.sum(axis=1, keepdims=True)
-    if depth_sigma <= 0.0:
+    if depth_pool is not None:
+        # Bootstrap from an observed depth distribution. The synthetic sigmas
+        # are a dose-response curve chosen for convenience; where the real data
+        # sits on that curve is a separate question, and GSE180661's 1.32x
+        # retained-to-rejected depth ratio is below even the smallest synthetic
+        # arm, so it cannot be read off by interpolation.
+        depth = rng.choice(depth_pool, size=n_cells, replace=True)
+    elif depth_sigma <= 0.0:
         depth = np.full(n_cells, float(median_depth))
     else:
         depth = median_depth * rng.lognormal(0.0, depth_sigma, size=n_cells)
@@ -165,8 +180,24 @@ def as_anndata(counts: np.ndarray, prefix: str):
     )
 
 
+def load_depth_pool(path: Path | None) -> np.ndarray | None:
+    """Read observed per-cell depths from a stored cell_confidence.csv."""
+    if path is None:
+        return None
+    table = pd.read_csv(path)
+    for column in ("predownsample_total_counts", "total_counts"):
+        if column in table:
+            values = pd.to_numeric(table[column], errors="coerce").to_numpy(np.float64)
+            values = values[np.isfinite(values) & (values >= 100)]
+            if values.size < 100:
+                raise RuntimeError(f"{path}: only {values.size} usable depths")
+            return values
+    raise RuntimeError(f"{path} has neither total_counts nor a pre-downsample column")
+
+
 def run_replicate(
-    arm: str, settings: dict, replicate: int, args: argparse.Namespace
+    arm: str, settings: dict, replicate: int, args: argparse.Namespace,
+    depth_pool: np.ndarray | None = None,
 ) -> dict[str, object]:
     seed = args.seed + 7919 * replicate + abs(hash(arm)) % 10_000
     rng = np.random.default_rng(seed)
@@ -178,6 +209,7 @@ def run_replicate(
         gene_mean=gene_mean, median_depth=args.median_depth,
         dispersion=args.dispersion,
         perturbation_log2=args.perturbation_log2,
+        depth_pool=depth_pool if arm.endswith("_observed") else None,
     )
     source_counts, source_depth, perturbed = simulate_counts(
         rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
@@ -208,6 +240,8 @@ def run_replicate(
 
     calibration_status = "fixed_user_supplied"
     calibration_valid = False
+    m4e_inference_valid = False
+    m4r_validation_clean = True
     if args.fixed_rejection_cost is not None:
         rejection_cost = float(args.fixed_rejection_cost)
     else:
@@ -247,6 +281,12 @@ def run_replicate(
         rejection_cost = float(calibration.rejection_cost)
         calibration_status = str(calibration.selection_status)
         calibration_valid = bool(calibration.calibration_valid)
+        # calibration_valid is a strict conjunction that any M4-R terminal
+        # warning zeroes, and M4-R exhausting its outer loop is expected rather
+        # than disqualifying, so the component the inference rests on is
+        # recorded separately.
+        m4e_inference_valid = bool(calibration.m4e_inference_valid)
+        m4r_validation_clean = bool(calibration.m4r_validation_clean)
 
     model = ConfidenceOT(
         backbone="uot", variant="exact", rejection_cost=rejection_cost,
@@ -276,6 +316,8 @@ def run_replicate(
         "rejection_cost": rejection_cost,
         "calibration_selection_status": calibration_status,
         "calibration_valid": calibration_valid,
+        "m4e_inference_valid": m4e_inference_valid,
+        "m4r_validation_clean": m4r_validation_clean,
         "hvg_n": len(hvg),
         "source_n": int(retained.size),
         # Question 1: is the rate informative?
@@ -348,16 +390,34 @@ def main() -> None:
         help="Bypass null calibration to isolate the calibration target's effect",
     )
     parser.add_argument("--seed", type=int, default=20260914)
-    parser.add_argument("--arm", action="append", choices=sorted(ARMS),
-                        help="Restrict to these arms; default runs all")
+    parser.add_argument(
+        "--depth-source", type=Path, default=None,
+        help="A stored cell_confidence.csv whose total_counts supply an "
+             "observed depth distribution; enables the *_observed arms",
+    )
+    parser.add_argument(
+        "--arm", action="append", choices=sorted({*ARMS, *OBSERVED_ARMS}),
+        help="Restrict to these arms; default runs all available",
+    )
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
 
-    selected = args.arm or sorted(ARMS)
+    depth_pool = load_depth_pool(args.depth_source)
+    available = dict(ARMS)
+    if depth_pool is not None:
+        available.update(OBSERVED_ARMS)
+    selected = args.arm or sorted(available)
+    missing = [arm for arm in selected if arm not in available]
+    if missing:
+        raise RuntimeError(
+            f"{missing} need --depth-source to supply an observed distribution"
+        )
     records = []
     for arm in selected:
         for replicate in range(args.replicates):
-            record = run_replicate(arm, ARMS[arm], replicate, args)
+            record = run_replicate(
+                arm, available[arm], replicate, args, depth_pool
+            )
             records.append(record)
             print(
                 f"{arm} rep={replicate} "
@@ -388,7 +448,8 @@ def main() -> None:
         "target_rejection_budget": args.target_rejection_budget,
         "replicates_per_arm": args.replicates,
         "cells_per_side": args.n_cells,
-        "arms": ARMS,
+        "depth_source": str(args.depth_source) if args.depth_source else None,
+        "arms": {arm: available[arm] for arm in selected},
         "expected_outcomes": {
             "homogeneous arms": (
                 "No incompatible cell exists, so a specific method rejects "

@@ -59,23 +59,29 @@ from cancer_metastasis.gse180661.primary_pseudobulk import (
 )
 
 
-def unique_samples(manifest: pd.DataFrame) -> list[tuple[str, tuple[str, ...]]]:
-    """Return every distinct (sample, source files) the manifest references.
+def unique_samples(
+    manifest: pd.DataFrame,
+) -> list[tuple[tuple[str, str], tuple[str, ...]]]:
+    """Return every distinct ((patient, sample), source files) referenced.
 
-    One sample can appear on either side and in several pairs, so it is loaded
-    and written once.
+    The sample column holds a site label such as ``left_adnexa``, which is not
+    unique across patients, so the patient is part of the key. One such sample
+    can still appear on either side and in several pairs, and is loaded and
+    written once.
     """
-    seen: dict[str, tuple[str, ...]] = {}
+    seen: dict[tuple[str, str], tuple[str, ...]] = {}
     for row in manifest.to_dict("records"):
         series = pd.Series(row)
+        patient = str(row["patient_id"])
         for side in ("source", "target"):
-            sample = str(row[f"{side}_sample"])
+            key = (patient, str(row[f"{side}_sample"]))
             files = tuple(paths_for(series, side))
-            if sample in seen and seen[sample] != files:
+            if key in seen and seen[key] != files:
                 raise RuntimeError(
-                    f"Sample {sample!r} is referenced with two different file sets"
+                    f"Patient {key[0]!r} sample {key[1]!r} is referenced with "
+                    "two different file sets"
                 )
-            seen[sample] = files
+            seen[key] = files
     return sorted(seen.items())
 
 
@@ -161,17 +167,17 @@ def main() -> None:
     # per-file target would leave the sides of a pair at different depths,
     # which is the difference the correction exists to remove.
     pooled: list[np.ndarray] = []
-    per_sample_n: dict[str, int] = {}
-    for sample, files in samples:
+    per_sample_n: dict[tuple[str, str], int] = {}
+    for (patient, sample), files in samples:
         data, qc = analysed_subset(sample, files, args)
         if data.n_obs == 0:
-            per_sample_n[sample] = 0
+            per_sample_n[(patient, sample)] = 0
             continue
         depth = np.asarray(
             sparse.csr_matrix(expression_matrix(data)).sum(axis=1)
         ).ravel()
         pooled.append(depth)
-        per_sample_n[sample] = int(data.n_obs)
+        per_sample_n[(patient, sample)] = int(data.n_obs)
         del data, qc
     if not pooled:
         raise RuntimeError("No analysed cells found in any referenced sample")
@@ -185,8 +191,8 @@ def main() -> None:
 
     rows = []
     depth_records = []
-    written: dict[str, str] = {}
-    for index, (sample, files) in enumerate(samples):
+    written: dict[tuple[str, str], str] = {}
+    for index, ((patient, sample), files) in enumerate(samples):
         data, _ = analysed_subset(sample, files, args)
         if data.n_obs == 0:
             continue
@@ -200,10 +206,11 @@ def main() -> None:
                 del data.layers[layer]
         data.obs["predownsample_total_counts"] = original
         data.obs["downsample_untouched"] = untouched
-        path = destination / "h5ad" / f"{safe_name(sample)}.h5ad"
+        path = destination / "h5ad" / f"{safe_name(patient)}__{safe_name(sample)}.h5ad"
         data.write_h5ad(path, compression="lzf")
-        written[sample] = str(path)
+        written[(patient, sample)] = str(path)
         rows.append({
+            "patient_id": patient,
             "sample_id": sample,
             "analysed_cell_n": int(data.n_obs),
             "already_at_or_below_target_n": int(untouched.sum()),
@@ -215,6 +222,7 @@ def main() -> None:
             "h5ad": str(path),
         })
         depth_records.append(pd.DataFrame({
+            "patient_id": patient,
             "sample_id": sample,
             "observation_id": data.obs_names.astype(str),
             "predownsample_total_counts": original,
@@ -225,7 +233,8 @@ def main() -> None:
     updated = manifest.copy()
     for side in ("source", "target"):
         column = f"{side}_sample"
-        updated[f"{side}_h5ad"] = updated[column].astype(str).map(written)
+        keys = list(zip(updated["patient_id"].astype(str), updated[column].astype(str)))
+        updated[f"{side}_h5ad"] = [written.get(key) for key in keys]
         json_column = f"{side}_h5ads_json"
         if json_column in updated:
             updated[json_column] = updated[f"{side}_h5ad"].map(

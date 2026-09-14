@@ -195,7 +195,27 @@ def load_depth_source(path: Path | None) -> pd.DataFrame | None:
     keep = [*required] + (
         ["downsample_untouched"] if "downsample_untouched" in table else []
     )
-    return table[keep].drop_duplicates(["sample_id", "observation_id"])
+    table = table[keep]
+    # cell_confidence.csv carries no patient, and the sample column holds a
+    # site label such as left_adnexa that repeats across patients, so the join
+    # key is only safe while barcodes do not repeat within a site. Dropping
+    # duplicates silently would hide a genuine collision, so conflicting depths
+    # for one key are an error and identical ones collapse.
+    duplicated = table.duplicated(["sample_id", "observation_id"], keep=False)
+    if duplicated.any():
+        conflicting = (
+            table[duplicated]
+            .groupby(["sample_id", "observation_id"])["predownsample_total_counts"]
+            .nunique()
+        )
+        offenders = conflicting[conflicting > 1]
+        if len(offenders):
+            raise RuntimeError(
+                f"{path}: {len(offenders)} sample/observation keys carry "
+                "conflicting depths, so the same barcode appears in more than "
+                "one patient's sample. Join on patient as well."
+            )
+    return table.drop_duplicates(["sample_id", "observation_id"])
 
 
 def pair_record(
