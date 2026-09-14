@@ -54,6 +54,8 @@ SUMMARY_EXTRA = (
     "forced_in_share_of_retained",
     "sign_rule_concordance",
     "terminal_disagreement_fraction",
+    "depth_residual_gate_jaccard",
+    "chance_gate_jaccard",
 )
 
 
@@ -96,6 +98,48 @@ def rank_correlation(left: pd.Series | None, right: pd.Series | None) -> float:
     if x.size < 3 or np.all(x == x[0]) or np.all(y == y[0]):
         return float("nan")
     return float(spearmanr(x, y).statistic)
+
+
+def depth_residual_gate_jaccard(
+    table: pd.DataFrame, retained: np.ndarray
+) -> float:
+    """Jaccard between the gate and a same-size gate on depth-residual cost.
+
+    Ranks are regressed rather than raw values, so the correction is monotone
+    and consistent with the Spearman diagnostic.  1.0 means removing the depth
+    component selects exactly the same cells; chance overlap for two sets of
+    size ``k`` drawn from ``n`` cells is roughly ``k / (2n - k)``, so a value
+    near that floor means depth, not the remaining geometry, decides the gate.
+    """
+    predictors = [
+        column for column in ("total_counts", "n_genes_by_counts")
+        if column in table
+    ]
+    if "decision_cost" not in table or not predictors:
+        return float("nan")
+    cost = pd.to_numeric(table["decision_cost"], errors="coerce").to_numpy(np.float64)
+    design = np.column_stack([
+        pd.to_numeric(table[column], errors="coerce").to_numpy(np.float64)
+        for column in predictors
+    ])
+    finite = np.isfinite(cost) & np.all(np.isfinite(design), axis=1)
+    actual = retained[finite]
+    accepted = int(actual.sum())
+    if finite.sum() < 10 or accepted == 0 or accepted == actual.size:
+        return float("nan")
+    response = rankdata(cost[finite])
+    ranked = np.column_stack([
+        rankdata(design[finite, index]) for index in range(design.shape[1])
+    ])
+    if np.any(ranked.max(axis=0) == ranked.min(axis=0)):
+        return float("nan")
+    matrix = np.column_stack([np.ones(ranked.shape[0]), ranked])
+    coefficients, *_ = np.linalg.lstsq(matrix, response, rcond=None)
+    residual = response - matrix @ coefficients
+    corrected = np.zeros(residual.size, dtype=bool)
+    corrected[np.argsort(residual, kind="stable")[:accepted]] = True
+    union = int((actual | corrected).sum())
+    return float(int((actual & corrected).sum()) / union) if union else float("nan")
 
 
 def confidence_paths(root: Path, scope: str, budget_tag: str | None) -> list[Path]:
@@ -186,6 +230,13 @@ def pair_record(
         record[f"spearman_decision_cost_{column}"] = rank_correlation(
             table.get("decision_cost"), table.get(column)
         )
+    record["depth_residual_gate_jaccard"] = depth_residual_gate_jaccard(
+        table, retained
+    )
+    record["chance_gate_jaccard"] = (
+        float(retained.sum() / (2 * retained.size - retained.sum()))
+        if retained.size else float("nan")
+    )
     if "decision_cost" in table:
         # The raw gate is a sign test on the coefficient, so its cost AUC is
         # near 0 by construction.  A large gap to auc_decision_cost isolates
@@ -346,6 +397,11 @@ def main() -> None:
                 "Rank correlation between transport cost and depth. A strong "
                 "negative value means the cost geometry itself reads depth, "
                 "upstream of the gate."
+            ),
+            "depth_residual_gate_jaccard": (
+                "Overlap between the gate and a same-size gate built on "
+                "depth-residual cost. Compare against chance_gate_jaccard: a "
+                "value near chance means depth decides which cells are kept."
             ),
         },
     }
