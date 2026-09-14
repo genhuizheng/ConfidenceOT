@@ -288,6 +288,12 @@ distribution, so that no incompatible cell exists, the method rejected 84.7%,
 exactly the rejection budget. The arm containing a genuine 20% incompatible
 subpopulation also rejected 84.7%. The rate could not distinguish the two.
 
+With the budget reported rather than enforced, the underlying severity is
+worse: at production parameters the same homogeneous population is rejected
+entirely, 1.000, because the calibrated rule retains nothing. The 84.7% figure
+was the cardinality floor holding the rate at the cap, not the rule agreeing
+with it.
+
 **Defect 2, the rejected identity was depth-driven.** With no biological
 difference at all, depth spread alone reproduced the real-data signature:
 AUC 0.64 to 0.68 against 0.67 to 0.79 observed, rho -0.35 to -0.62 against
@@ -337,28 +343,52 @@ devices could disagree by one cell; both now share a rounded helper.
 
 #### 5.7.4 Measured effect of the changes
 
-On the simulation, at 300 cells per side:
+At production parameters, 1,500 cells per side with 2,000 HVGs and 30 PCs, one
+replicate, with the budget reported rather than enforced:
 
 | Quantity | Rotation null | Within-side null | Truth |
 |---|---:|---:|---:|
-| Homogeneous rejection rate | 0.847 | 0.063 | ~0 |
-| Perturbed rejection rate | 0.847 | 0.170 | 0.200 |
-| Perturbed detection recall | 1.000 | 0.717 | - |
-| Perturbed detection precision | 0.236 | 0.843 | - |
-| Perturbed detection F1 | 0.382 | 0.775 | - |
+| Homogeneous rejection rate | 1.000 | 0.090 | ~0 |
+| Homogeneous `sign_rule_retained_fraction` | 0.000 | 0.910 | ~1 |
+| Calibrated rejection cost | 0.538 | 0.807 | - |
+| Median decision cost | 1.012 | 0.696 | - |
+| Perturbed rejection rate | 0.999 | 0.259 | 0.200 |
+| Perturbed detection recall | 1.000 | 1.000 | - |
+| Perturbed detection precision | 0.200 | 0.773 | - |
+| Perturbed detection F1 | 0.334 | 0.872 | - |
+| Wall time, two arms | 13m19s | 3m50s | - |
 
-Both columns were measured with the budget still enforced, so they isolate the
-change of null. Unenforcing the budget as well moves the same two rates to
-0.057 and 0.160.
+The rotation null rejects every cell of a population that contains nothing to
+reject. Its `sign_rule_retained_fraction` of 0.000 says the calibrated rule
+wanted to reject all of them, and the earlier figure of 84.7% was the
+cardinality floor holding the rate at the cap rather than the rule agreeing
+with it. Removing the floor is what made the severity visible, which is also
+why the floor had to be removed only after the cost was recalibrated.
 
-The old recall of 1.000 was an artefact of rejecting 85% of cells; a precision
-of 0.236, close to the 0.20 perturbed fraction, shows that gate was uninformed
-about the truth. The rejection rate now estimates the incompatible fraction
-instead of restating the cap.
+Its precision of 0.200 equals the perturbed fraction exactly. That is the
+arithmetic signature of a gate carrying no information about the truth: reject
+everything and precision necessarily falls to the base rate, while recall is
+trivially 1.000.
 
-A first production-parameter run, 1,500 cells per side with 2,000 HVGs and
-30 PCs, gives 0.090 on the homogeneous uniform-depth arm. The remaining arms
-and replicates are still running.
+The within-side null instead retains 0.910 of a homogeneous population against
+an acceptance requirement of 0.90, so the calibration lands where it was
+designed to. On the perturbed arm it recovers every one of the 300 genuinely
+incompatible cells and adds 88 false positives out of 1,200 compatible cells,
+a false-positive rate of about 7% consistent with the 0.090 measured on the
+homogeneous arm. `auc_perturbed_rejected` is 0.997, so the decision cost
+separates the truly incompatible cells almost perfectly.
+
+The same comparison at 300 cells per side, with the budget still enforced,
+gave 0.847 against 0.063 on the homogeneous arm and an F1 of 0.382 against
+0.775. Unenforcing the budget moves the within-side rates to 0.057 and 0.160
+at that size. The direction and magnitude of the improvement hold at both
+scales; the production figures above are the ones to quote.
+
+Remaining to measure: the depth arms at sigma 0.3, 0.6 and 0.9 give the
+dose-response curve for Defect 2 at production scale, and three replicates are
+needed before any of these figures carry an uncertainty. Only sigma = 0 has
+been run so far, where `auc_total_counts` is exactly 0.500 because depth is
+constant by construction.
 
 #### 5.7.5 What this does not yet establish
 
@@ -502,7 +532,7 @@ bash scripts/tacc/submit_splatter_scaling.sh
 3. Malignant-only gates identify expression differences, but the current direction is not equivalent to metastatic potential.
 4. The inflammatory and invasive signals in source-rejected cells are real observations about the fitted partition, and the labels were never reversed. The partition itself, however, separates cells by sequencing depth, and the groups differ in depth by 1.3x to 3.1x. A pseudobulk built from shallower cells is relatively enriched for high-abundance transcripts, which is the most likely reading of the keratinisation and SPRR signal that appears on the rejected side of all three datasets.
 5. Post-QC filtering does not by itself resolve the biological-direction issue.
-6. Rejection specificity is the most important limitation, ahead of M4-E gate initialization sensitivity. On simulated data containing no incompatible cells at all, the method rejected 84.7% of them, exactly the rejection budget.
+6. Rejection specificity is the most important limitation, ahead of M4-E gate initialization sensitivity. On simulated data containing no incompatible cells at all, the rotation-null calibration rejected every one of them at production parameters, and the 84.7% seen previously was the rejection budget holding the rate down rather than the rule agreeing with it. The within-side null brings the same case to 0.090 while recovering all 300 genuinely incompatible cells in the positive control.
 7. M4-R frequently exhausts its outer loop, which is expected: its gate has no monotone-objective guarantee. That is not evidence against the rejection cost, which is fitted with M4-E, and the earlier reading of `calibration_valid` conflated the two. M4-R remains a cross-check rather than the basis of the primary claim.
 8. Dataset annotation and epithelial-state contamination are major possible confounders.
 9. The GSE180661 UCell result is explainable by a sequencing-depth difference and is not evidence for two metastatic-potential states. Retained and rejected primary cells there differ in median depth by 1.32x. UCell ranks within a cell, which is depth-robust but not depth-invariant: shallow cells detect fewer genes, so signature genes reach `maxRank` less often. A tiny effect that is nonetheless overwhelmingly significant is the signature of a systematic artefact, not of a small biological difference.
