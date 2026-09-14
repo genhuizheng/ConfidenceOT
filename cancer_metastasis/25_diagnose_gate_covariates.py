@@ -18,6 +18,15 @@ questions without refitting optimal transport.
    or mitochondrial fraction?  Any ``auc_*`` far from 0.5 for those covariates
    means the gate tracks a technical axis.
 
+When the counts were corrected by ``27_downsample_counts.py``, pass
+``--predownsample-depth`` with the ``predownsample_depth.csv.gz`` it wrote.  The
+stored ``total_counts`` is near constant after correction, so its AUC is
+trivially 0.5 and proves nothing; the question that matters is whether the gate
+still tracks each cell's original depth, reported as
+``auc_predownsample_total_counts``.  ``auc_downsample_untouched`` covers the
+cells that were already at or below the target and kept their depth, which is
+the residual gradient the correction could not remove.
+
 ``signed_rejection_margin``, ``relative_rejection_margin`` and
 ``normalized_rejection_score`` are monotone transforms of ``decision_cost``, so
 their AUCs are identical to ``auc_decision_cost`` and are not recomputed.
@@ -46,8 +55,18 @@ COVARIATES = (
     "n_genes_by_counts",
     "pct_counts_mitochondrial",
 )
+# Supplied by 27_downsample_counts.py. After depth correction the stored
+# total_counts is near constant, so its AUC is trivially 0.5 and proves
+# nothing; the question that matters is whether the gate still tracks each
+# cell's original depth. downsample_untouched marks the cells that were already
+# at or below the target and so kept their depth, which is the residual
+# gradient the correction could not remove.
+DEPTH_SOURCE_COVARIATES = (
+    "predownsample_total_counts",
+    "downsample_untouched",
+)
 REQUIRED = ("method", "side", "observation_id", "retained", "raw_retained")
-AUC_TARGETS = ("decision_cost", *COVARIATES)
+AUC_TARGETS = ("decision_cost", *COVARIATES, *DEPTH_SOURCE_COVARIATES)
 SUMMARY_EXTRA = (
     "retained_fraction",
     "sign_rule_retained_fraction",
@@ -111,10 +130,16 @@ def depth_residual_gate_jaccard(
     size ``k`` drawn from ``n`` cells is roughly ``k / (2n - k)``, so a value
     near that floor means depth, not the remaining geometry, decides the gate.
     """
-    predictors = [
-        column for column in ("total_counts", "n_genes_by_counts")
-        if column in table
-    ]
+    # Prefer the original depth when the counts were corrected: the stored
+    # total_counts is then near constant and useless as a predictor, so
+    # regressing it out would leave the cost untouched and overstate the
+    # correction.
+    candidates = (
+        ("predownsample_total_counts", "n_genes_by_counts")
+        if "predownsample_total_counts" in table
+        else ("total_counts", "n_genes_by_counts")
+    )
+    predictors = [column for column in candidates if column in table]
     if "decision_cost" not in table or not predictors:
         return float("nan")
     cost = pd.to_numeric(table["decision_cost"], errors="coerce").to_numpy(np.float64)
@@ -156,8 +181,26 @@ def group_medians(
     }
 
 
+def load_depth_source(path: Path | None) -> pd.DataFrame | None:
+    """Load the pre-downsampling depth table emitted by the correction step."""
+    if path is None:
+        return None
+    table = pd.read_csv(path)
+    required = ["sample_id", "observation_id", "predownsample_total_counts"]
+    missing = [column for column in required if column not in table]
+    if missing:
+        raise RuntimeError(f"{path} is missing required columns: {missing}")
+    table["sample_id"] = table["sample_id"].astype(str)
+    table["observation_id"] = table["observation_id"].astype(str)
+    keep = [*required] + (
+        ["downsample_untouched"] if "downsample_untouched" in table else []
+    )
+    return table[keep].drop_duplicates(["sample_id", "observation_id"])
+
+
 def pair_record(
-    path: Path, dataset: str, method: str, side: str, scope: str
+    path: Path, dataset: str, method: str, side: str, scope: str,
+    depth_source: pd.DataFrame | None = None,
 ) -> dict[str, object] | None:
     table = pd.read_csv(path)
     missing = [column for column in REQUIRED if column not in table]
@@ -167,6 +210,19 @@ def pair_record(
     if table.empty:
         return None
     table = table.reset_index(drop=True)
+    if depth_source is not None:
+        if "sample_id" not in table:
+            raise RuntimeError(f"{path} has no sample_id to join depths on")
+        table["sample_id"] = table["sample_id"].astype(str)
+        table["observation_id"] = table["observation_id"].astype(str)
+        table = table.merge(
+            depth_source, on=["sample_id", "observation_id"],
+            how="left", validate="many_to_one",
+        )
+        if table["predownsample_total_counts"].isna().any():
+            raise RuntimeError(
+                f"{path}: some cells are absent from the pre-downsampling depth table"
+            )
     if table["observation_id"].duplicated().any():
         raise RuntimeError(f"{path} has duplicate observation_id for {method}/{side}")
 
@@ -224,9 +280,11 @@ def pair_record(
             continue
         record[f"auc_{column}"] = rank_auc(table[column], retained)
         record.update(group_medians(table[column], retained, column))
-    for column in COVARIATES:
+    for column in (*COVARIATES, *DEPTH_SOURCE_COVARIATES):
         # A strong negative rank correlation means the transport cost itself is
-        # a readout of the covariate, upstream of any gate decision.
+        # a readout of the covariate, upstream of any gate decision.  The
+        # original-depth entry is the headline: it read -0.33 to -0.59 across
+        # the three datasets before correction.
         record[f"spearman_decision_cost_{column}"] = rank_correlation(
             table.get("decision_cost"), table.get(column)
         )
@@ -312,10 +370,17 @@ def main() -> None:
         "--budget-tag", default=None,
         help="Exact budget directory name; omit to accept every completed tag",
     )
+    parser.add_argument(
+        "--predownsample-depth", type=Path, default=None,
+        help="predownsample_depth.csv.gz from 27_downsample_counts.py; adds "
+             "each cell's original depth so the gate can be tested against it "
+             "rather than against the corrected, near-constant depth",
+    )
     parser.add_argument("--method", default="M4-E")
     parser.add_argument("--side", default="source", choices=("source", "target"))
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
+    depth_source = load_depth_source(args.predownsample_depth)
 
     records = []
     inventory = []
@@ -330,7 +395,9 @@ def main() -> None:
                 f"scope={args.scope} budget_tag={args.budget_tag}"
             )
         for path in paths:
-            record = pair_record(path, dataset, args.method, args.side, args.scope)
+            record = pair_record(
+                path, dataset, args.method, args.side, args.scope, depth_source
+            )
             if record is not None:
                 records.append(record)
     if not records:
@@ -364,6 +431,9 @@ def main() -> None:
         "side": args.side,
         "scope": args.scope,
         "budget_tag": args.budget_tag or "any_completed",
+        "predownsample_depth": (
+            str(args.predownsample_depth) if args.predownsample_depth else None
+        ),
         "inventory": inventory,
         "pair_n": int(len(pairs)),
         "auc_positive_class": "retained",
