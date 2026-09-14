@@ -2,7 +2,7 @@
 #SBATCH -J cot_rep_umap
 #SBATCH -o /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/rep_umap_%j.out
 #SBATCH -e /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/rep_umap_%j.err
-#SBATCH -p gg
+#SBATCH -p gh-dev
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 32
