@@ -187,7 +187,9 @@ def pair_record(
         "spearman_reciprocal_edge_depth": edge_rho,
     }
     # One strongly depth-correlated component can be regressed out; depth
-    # spread thinly across many components cannot.
+    # spread thinly across many components cannot.  Principal component signs
+    # are arbitrary and flip between pairs, so the per-component correlations
+    # below are only readable through max_abs_spearman_pc_depth.
     absolute = []
     for index, column in enumerate(pcs, start=1):
         rho = rank_correlation(primary[column].to_numpy(dtype=np.float64), depth)
