@@ -38,7 +38,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import rankdata, wilcoxon
+from scipy.stats import rankdata, spearmanr, wilcoxon
 
 
 COVARIATES = (
@@ -83,6 +83,19 @@ def rank_auc(values: pd.Series, positive: np.ndarray) -> float:
     return (
         positive_rank_sum - n_positive * (n_positive + 1) / 2.0
     ) / (n_positive * n_negative)
+
+
+def rank_correlation(left: pd.Series | None, right: pd.Series | None) -> float:
+    """Return Spearman rho, or NaN when either side is absent or constant."""
+    if left is None or right is None:
+        return float("nan")
+    x = pd.to_numeric(left, errors="coerce").to_numpy(dtype=np.float64)
+    y = pd.to_numeric(right, errors="coerce").to_numpy(dtype=np.float64)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x, y = x[finite], y[finite]
+    if x.size < 3 or np.all(x == x[0]) or np.all(y == y[0]):
+        return float("nan")
+    return float(spearmanr(x, y).statistic)
 
 
 def confidence_paths(root: Path, scope: str, budget_tag: str | None) -> list[Path]:
@@ -167,6 +180,12 @@ def pair_record(
             continue
         record[f"auc_{column}"] = rank_auc(table[column], retained)
         record.update(group_medians(table[column], retained, column))
+    for column in COVARIATES:
+        # A strong negative rank correlation means the transport cost itself is
+        # a readout of the covariate, upstream of any gate decision.
+        record[f"spearman_decision_cost_{column}"] = rank_correlation(
+            table.get("decision_cost"), table.get(column)
+        )
     if "decision_cost" in table:
         # The raw gate is a sign test on the coefficient, so its cost AUC is
         # near 0 by construction.  A large gap to auc_decision_cost isolates
@@ -175,21 +194,34 @@ def pair_record(
     return record
 
 
+def null_value(statistic: str) -> float:
+    """Return the no-effect reference for a statistic, or NaN when undefined."""
+    if statistic.startswith("auc_"):
+        return 0.5
+    if statistic.startswith("spearman_"):
+        return 0.0
+    return float("nan")
+
+
 def summarize(pairs: pd.DataFrame) -> pd.DataFrame:
     statistics = [
         column for column in pairs.columns
-        if (column.startswith("auc_") or column in SUMMARY_EXTRA)
+        if (
+            column.startswith(("auc_", "spearman_", "median_"))
+            or column in SUMMARY_EXTRA
+        )
         and pairs[column].notna().any()
     ]
     rows = []
     for dataset, table in pairs.groupby("dataset", sort=True):
         for column in statistics:
             values = pd.to_numeric(table[column], errors="coerce").dropna()
-            is_auc = column.startswith("auc_")
+            null = null_value(column)
             p_value = float("nan")
-            if is_auc:
-                delta = values - 0.5
-                nonzero = delta[delta.ne(0.0)]
+            fraction_above = float("nan")
+            if np.isfinite(null) and len(values):
+                fraction_above = float(values.gt(null).mean())
+                nonzero = (values - null)[(values - null).ne(0.0)]
                 if len(nonzero) >= 6:
                     try:
                         p_value = float(wilcoxon(nonzero).pvalue)
@@ -202,10 +234,9 @@ def summarize(pairs: pd.DataFrame) -> pd.DataFrame:
                 "median": float(values.median()) if len(values) else float("nan"),
                 "q25": float(values.quantile(0.25)) if len(values) else float("nan"),
                 "q75": float(values.quantile(0.75)) if len(values) else float("nan"),
-                "fraction_above_half": (
-                    float(values.gt(0.5).mean()) if is_auc and len(values) else float("nan")
-                ),
-                "signed_rank_p_vs_half": p_value,
+                "null_value": null,
+                "fraction_above_null": fraction_above,
+                "signed_rank_p_vs_null": p_value,
             })
     order = {name: index for index, name in enumerate(SUMMARY_EXTRA)}
     frame = pd.DataFrame(rows)
@@ -310,6 +341,11 @@ def main() -> None:
             ),
             "auc_total_counts": (
                 "Departure from 0.5 means the gate tracks sequencing depth."
+            ),
+            "spearman_decision_cost_total_counts": (
+                "Rank correlation between transport cost and depth. A strong "
+                "negative value means the cost geometry itself reads depth, "
+                "upstream of the gate."
             ),
         },
     }
