@@ -174,6 +174,7 @@ class TestBidirectionalConfidenceFilteredUOT(unittest.TestCase):
             variant="exact",
             source_rejection_budget=0.0,
             target_rejection_budget=0.0,
+            enforce_budget=True,
         )
         self.assertTrue(np.all(all_accepted.source_gate))
         self.assertTrue(np.all(all_accepted.target_gate))
@@ -187,6 +188,7 @@ class TestBidirectionalConfidenceFilteredUOT(unittest.TestCase):
             variant="exact",
             source_rejection_budget=0.20,
             target_rejection_budget=0.40,
+            enforce_budget=True,
         )
         self.assertEqual(unequal.source_gate.sum(), 4)
         self.assertEqual(unequal.target_gate.sum(), 5)
@@ -205,6 +207,7 @@ class TestBidirectionalConfidenceFilteredUOT(unittest.TestCase):
             variant="exact",
             source_rejection_budget=0.25,
             target_rejection_budget=0.34,
+            enforce_budget=True,
             threshold=1e-12,
         )
         self.assertTrue(result.outer_converged)
@@ -271,6 +274,7 @@ class TestBidirectionalConfidenceFilteredUOT(unittest.TestCase):
             variant="reversible",
             source_rejection_budget=0.20,
             target_rejection_budget=0.35,
+            enforce_budget=True,
             threshold=1e-11,
         )
         self.assertEqual(result.source_min_accepted, 15)
@@ -353,6 +357,7 @@ class TestBidirectionalConfidenceFilteredUOT(unittest.TestCase):
             lambda_b=3.0,
             source_acceptance_target=0.34,
             target_acceptance_target=0.30,
+            enforce_budget=True,
             grid_size=7,
             max_outer_iterations=15,
         )
@@ -420,6 +425,7 @@ class TestBidirectionalConfidenceFilteredUOT(unittest.TestCase):
             confidence_filtered_bidirectional_uot(
                 np.ones((3, 4)), rejection_cost=1, epsilon=1,
                 lambda_a=1, lambda_b=1, source_rejection_budget=0.1,
+                enforce_budget=True,
                 initial_source_gate=[True, True, False],
             )
 

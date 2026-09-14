@@ -236,6 +236,17 @@ def _binary_gate(
     return result
 
 
+def _non_negative_integer(value: object, *, name: str) -> int:
+    """Like ``_positive_integer`` but admits ``0`` for an unenforced floor."""
+    if (
+        isinstance(value, (bool, np.bool_))
+        or not isinstance(value, (int, np.integer))
+        or value < 0
+    ):
+        raise ValueError(f"`{name}` must be a non-negative integer.")
+    return int(value)
+
+
 def _rejection_budget(value: object, *, name: str) -> float:
     budget = _positive_finite(value, name=name, allow_zero=True)
     if budget >= 1.0:
@@ -243,9 +254,30 @@ def _rejection_budget(value: object, *, name: str) -> float:
     return budget
 
 
-def _coverage_floor(n: int, rejection_budget: float) -> int:
-    """Return ``ceil((1-rho)N)`` with the theoretical cardinality semantics."""
-    return max(1, min(n, int(ceil((1.0 - rejection_budget) * n))))
+def _coverage_floor(n: int, rejection_budget: float, *, enforce: bool = True) -> int:
+    """Return ``ceil((1-rho)N)``, or ``0`` when the budget is not enforced.
+
+    Enforcing the floor makes the rejection rate equal the budget whenever the
+    fitted rejection cost wants to reject more than the budget allows, which
+    turns an arbitrary parameter into the answer.  Once the cost is calibrated
+    against a null containing no incompatible cells, the floor has nothing left
+    to protect, so ``enforce=False`` lets the decision rule stand on its own and
+    the budget is reported as a diagnostic instead.
+    """
+    if not enforce and rejection_budget > 0.0:
+        return 0
+    # A budget of exactly zero is honoured whether or not enforcement is asked
+    # for.  "Reject at most none" is a statement of intent, not a safety cap,
+    # and it carries no arbitrary-parameter problem: the source-only cancer
+    # design sets the target budget to zero precisely to hold every target cell
+    # in the reference distribution.
+    #
+    # Round before the ceiling.  At the production budget of 0.85,
+    # (1 - 0.85) * 1000 evaluates to 150.00000000000003, so a bare ceiling
+    # returns 151 where the exact arithmetic gives 150 and one extra cell is
+    # retained.  Genuinely fractional cases are untouched: 0.15 * 1001 is
+    # 150.15, which still rounds up to 151.
+    return max(1, min(n, int(ceil(round((1.0 - rejection_budget) * n, 9)))))
 
 
 def _validate_inner_terminal(result: UOTResult, *, context: str) -> None:
@@ -275,8 +307,8 @@ def filtered_cost(
 ) -> FloatArray:
     """Return ``delta_i eta_j C_ij + (1-delta_i eta_j)c``."""
     cost = _cost_matrix(cost_matrix)
-    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate")
-    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate")
+    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate", allow_empty=True)
+    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate", allow_empty=True)
     c = _positive_finite(rejection_cost, name="rejection_cost")
     trusted = source[:, None] & target[None, :]
     return np.where(trusted, cost, c)
@@ -300,8 +332,8 @@ def solve_fixed_bidirectional_uot(
 ) -> UOTResult:
     """Solve KL-UOT for fixed non-empty source and target gates."""
     cost = _cost_matrix(cost_matrix)
-    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate")
-    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate")
+    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate", allow_empty=True)
+    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate", allow_empty=True)
     c = _positive_finite(rejection_cost, name="rejection_cost")
     epsilon = _positive_finite(epsilon, name="epsilon")
     lambda_a = _positive_finite(lambda_a, name="lambda_a", allow_zero=True)
@@ -406,7 +438,7 @@ def constrained_gate_update(
     old = _binary_gate(
         current_gate, n=score.size, name="current_gate", allow_empty=True
     )
-    minimum = _positive_integer(min_accepted, name="min_accepted")
+    minimum = _non_negative_integer(min_accepted, name="min_accepted")
     if minimum > score.size:
         raise ValueError("`min_accepted` cannot exceed the number of coefficients.")
     tolerance = _positive_finite(tau_s, name="tau_s", allow_zero=True)
@@ -495,6 +527,7 @@ def confidence_filtered_bidirectional_uot(
     initial_target_gate: ArrayLike | None = None,
     source_rejection_budget: float = 0.10,
     target_rejection_budget: float = 0.10,
+    enforce_budget: bool = False,
     update_source: bool = True,
     update_target: bool = True,
     tau_s: float = 0.0,
@@ -529,8 +562,12 @@ def confidence_filtered_bidirectional_uot(
     target_budget = _rejection_budget(
         target_rejection_budget, name="target_rejection_budget"
     )
-    source_min_accepted = _coverage_floor(cost.shape[0], source_budget)
-    target_min_accepted = _coverage_floor(cost.shape[1], target_budget)
+    source_min_accepted = _coverage_floor(
+        cost.shape[0], source_budget, enforce=enforce_budget
+    )
+    target_min_accepted = _coverage_floor(
+        cost.shape[1], target_budget, enforce=enforce_budget
+    )
     if variant not in ("exact", "reversible"):
         raise ValueError("`variant` must be 'exact' or 'reversible'.")
     if not isinstance(update_source, (bool, np.bool_)) or not isinstance(
@@ -543,10 +580,12 @@ def confidence_filtered_bidirectional_uot(
         raise ValueError("`warm_start` must be boolean.")
 
     source_gate = _binary_gate(
-        initial_source_gate, n=cost.shape[0], name="initial_source_gate"
+        initial_source_gate, n=cost.shape[0], name="initial_source_gate",
+        allow_empty=not enforce_budget,
     )
     target_gate = _binary_gate(
-        initial_target_gate, n=cost.shape[1], name="initial_target_gate"
+        initial_target_gate, n=cost.shape[1], name="initial_target_gate",
+        allow_empty=not enforce_budget,
     )
     if int(np.count_nonzero(source_gate)) < source_min_accepted:
         raise ValueError(
@@ -861,6 +900,7 @@ def calibrate_bidirectional_rejection_cost(
     target_weights: ArrayLike | None = None,
     source_rejection_budget: float = 0.10,
     target_rejection_budget: float = 0.10,
+    enforce_budget: bool = False,
     tau_s: float = 0.0,
     threshold: float = 1e-4,
     max_iterations: int = 10_000,
@@ -962,6 +1002,7 @@ def calibrate_bidirectional_rejection_cost(
                 variant=variant,
                 source_rejection_budget=source_budget,
                 target_rejection_budget=target_budget,
+                enforce_budget=enforce_budget,
                 tau_s=tau_s,
                 max_outer_iterations=max_outer_iterations,
                 **solver_arguments,
@@ -1153,8 +1194,8 @@ def refit_post_selection_uot(
     UOT solver.
     """
     cost = _cost_matrix(cost_matrix)
-    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate")
-    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate")
+    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate", allow_empty=True)
+    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate", allow_empty=True)
     source_indices = np.flatnonzero(source).astype(np.int64, copy=False)
     target_indices = np.flatnonzero(target).astype(np.int64, copy=False)
     source_full = (

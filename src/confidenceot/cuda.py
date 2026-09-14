@@ -176,6 +176,7 @@ def _fit_cuda_impl(
     threshold: float,
     max_iterations: int,
     max_outer_iterations: int,
+    enforce_budget: bool,
     dtype: str,
     _torch_device: str = "cuda",
 ) -> ConfidenceOTResult:
@@ -207,8 +208,14 @@ def _fit_cuda_impl(
     target_gate_np = np.ones(n_target, dtype=bool) if initial_target_gate is None else np.asarray(initial_target_gate, dtype=bool).copy()
     if source_gate_np.shape != (n_source,) or target_gate_np.shape != (n_target,):
         raise ValueError("Initial gates have incompatible shapes.")
-    source_min = int(math.ceil((1.0 - source_rejection_budget) * n_source - 1e-12))
-    target_min = int(math.ceil((1.0 - target_rejection_budget) * n_target - 1e-12))
+    # Share the CPU reference's floor rather than recomputing it: the previous
+    # local expression subtracted 1e-12 before the ceiling and omitted the
+    # max(1, min(n, .)) clamp, so it could differ from the CPU result by one
+    # cell whenever (1-rho)*n landed just above an integer.
+    from confidenceot._cpu_uot import _coverage_floor
+
+    source_min = _coverage_floor(n_source, source_rejection_budget, enforce=enforce_budget)
+    target_min = _coverage_floor(n_target, target_rejection_budget, enforce=enforce_budget)
     if source_gate_np.sum() < source_min or target_gate_np.sum() < target_min:
         raise ValueError("Initial gates violate the rejection budget.")
 
@@ -353,6 +360,15 @@ def _fit_cuda_impl(
         coupling=result.coupling.detach().cpu().double().numpy(),
         source_gate=source_gate_np,
         target_gate=target_gate_np,
+        source_rejection_budget=source_rejection_budget,
+        target_rejection_budget=target_rejection_budget,
+        budget_enforced=enforce_budget,
+        source_budget_exceeded=bool(
+            float(np.mean(~source_gate_np)) > source_rejection_budget + 1e-12
+        ),
+        target_budget_exceeded=bool(
+            float(np.mean(~target_gate_np)) > target_rejection_budget + 1e-12
+        ),
         source_score=source_score,
         target_score=target_score,
         source_raw_gate=source_raw_gate,

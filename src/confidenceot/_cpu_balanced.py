@@ -123,8 +123,8 @@ def bidirectional_balanced_filtered_cost(
 ) -> FloatArray:
     """Return ``delta_i eta_j C_ij + (1-delta_i eta_j)c``."""
     cost = _cost_matrix(cost_matrix)
-    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate")
-    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate")
+    source = _binary_gate(source_gate, n=cost.shape[0], name="source_gate", allow_empty=True)
+    target = _binary_gate(target_gate, n=cost.shape[1], name="target_gate", allow_empty=True)
     c = _positive_finite(rejection_cost, name="rejection_cost")
     return np.where(source[:, None] & target[None, :], cost, c)
 
@@ -183,11 +183,19 @@ def _partner_losses(
     weighted = coupling * cost
     source_partner_mass = coupling @ target_gate.astype(np.float64)
     target_partner_mass = coupling.T @ source_gate.astype(np.float64)
-    source_loss = np.divide(
-        weighted @ target_gate.astype(np.float64), source_partner_mass
+    source_loss = np.zeros(cost.shape[0], dtype=np.float64)
+    target_loss = np.zeros(cost.shape[1], dtype=np.float64)
+    np.divide(
+        weighted @ target_gate.astype(np.float64),
+        source_partner_mass,
+        out=source_loss,
+        where=source_partner_mass > 0.0,
     )
-    target_loss = np.divide(
-        weighted.T @ source_gate.astype(np.float64), target_partner_mass
+    np.divide(
+        weighted.T @ source_gate.astype(np.float64),
+        target_partner_mass,
+        out=target_loss,
+        where=target_partner_mass > 0.0,
     )
     return source_loss, target_loss, source_partner_mass, target_partner_mass
 
@@ -248,6 +256,7 @@ def confidence_filtered_bidirectional_balanced_ot(
     initial_target_gate: ArrayLike | None = None,
     source_rejection_budget: float = 0.10,
     target_rejection_budget: float = 0.10,
+    enforce_budget: bool = False,
     update_source: bool = True,
     update_target: bool = True,
     tau_s: float = 0.0,
@@ -278,8 +287,12 @@ def confidence_filtered_bidirectional_balanced_ot(
     target_budget = _rejection_budget(
         target_rejection_budget, name="target_rejection_budget"
     )
-    source_min = _coverage_floor(cost.shape[0], source_budget)
-    target_min = _coverage_floor(cost.shape[1], target_budget)
+    source_min = _coverage_floor(
+        cost.shape[0], source_budget, enforce=enforce_budget
+    )
+    target_min = _coverage_floor(
+        cost.shape[1], target_budget, enforce=enforce_budget
+    )
     if variant not in ("exact", "reversible"):
         raise ValueError("`variant` must be 'exact' or 'reversible'.")
     if not isinstance(update_source, (bool, np.bool_)) or not isinstance(
@@ -292,10 +305,12 @@ def confidence_filtered_bidirectional_balanced_ot(
         raise ValueError("`warm_start` must be boolean.")
 
     source_gate = _binary_gate(
-        initial_source_gate, n=cost.shape[0], name="initial_source_gate"
+        initial_source_gate, n=cost.shape[0], name="initial_source_gate",
+        allow_empty=not enforce_budget,
     )
     target_gate = _binary_gate(
-        initial_target_gate, n=cost.shape[1], name="initial_target_gate"
+        initial_target_gate, n=cost.shape[1], name="initial_target_gate",
+        allow_empty=not enforce_budget,
     )
     if np.count_nonzero(source_gate) < source_min:
         raise ValueError("`initial_source_gate` violates `source_rejection_budget`.")

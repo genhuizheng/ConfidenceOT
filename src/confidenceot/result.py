@@ -73,6 +73,11 @@ class ConfidenceOTResult:
     backbone: Literal["balanced", "uot"]
     variant: Literal["exact", "reversible"]
     rejection_cost: float
+    source_rejection_budget: float
+    target_rejection_budget: float
+    budget_enforced: bool
+    source_budget_exceeded: bool
+    target_budget_exceeded: bool
     device: str
     backend: str
     inner_converged: bool

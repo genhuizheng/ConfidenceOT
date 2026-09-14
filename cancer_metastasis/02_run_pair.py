@@ -171,6 +171,13 @@ def main() -> None:
     parser.add_argument("--null-validation-replicates", type=int, default=5)
     parser.add_argument("--calibration-grid-size", type=int, default=5)
     parser.add_argument(
+        "--enforce-rejection-budget", action="store_true",
+        help="Restore the pre-2026-09 cardinality floor. Off by default: with "
+             "the cost calibrated against a within-side null the floor only "
+             "makes the rejection rate equal the cap. A budget of 0.00 stays "
+             "binding either way",
+    )
+    parser.add_argument(
         "--calibration-null", default="within_side_split",
         choices=("within_side_split", "cross_side_rotation"),
         help="Null the rejection cost is calibrated against; rotation is the "
@@ -392,6 +399,7 @@ def main() -> None:
             epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
             source_rejection_budget=source_budget,
             target_rejection_budget=target_budget,
+            enforce_rejection_budget=args.enforce_rejection_budget,
             tolerance=args.tolerance, device=args.device,
         )
         fit_started = time.perf_counter()
@@ -448,6 +456,9 @@ def main() -> None:
             "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
             "source_final_rejection_rate": float(np.mean(~result.source_gate)),
             "target_final_rejection_rate": float(np.mean(~result.target_gate)),
+            "budget_enforced": result.budget_enforced,
+            "source_budget_exceeded": result.source_budget_exceeded,
+            "target_budget_exceeded": result.target_budget_exceeded,
             "source_budget_override_rate": float(np.mean(result.source_confidence.budget_overridden)),
             "target_budget_override_rate": float(np.mean(result.target_confidence.budget_overridden)),
             "transported_mass": float(result.coupling.sum()),
