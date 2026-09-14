@@ -18,6 +18,7 @@ venv/
 
 # Generated benchmark data, reports, and scratch outputs
 results/
+replication_gsea_figures/
 Progress_report_20260818/
 20260813_progress_report/
 progress_report7/

@@ -196,6 +196,39 @@ def make_figure(table: pd.DataFrame, dataset: str, output: Path) -> None:
     plt.close(figure)
 
 
+def make_primary_gate_context_figure(
+    table: pd.DataFrame, dataset: str, output: Path
+) -> None:
+    """Show primary M4-E states relative to metastatic malignant cells."""
+    figure, axis = plt.subplots(figsize=(8.4, 7.2))
+    styles = (
+        ("metastasis", None, "#bdbdbd", "Metastatic malignant cells", 6, 0.32),
+        ("primary", "retained", "#2b8cbe", "Primary retained", 9, 0.78),
+        ("primary", "rejected", "#d7301f", "Primary rejected", 9, 0.78),
+        ("primary", "discordant", "#636363", "Primary discordant", 9, 0.78),
+    )
+    for side, gate, color, label, size, alpha in styles:
+        use = table.loc[table["side"].eq(side)]
+        if gate is not None:
+            use = use.loc[use["primary_gate"].eq(gate)]
+        if not len(use):
+            continue
+        axis.scatter(
+            use["UMAP1"], use["UMAP2"], s=size, alpha=alpha, linewidths=0,
+            color=color, label=f"{label} (n={len(use):,})", rasterized=True,
+        )
+    clean_axis(axis)
+    axis.set_title(
+        f"{dataset}: primary M4-E gate states relative to metastatic malignant cells"
+    )
+    axis.legend(frameon=False, fontsize=9, markerscale=2, loc="best")
+    figure.tight_layout()
+    stem = f"{dataset}_primary_retained_rejected_vs_metastasis_umap"
+    figure.savefig(output / f"{stem}.png", dpi=300, bbox_inches="tight")
+    figure.savefig(output / f"{stem}.pdf", bbox_inches="tight")
+    plt.close(figure)
+
+
 def run_dataset(args: argparse.Namespace, dataset: str) -> dict[str, object]:
     manifest_path = args.replication_root / dataset / "manifest" / "pair_manifest_malignant_eligible.csv"
     ot_root = args.replication_root / dataset / "ot"
@@ -239,6 +272,7 @@ def run_dataset(args: argparse.Namespace, dataset: str) -> dict[str, object]:
     )
     subtype_counts.to_csv(destination / "cell_subtype_counts.csv", index=False)
     make_figure(table, dataset, destination)
+    make_primary_gate_context_figure(table, dataset, destination)
     primary = table.loc[table["side"].eq("primary")]
     report = {
         "dataset": dataset,
