@@ -18,6 +18,9 @@ set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_REPLICATION_ROOT:?CONFIDENCEOT_REPLICATION_ROOT is required}
+dataset=${CONFIDENCEOT_REPLICATION_DATASET:-all}
+source_budget=${CONFIDENCEOT_SOURCE_REJECTION_BUDGET:-0.85}
+target_budget=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-0.95}
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16 NUMEXPR_NUM_THREADS=16
@@ -43,8 +46,8 @@ PY
       --analysis-scope malignant \
       "$@" \
       --cell-qc \
-      --source-rejection-budget 0.85 \
-      --target-rejection-budget 0.95 \
+      --source-rejection-budget "$source_budget" \
+      --target-rejection-budget "$target_budget" \
       --max-observed-cells-per-side 10000 \
       --null-calibration-replicates 5 \
       --null-validation-replicates 5 \
@@ -56,14 +59,37 @@ PY
   done
 }
 
-run_dataset GSE181919 --include-annotation Malignant.cells
+run_gse181919() {
+  run_dataset GSE181919 --include-annotation Malignant.cells
+  touch "$root/GSE181919/OT_COMPLETE"
+}
 
-labels=()
-for annotation in \
-  Tu01_AREG Tu02_DEFA5 Tu03_SRRM2 Tu04_RGMB Tu05_PCNA Tu06_NKD1 \
-  Tu07_MKI67 Tu08_GNG13 Tu09_MUC2 Tu10_COL3A1 Tu11_PLA2G2A; do
-  labels+=(--include-annotation "$annotation")
-done
-run_dataset GSE225857 "${labels[@]}"
+run_gse225857() {
+  local labels=()
+  local annotation
+  for annotation in \
+    Tu01_AREG Tu02_DEFA5 Tu03_SRRM2 Tu04_RGMB Tu05_PCNA Tu06_NKD1 \
+    Tu07_MKI67 Tu08_GNG13 Tu09_MUC2 Tu10_COL3A1 Tu11_PLA2G2A; do
+    labels+=(--include-annotation "$annotation")
+  done
+  run_dataset GSE225857 "${labels[@]}"
+  touch "$root/GSE225857/OT_COMPLETE"
+}
 
-touch "$root/OT_COMPLETE"
+case "$dataset" in
+  GSE181919)
+    run_gse181919
+    ;;
+  GSE225857)
+    run_gse225857
+    ;;
+  all)
+    run_gse181919
+    run_gse225857
+    touch "$root/OT_COMPLETE"
+    ;;
+  *)
+    echo "Unsupported CONFIDENCEOT_REPLICATION_DATASET=$dataset" >&2
+    exit 2
+    ;;
+esac

@@ -20,6 +20,7 @@ manifest=${CONFIDENCEOT_MANIFEST:-$result/manifest/GSE180661_malignant/pair_mani
 ot_root=${CONFIDENCEOT_MALIGNANT_OT_ROOT:-$result/malignant_full_GSE180661}
 output=${CONFIDENCEOT_PRIMARY_PSEUDOBULK_ROOT:-$result/pairwise_primary_pseudobulk_GSE180661}
 budget_tag=${CONFIDENCEOT_BUDGET_TAG:-}
+gate_state_labels=${CONFIDENCEOT_GATE_STATE_LABELS:-0}
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
@@ -43,9 +44,13 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
   if [[ -n "$budget_tag" ]]; then
     budget_args+=(--budget-tag "$budget_tag")
   fi
+  gate_args=()
+  if [[ "$gate_state_labels" == "1" ]]; then
+    gate_args+=(--gate-state-labels)
+  fi
   if python -m cancer_metastasis.gse180661.primary_pseudobulk \
       "$manifest" "$ot_root" "$output" --index "$index" \
-      "${budget_args[@]}" --minimum-cells-per-state 20; then
+      "${budget_args[@]}" "${gate_args[@]}" --minimum-cells-per-state 20; then
     echo "===== PRIMARY PSEUDOBULK COMPLETE index=$index $(date --iso-8601=seconds) ====="
   else
     failures=$((failures + 1))

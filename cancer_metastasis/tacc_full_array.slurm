@@ -27,6 +27,7 @@ source_budget=${CONFIDENCEOT_SOURCE_REJECTION_BUDGET:-$shared_budget}
 target_budget=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-$shared_budget}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 save_pairing_edges=${CONFIDENCEOT_SAVE_PAIRING_EDGES:-0}
+cell_qc=${CONFIDENCEOT_CELL_QC:-0}
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -72,8 +73,12 @@ echo "Rejection caps: source=$source_budget target=$target_budget"
 echo "Maximum observed cells per side: $maximum_observed_cells"
 scope_args=(--analysis-scope "$analysis_scope")
 pairing_args=()
+qc_args=()
 if [[ "$save_pairing_edges" == "1" ]]; then
   pairing_args+=(--save-pairing-edges)
+fi
+if [[ "$cell_qc" == "1" ]]; then
+  qc_args+=(--cell-qc)
 fi
 if [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
@@ -91,6 +96,7 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
     --index "$index" \
     "${scope_args[@]}" \
     "${pairing_args[@]}" \
+    "${qc_args[@]}" \
     --source-rejection-budget "$source_budget" \
     --target-rejection-budget "$target_budget" \
     --max-observed-cells-per-side "$maximum_observed_cells" \

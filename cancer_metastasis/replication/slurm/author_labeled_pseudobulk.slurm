@@ -18,6 +18,7 @@ set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_REPLICATION_ROOT:?CONFIDENCEOT_REPLICATION_ROOT is required}
+budget_tag=${CONFIDENCEOT_BUDGET_TAG:-budget_source_0.85_target_0.95}
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 MKL_NUM_THREADS=8 NUMEXPR_NUM_THREADS=8
@@ -41,7 +42,7 @@ PY
     python -m cancer_metastasis.gse180661.primary_pseudobulk \
       "$manifest" "$ot" "$output" \
       --index "$index" \
-      --budget-tag budget_source_0.85_target_0.95 \
+      --budget-tag "$budget_tag" \
       --method M4-E \
       --minimum-cells-per-state 20 \
       --gate-state-labels \
