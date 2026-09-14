@@ -20,6 +20,7 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 source_only=${CONFIDENCEOT_SOURCE_ONLY_ROOT:?CONFIDENCEOT_SOURCE_ONLY_ROOT is required}
 output=${CONFIDENCEOT_GATE_UCELL_ROOT:?CONFIDENCEOT_GATE_UCELL_ROOT is required}
+stage=${CONFIDENCEOT_GATE_UCELL_STAGE:-prepare}
 manifest=${CONFIDENCEOT_GSE180661_MANIFEST:-$result/manifest/GSE180661_malignant/pair_manifest_malignant_eligible.csv}
 datasets=(GSE180661 GSE181919 GSE225857)
 dataset=${datasets[${SLURM_ARRAY_TASK_ID:-0}]}
@@ -33,6 +34,7 @@ mkdir -p "$output" "$result/logs"
 python -m cancer_metastasis.replication.validate_primary_gate_ucell \
   "$source_only" "$manifest" "$output" \
   --dataset "$dataset" \
+  --stage "$stage" \
   --budget-tag budget_source_0.85_target_0.00 \
   --signature-sizes 50 100 200 \
   --n-cpus 16 \

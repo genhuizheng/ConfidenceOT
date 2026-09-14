@@ -16,7 +16,7 @@ import pandas as pd
 from scipy import sparse
 from scipy.stats import wilcoxon
 
-from cancer_metastasis.common import cell_qc_table, load_exact_side
+from cancer_metastasis.common import load_exact_side
 from cancer_metastasis.gse180661.primary_pseudobulk import (
     collapsed_raw_counts,
     malignant_annotation_mask,
@@ -222,7 +222,8 @@ def summarize_scores(long: pd.DataFrame, score_columns: list[str]):
         ("pair", pair, "pair_id"), ("patient", patient, "patient_id")
     ):
         for score in score_columns:
-            wide = table.pivot(index=key, columns="gate", values=score).dropna()
+            wide = table.pivot(index=key, columns="gate", values=score)
+            wide = wide.reindex(columns=["retained", "rejected"]).dropna()
             delta = wide["retained"] - wide["rejected"]
             try:
                 p_value = float(wilcoxon(delta).pvalue) if len(delta) else np.nan
@@ -273,32 +274,22 @@ def violin_figure(
     plt.close(figure)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source_only_root", type=Path)
-    parser.add_argument("gse180661_manifest", type=Path)
-    parser.add_argument("output_root", type=Path)
-    parser.add_argument("--dataset", choices=sorted(DATASET_LABELS), required=True)
-    parser.add_argument("--budget-tag", default="budget_source_0.85_target_0.00")
-    parser.add_argument("--signature-sizes", nargs="+", type=int, default=[50, 100, 200])
-    parser.add_argument("--n-cpus", type=int, default=16)
-    parser.add_argument("--ucell-chunk-size", type=int, default=1000)
-    args = parser.parse_args()
-
-    try:
-        import pyucell as uc
-    except ImportError as error:
-        raise RuntimeError("pyucell>=0.7,<0.8 is required") from error
-
+def input_paths(args: argparse.Namespace):
     dataset = args.dataset
-    destination = args.output_root / dataset
-    destination.mkdir(parents=True, exist_ok=False)
     manifest_path = (
         args.gse180661_manifest if dataset == "GSE180661"
         else args.source_only_root / dataset / "manifest" / "pair_manifest_malignant_eligible.csv"
     )
     manifest = pd.read_csv(manifest_path)
     ot_root = args.source_only_root / dataset / "ot"
+    return manifest, ot_root
+
+
+def prepare(args: argparse.Namespace) -> None:
+    dataset = args.dataset
+    destination = args.output_root / dataset
+    destination.mkdir(parents=True, exist_ok=False)
+    manifest, ot_root = input_paths(args)
     labels = DATASET_LABELS[dataset]
     source = load_analyzed_side(manifest, ot_root, args.budget_tag, "source", labels)
     target = load_analyzed_side(manifest, ot_root, args.budget_tag, "target", labels)
@@ -323,6 +314,42 @@ def main() -> None:
     )
 
     primary = data[data.obs["side"].eq("primary").to_numpy()].copy()
+    primary.write_h5ad(destination / "primary_malignant_counts.h5ad", compression="lzf")
+    report = {
+        "dataset": dataset,
+        "stage": "prepare",
+        "signature_discovery": "patient-paired metastasis malignant versus all primary malignant",
+        "signature_ranking": "positive PyDESeq2 Wald statistic; OT gate not used",
+        "signature_sizes": sorted(set(args.signature_sizes)),
+        "patient_n": int(metadata["patient_id"].nunique()),
+        "pair_n": int(manifest["pair_id"].nunique()),
+        "primary_unique_cell_n": int(primary.n_obs),
+    }
+    (destination / "preparation_report.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8"
+    )
+    (destination / "PREPARATION_COMPLETE").write_text("complete\n", encoding="utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+
+
+def score(args: argparse.Namespace) -> None:
+    try:
+        import pyucell as uc
+    except ImportError as error:
+        raise RuntimeError("pyucell>=0.7,<0.8 is required for --stage score") from error
+
+    dataset = args.dataset
+    destination = args.output_root / dataset
+    if not (destination / "PREPARATION_COMPLETE").is_file():
+        raise RuntimeError(f"Preparation is incomplete: {destination}")
+    if (destination / "VALIDATION_COMPLETE").exists():
+        raise RuntimeError(f"Validation output already exists: {destination}")
+    manifest, ot_root = input_paths(args)
+    signatures = {}
+    for size in sorted(set(args.signature_sizes)):
+        table = pd.read_csv(destination / f"MetastasisTop{size}_genes.csv")
+        signatures[f"MetastasisTop{size}"] = table["gene"].astype(str).tolist()
+    primary = ad.read_h5ad(destination / "primary_malignant_counts.h5ad")
     uc.compute_ucell_scores(
         primary, signatures=signatures, chunk_size=args.ucell_chunk_size
     )
@@ -354,7 +381,7 @@ def main() -> None:
         "signature_ranking": "positive PyDESeq2 Wald statistic; OT gate not used",
         "signature_sizes": sorted(set(args.signature_sizes)),
         "ucell_engine": "pyUCell",
-        "patient_n": int(metadata["patient_id"].nunique()),
+        "patient_n": int(manifest["patient_id"].nunique()),
         "pair_n": int(manifest["pair_id"].nunique()),
         "primary_unique_cell_n": int(primary.n_obs),
         "primary_gate_occurrence_n": int(len(long)),
@@ -367,6 +394,25 @@ def main() -> None:
     (destination / "VALIDATION_COMPLETE").write_text("complete\n", encoding="utf-8")
     print(json.dumps(report, indent=2), flush=True)
     print(tests.to_string(index=False), flush=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source_only_root", type=Path)
+    parser.add_argument("gse180661_manifest", type=Path)
+    parser.add_argument("output_root", type=Path)
+    parser.add_argument("--dataset", choices=sorted(DATASET_LABELS), required=True)
+    parser.add_argument("--stage", choices=["prepare", "score", "all"], default="all")
+    parser.add_argument("--budget-tag", default="budget_source_0.85_target_0.00")
+    parser.add_argument("--signature-sizes", nargs="+", type=int, default=[50, 100, 200])
+    parser.add_argument("--n-cpus", type=int, default=16)
+    parser.add_argument("--ucell-chunk-size", type=int, default=1000)
+    args = parser.parse_args()
+
+    if args.stage in {"prepare", "all"}:
+        prepare(args)
+    if args.stage in {"score", "all"}:
+        score(args)
 
 
 if __name__ == "__main__":
