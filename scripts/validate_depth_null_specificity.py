@@ -3,20 +3,23 @@
 This script is deliberately independent of the Splatter scaling benchmark.  It
 builds its own counts so that the ground truth is a construction rather than a
 simulator parameter, then runs the exact production path used by the cancer
-workflow: ``raw counts -> library size 1e4 -> log1p -> joint HVG -> gene
-scaling -> joint PCA -> squared Euclidean cost -> median scaling -> rotation
-null calibration -> M4-E``.
+workflow: ``raw counts -> normalisation -> joint HVG -> gene scaling -> joint
+PCA -> squared Euclidean cost -> median scaling -> null calibration -> M4-E``.
+``--normalization`` and ``--calibration-null`` select the two steps under test.
 
 Two separate questions are measured, because they have different consequences.
 
 1. Is the rejection *rate* informative?  The ``homogeneous`` arms contain one
    population with no incompatible cells at all, so a specific method should
-   reject almost none of them.  The rotation null calibration, however,
-   selects the largest cost whose null raw acceptance stays at or below 10%,
-   and for a homogeneous cloud the rotated null closely resembles the observed
-   data.  If the homogeneous arms still reject at the cap, the rate is fixed by
-   the calibration target rather than by compatibility, and no rejection rate
-   reported anywhere in the project carries biological information.
+   reject almost none of them.  Under ``--calibration-null
+   cross_side_rotation`` the cost is the largest whose rotated-null acceptance
+   stays at or below 10%, and for a homogeneous cloud the rotated null closely
+   resembles the observed data, so the threshold lands below the median cost.
+   If the homogeneous arms reject at the cap, the rate is fixed by the
+   calibration target rather than by compatibility, and no rejection rate
+   reported anywhere in the project carries biological information.  Under
+   ``within_side_split`` the cost must instead accept two halves of one side,
+   which contain no incompatible cells by construction.
 2. Is the rejection *identity* driven by depth?  The homogeneous arms differ
    only in how widely per-cell sequencing depth is spread.  Every cell's
    underlying relative expression profile is drawn from the same distribution
@@ -55,6 +58,7 @@ from confidenceot import (  # noqa: E402
     ConfidenceOT,
     calibrate_confidence_cost,
     rotation_null_costs,
+    within_side_null_costs,
 )
 
 
@@ -108,8 +112,8 @@ def rank_correlation(left: np.ndarray, right: np.ndarray) -> float:
 def simulate_counts(
     rng: np.random.Generator,
     *,
+    gene_mean: np.ndarray,
     n_cells: int,
-    n_genes: int,
     median_depth: float,
     depth_sigma: float,
     dispersion: float,
@@ -118,14 +122,18 @@ def simulate_counts(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return integer counts, realised depth, and the perturbed-cell mask.
 
-    Every cell's relative expression profile is drawn from one shared gene mean
-    vector with gamma overdispersion, so cells differ biologically only through
-    the optional perturbed subpopulation.  Depth is applied afterwards by
-    multinomial sampling, which is why depth carries no biological signal by
-    construction.
+    ``gene_mean`` is supplied by the caller and must be the *same* vector for
+    the source and target side of one replicate.  Drawing it separately per
+    side would give the two sides unrelated expression profiles, so the
+    homogeneous arms would no longer be homogeneous and rejecting them would be
+    correct rather than a specificity failure.
+
+    Every cell's profile is then that shared vector with gamma overdispersion,
+    so cells differ biologically only through the optional perturbed
+    subpopulation.  Depth is applied afterwards by multinomial sampling, which
+    is why depth carries no biological signal by construction.
     """
-    gene_mean = rng.lognormal(mean=0.0, sigma=1.6, size=n_genes)
-    gene_mean /= gene_mean.sum()
+    n_genes = int(gene_mean.size)
     rates = rng.gamma(
         shape=dispersion, scale=gene_mean / dispersion, size=(n_cells, n_genes)
     )
@@ -162,8 +170,12 @@ def run_replicate(
 ) -> dict[str, object]:
     seed = args.seed + 7919 * replicate + abs(hash(arm)) % 10_000
     rng = np.random.default_rng(seed)
+    # One gene mean vector for both sides: the homogeneous arms are only
+    # homogeneous if source and target share it.
+    gene_mean = rng.lognormal(mean=0.0, sigma=1.6, size=args.n_genes)
+    gene_mean /= gene_mean.sum()
     shared = dict(
-        n_genes=args.n_genes, median_depth=args.median_depth,
+        gene_mean=gene_mean, median_depth=args.median_depth,
         dispersion=args.dispersion,
         perturbation_log2=args.perturbation_log2,
     )
@@ -203,10 +215,20 @@ def run_replicate(
         source_index = np.sort(rng.choice(len(source_pca), limit, replace=False))
         target_index = np.sort(rng.choice(len(target_pca), limit, replace=False))
         total = args.null_calibration_replicates + args.null_validation_replicates
-        source_nulls, target_nulls = rotation_null_costs(
-            source_pca[source_index], target_pca[target_index],
-            observed_scale=scale, seed=seed, n_replicates=total,
-        )
+        if args.calibration_null == "within_side_split":
+            source_nulls = within_side_null_costs(
+                source_pca[source_index], observed_scale=scale,
+                seed=seed, n_replicates=total,
+            )
+            target_nulls = within_side_null_costs(
+                target_pca[target_index], observed_scale=scale,
+                seed=seed + 7, n_replicates=total,
+            )
+        else:
+            source_nulls, target_nulls = rotation_null_costs(
+                source_pca[source_index], target_pca[target_index],
+                observed_scale=scale, seed=seed, n_replicates=total,
+            )
         split = args.null_calibration_replicates
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
@@ -215,6 +237,8 @@ def run_replicate(
                 source_nulls[split:] + target_nulls[split:],
                 backbone="uot", epsilon=args.epsilon,
                 lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+                null_semantics=args.calibration_null,
+                within_side_acceptance_minimum=args.within_side_acceptance_minimum,
                 source_rejection_budget=args.source_rejection_budget,
                 target_rejection_budget=args.target_rejection_budget,
                 tolerance=args.tolerance, grid_size=args.calibration_grid_size,
@@ -245,6 +269,9 @@ def run_replicate(
         "perturbed_fraction": settings["perturbed_fraction"],
         "rejection_cost_mode": (
             "fixed" if args.fixed_rejection_cost is not None else "null_calibrated"
+        ),
+        "calibration_null": (
+            "none" if args.fixed_rejection_cost is not None else args.calibration_null
         ),
         "rejection_cost": rejection_cost,
         "calibration_selection_status": calibration_status,
@@ -307,6 +334,15 @@ def main() -> None:
     parser.add_argument("--calibration-grid-size", type=int, default=5)
     parser.add_argument("--null-calibration-replicates", type=int, default=5)
     parser.add_argument("--null-validation-replicates", type=int, default=5)
+    parser.add_argument(
+        "--calibration-null", default="within_side_split",
+        choices=("within_side_split", "cross_side_rotation"),
+        help="Null the rejection cost is calibrated against",
+    )
+    parser.add_argument(
+        "--within-side-acceptance-minimum", type=float, default=0.90,
+        help="Minimum within-side null acceptance the rejection cost must reach",
+    )
     parser.add_argument(
         "--fixed-rejection-cost", type=float, default=None,
         help="Bypass null calibration to isolate the calibration target's effect",
