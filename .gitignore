@@ -40,6 +40,7 @@ scripts/*
 !scripts/build_n1000_combined_mass_deficit_f1_report.py
 !scripts/aggregate_confidenceot_grid.py
 !scripts/finalize_splatter_scaling_benchmark.py
+!scripts/validate_depth_null_specificity.py
 !scripts/tacc/
 scripts/tacc/*
 !scripts/tacc/generate_splatter_scaling.slurm
