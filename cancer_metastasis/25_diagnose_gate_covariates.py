@@ -255,6 +255,15 @@ def main() -> None:
         raise RuntimeError(f"No rows matched method={args.method} side={args.side}")
 
     pairs = pd.DataFrame(records).sort_values(["dataset", "pair_id"], kind="stable")
+    # Statistics whose source column was absent are dropped from the summary,
+    # so report availability explicitly rather than letting a row vanish.
+    availability = {
+        column: sorted(
+            pairs.loc[pairs[f"auc_{column}"].notna(), "dataset"].unique().tolist()
+        )
+        for column in AUC_TARGETS
+        if f"auc_{column}" in pairs
+    }
     duplicated = pairs.duplicated(["dataset", "pair_id"], keep=False)
     if duplicated.any():
         # Several budget tags completed for one pair; a summary median over
@@ -276,6 +285,7 @@ def main() -> None:
         "inventory": inventory,
         "pair_n": int(len(pairs)),
         "auc_positive_class": "retained",
+        "datasets_with_usable_column": availability,
         "interpretation": {
             "sign_rule_retained_fraction": (
                 "Fraction retained by the calibrated rule decision_cost < "
