@@ -28,6 +28,16 @@ target_budget=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-$shared_budget}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 save_pairing_edges=${CONFIDENCEOT_SAVE_PAIRING_EDGES:-0}
 cell_qc=${CONFIDENCEOT_CELL_QC:-0}
+# Thresholds are separate from the switch because a run on depth-equalised
+# counts needs the QC metrics recorded, since the gate diagnostics read them,
+# while filtering again would discard cells that were already selected:
+# subsampling lowers the detected-gene count a second pass would test. Set all
+# three permissive for that case.
+qc_minimum_counts=${CONFIDENCEOT_MINIMUM_TOTAL_COUNTS:-1000}
+qc_minimum_genes=${CONFIDENCEOT_MINIMUM_DETECTED_GENES:-500}
+qc_maximum_mito=${CONFIDENCEOT_MAXIMUM_MITOCHONDRIAL_PERCENT:-20.0}
+calibration_null=${CONFIDENCEOT_CALIBRATION_NULL:-within_side_split}
+enforce_budget=${CONFIDENCEOT_ENFORCE_REJECTION_BUDGET:-0}
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -78,7 +88,13 @@ if [[ "$save_pairing_edges" == "1" ]]; then
   pairing_args+=(--save-pairing-edges)
 fi
 if [[ "$cell_qc" == "1" ]]; then
-  qc_args+=(--cell-qc)
+  qc_args+=(--cell-qc
+    --minimum-total-counts "$qc_minimum_counts"
+    --minimum-detected-genes "$qc_minimum_genes"
+    --maximum-mitochondrial-percent "$qc_maximum_mito")
+fi
+if [[ "$enforce_budget" == "1" ]]; then
+  qc_args+=(--enforce-rejection-budget)
 fi
 if [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
@@ -97,6 +113,7 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
     "${scope_args[@]}" \
     "${pairing_args[@]}" \
     "${qc_args[@]}" \
+    --calibration-null "$calibration_null" \
     --source-rejection-budget "$source_budget" \
     --target-rejection-budget "$target_budget" \
     --max-observed-cells-per-side "$maximum_observed_cells" \
