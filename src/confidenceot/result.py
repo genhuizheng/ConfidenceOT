@@ -73,11 +73,14 @@ class ConfidenceOTResult:
     backbone: Literal["balanced", "uot"]
     variant: Literal["exact", "reversible"]
     rejection_cost: float
-    source_rejection_budget: float
-    target_rejection_budget: float
-    budget_enforced: bool
-    source_budget_exceeded: bool
-    target_budget_exceeded: bool
+    # Bounds on the *rejected* fraction, one interval per side. (0, 1) is
+    # unconstrained and (0, 0) means that side never rejects. The paired flags
+    # say whether the lower and upper end bound, since a bound that binds means
+    # the parameter rather than the data set the answer at that end.
+    source_rejection_bounds: tuple[float, float]
+    target_rejection_bounds: tuple[float, float]
+    source_bounds_active: tuple[bool, bool]
+    target_bounds_active: tuple[bool, bool]
     device: str
     backend: str
     inner_converged: bool

@@ -50,6 +50,15 @@ class _InnerResult:
     error: float
 
 
+def _bounds_active(rate: float, bounds: tuple[float, float]) -> tuple[bool, bool]:
+    """Say whether each end of a rejection interval bound the result."""
+    low, high = bounds
+    return (
+        bool(rate <= low + 1e-9 and low > 0.0),
+        bool(rate >= high - 1e-9 and high < 1.0),
+    )
+
+
 def _project_gate(
     coefficients: np.ndarray,
     current: np.ndarray,
@@ -57,6 +66,7 @@ def _project_gate(
     minimum: int,
     tau: float,
     scale: np.ndarray,
+    maximum: int | None = None,
 ) -> np.ndarray:
     """Deterministic budgeted sign projection matching the reference solver."""
     boundary = tau * scale
@@ -72,6 +82,14 @@ def _project_gate(
             (candidates, -current[candidates].astype(np.int8), coefficients[candidates])
         )
         gate[candidates[order[:missing]]] = True
+    if maximum is not None:
+        excess = int(gate.sum()) - maximum
+        if excess > 0:
+            held = np.flatnonzero(gate)
+            order = np.lexsort(
+                (held, -current[held].astype(np.int8), coefficients[held])
+            )
+            gate[held[order[maximum:]]] = False
     return gate
 
 
@@ -177,6 +195,8 @@ def _fit_cuda_impl(
     max_iterations: int,
     max_outer_iterations: int,
     enforce_budget: bool,
+    source_rejection_bounds: tuple[float, float] | None,
+    target_rejection_bounds: tuple[float, float] | None,
     dtype: str,
     _torch_device: str = "cuda",
 ) -> ConfidenceOTResult:
@@ -212,10 +232,18 @@ def _fit_cuda_impl(
     # local expression subtracted 1e-12 before the ceiling and omitted the
     # max(1, min(n, .)) clamp, so it could differ from the CPU result by one
     # cell whenever (1-rho)*n landed just above an integer.
-    from confidenceot._cpu_uot import _coverage_floor
+    from confidenceot._cpu_uot import bounded_gate_counts, resolve_rejection_bounds
 
-    source_min = _coverage_floor(n_source, source_rejection_budget, enforce=enforce_budget)
-    target_min = _coverage_floor(n_target, target_rejection_budget, enforce=enforce_budget)
+    source_interval = resolve_rejection_bounds(
+        source_rejection_bounds, legacy_budget=source_rejection_budget,
+        enforce_legacy_budget=enforce_budget, name="source_rejection_bounds",
+    )
+    target_interval = resolve_rejection_bounds(
+        target_rejection_bounds, legacy_budget=target_rejection_budget,
+        enforce_legacy_budget=enforce_budget, name="target_rejection_bounds",
+    )
+    source_min, source_max = bounded_gate_counts(n_source, source_interval)
+    target_min, target_max = bounded_gate_counts(n_target, target_interval)
     if source_gate_np.sum() < source_min or target_gate_np.sum() < target_min:
         raise ValueError("Initial gates violate the rejection budget.")
 
@@ -252,7 +280,7 @@ def _fit_cuda_impl(
             source_coeff_t = source_partner_mass * (source_cf - rejection_cost)
         source_coeff = source_coeff_t.detach().cpu().double().numpy()
         source_scale = source_partner_mass.detach().cpu().double().numpy()
-        source_gate_np = _project_gate(source_coeff, source_gate_np, minimum=source_min, tau=tau, scale=source_scale)
+        source_gate_np = _project_gate(source_coeff, source_gate_np, minimum=source_min, tau=tau, scale=source_scale, maximum=source_max)
 
         new_source_gate = torch.as_tensor(source_gate_np, device=device)
         target_partner_mass = result.coupling.T @ new_source_gate.to(torch_dtype)
@@ -262,7 +290,7 @@ def _fit_cuda_impl(
             target_coeff_t = target_partner_mass * (target_cf - rejection_cost)
         target_coeff = target_coeff_t.detach().cpu().double().numpy()
         target_scale = target_partner_mass.detach().cpu().double().numpy()
-        target_gate_np = _project_gate(target_coeff, target_gate_np, minimum=target_min, tau=tau, scale=target_scale)
+        target_gate_np = _project_gate(target_coeff, target_gate_np, minimum=target_min, tau=tau, scale=target_scale, maximum=target_max)
 
         if np.array_equal(source_gate_np, previous_source) and np.array_equal(target_gate_np, previous_target):
             outer_converged = True
@@ -360,14 +388,13 @@ def _fit_cuda_impl(
         coupling=result.coupling.detach().cpu().double().numpy(),
         source_gate=source_gate_np,
         target_gate=target_gate_np,
-        source_rejection_budget=source_rejection_budget,
-        target_rejection_budget=target_rejection_budget,
-        budget_enforced=enforce_budget,
-        source_budget_exceeded=bool(
-            float(np.mean(~source_gate_np)) > source_rejection_budget + 1e-12
+        source_rejection_bounds=source_interval,
+        target_rejection_bounds=target_interval,
+        source_bounds_active=_bounds_active(
+            float(np.mean(~source_gate_np)), source_interval
         ),
-        target_budget_exceeded=bool(
-            float(np.mean(~target_gate_np)) > target_rejection_budget + 1e-12
+        target_bounds_active=_bounds_active(
+            float(np.mean(~target_gate_np)), target_interval
         ),
         source_score=source_score,
         target_score=target_score,

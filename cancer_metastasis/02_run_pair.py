@@ -25,7 +25,26 @@ def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return np.maximum(value, 0.0)
 
 
-def budget_tag(source_budget: float, target_budget: float) -> str:
+def budget_tag(
+    source_budget: float,
+    target_budget: float,
+    source_bounds: tuple[float, float] | None = None,
+    target_bounds: tuple[float, float] | None = None,
+) -> str:
+    """Name the output directory after the constraint that was actually used.
+
+    Explicit rejection intervals get their own tag, because otherwise two runs
+    under different intervals would land in the same directory named for a
+    legacy budget that constrained neither of them, and the second would
+    overwrite the first.
+    """
+    if source_bounds is not None or target_bounds is not None:
+        low_s, high_s = source_bounds if source_bounds else (0.0, source_budget)
+        low_t, high_t = target_bounds if target_bounds else (0.0, target_budget)
+        return (
+            f"bounds_source_{low_s:.2f}_{high_s:.2f}"
+            f"_target_{low_t:.2f}_{high_t:.2f}"
+        )
     if np.isclose(source_budget, target_budget, rtol=0.0, atol=5e-12):
         return f"budget_{source_budget:.2f}"
     return f"budget_source_{source_budget:.2f}_target_{target_budget:.2f}"
@@ -171,6 +190,17 @@ def main() -> None:
     parser.add_argument("--null-validation-replicates", type=int, default=5)
     parser.add_argument("--calibration-grid-size", type=int, default=5)
     parser.add_argument(
+        "--source-rejection-bounds", type=float, nargs=2, metavar=("LOW", "HIGH"),
+        help="Bounds on the rejected source fraction. (0 1) is unconstrained, "
+             "(0 0) means this side never rejects, and a non-zero LOW caps "
+             "retention, which makes the gate a ranked selection of that size "
+             "rather than a partition the objective chose",
+    )
+    parser.add_argument(
+        "--target-rejection-bounds", type=float, nargs=2, metavar=("LOW", "HIGH"),
+        help="Bounds on the rejected target fraction; see the source option",
+    )
+    parser.add_argument(
         "--enforce-rejection-budget", action="store_true",
         help="Restore the pre-2026-09 cardinality floor. Off by default: with "
              "the cost calibrated against a within-side null the floor only "
@@ -238,7 +268,11 @@ def main() -> None:
     pair_id = str(row["pair_id"])
     output = (
         args.output_root / pair_id / f"scope_{args.analysis_scope}"
-        / budget_tag(source_budget, target_budget)
+        / budget_tag(
+            source_budget, target_budget,
+            tuple(args.source_rejection_bounds) if args.source_rejection_bounds else None,
+            tuple(args.target_rejection_bounds) if args.target_rejection_bounds else None,
+        )
     )
     if args.skip_completed and (output / "SUCCESS").is_file():
         print(f"SKIP completed index={args.index} pair_id={pair_id} output={output}")
@@ -400,6 +434,14 @@ def main() -> None:
             source_rejection_budget=source_budget,
             target_rejection_budget=target_budget,
             enforce_rejection_budget=args.enforce_rejection_budget,
+            source_rejection_bounds=(
+                tuple(args.source_rejection_bounds)
+                if args.source_rejection_bounds else None
+            ),
+            target_rejection_bounds=(
+                tuple(args.target_rejection_bounds)
+                if args.target_rejection_bounds else None
+            ),
             tolerance=args.tolerance, device=args.device,
         )
         fit_started = time.perf_counter()
@@ -456,9 +498,12 @@ def main() -> None:
             "target_raw_rejection_rate": float(np.mean(~result.target_raw_gate)),
             "source_final_rejection_rate": float(np.mean(~result.source_gate)),
             "target_final_rejection_rate": float(np.mean(~result.target_gate)),
-            "budget_enforced": result.budget_enforced,
-            "source_budget_exceeded": result.source_budget_exceeded,
-            "target_budget_exceeded": result.target_budget_exceeded,
+            "source_rejection_bounds": str(result.source_rejection_bounds),
+            "target_rejection_bounds": str(result.target_rejection_bounds),
+            "source_lower_bound_active": result.source_bounds_active[0],
+            "source_upper_bound_active": result.source_bounds_active[1],
+            "target_lower_bound_active": result.target_bounds_active[0],
+            "target_upper_bound_active": result.target_bounds_active[1],
             "source_budget_override_rate": float(np.mean(result.source_confidence.budget_overridden)),
             "target_budget_override_rate": float(np.mean(result.target_confidence.budget_overridden)),
             "transported_mass": float(result.coupling.sum()),

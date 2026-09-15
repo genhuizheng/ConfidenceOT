@@ -10,7 +10,7 @@ monotone-objective guarantee.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
+from math import ceil, floor
 from typing import Literal, Sequence
 import warnings
 
@@ -58,6 +58,9 @@ class GateUpdateDiagnostics:
     accepted_before_projection: int
     tie_fill_count: int
     forced_acceptance_count: int
+    max_accepted: int | None = None
+    ceiling_active: bool = False
+    forced_rejection_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -254,30 +257,84 @@ def _rejection_budget(value: object, *, name: str) -> float:
     return budget
 
 
-def _coverage_floor(n: int, rejection_budget: float, *, enforce: bool = True) -> int:
-    """Return ``ceil((1-rho)N)``, or ``0`` when the budget is not enforced.
+RejectionBounds = tuple[float, float]
 
-    Enforcing the floor makes the rejection rate equal the budget whenever the
-    fitted rejection cost wants to reject more than the budget allows, which
-    turns an arbitrary parameter into the answer.  Once the cost is calibrated
-    against a null containing no incompatible cells, the floor has nothing left
-    to protect, so ``enforce=False`` lets the decision rule stand on its own and
-    the budget is reported as a diagnostic instead.
+
+def resolve_rejection_bounds(
+    bounds: RejectionBounds | None,
+    *,
+    legacy_budget: float | None = None,
+    enforce_legacy_budget: bool = False,
+    name: str = "rejection_bounds",
+) -> RejectionBounds:
+    """Return ``(low, high)`` bounds on the *rejected* fraction.
+
+    One interval per side replaces the separate budget, enforcement switch and
+    retention ceiling, and the degenerate ``(0, 0)`` expresses "this side never
+    rejects", so one-sided and two-sided designs need no extra mode flag.
+
+    ``(0.0, 1.0)`` is unconstrained and lets the calibrated decision rule stand
+    alone. A non-zero ``low`` is an upper bound on retention: it turns the gate
+    from a partition the objective chose into a ranked selection of that size,
+    which is defensible when the analysis says so and only once the ranking is
+    trustworthy.
+
+    The legacy ``*_rejection_budget`` maps to ``(0, budget)`` when enforced and
+    to ``(0, 1)`` when not, except that a budget of exactly zero always maps to
+    ``(0, 0)``, since "reject at most none" states an intent rather than a cap.
     """
-    if not enforce and rejection_budget > 0.0:
-        return 0
-    # A budget of exactly zero is honoured whether or not enforcement is asked
-    # for.  "Reject at most none" is a statement of intent, not a safety cap,
-    # and it carries no arbitrary-parameter problem: the source-only cancer
-    # design sets the target budget to zero precisely to hold every target cell
-    # in the reference distribution.
-    #
-    # Round before the ceiling.  At the production budget of 0.85,
-    # (1 - 0.85) * 1000 evaluates to 150.00000000000003, so a bare ceiling
-    # returns 151 where the exact arithmetic gives 150 and one extra cell is
-    # retained.  Genuinely fractional cases are untouched: 0.15 * 1001 is
-    # 150.15, which still rounds up to 151.
-    return max(1, min(n, int(ceil(round((1.0 - rejection_budget) * n, 9)))))
+    if bounds is not None:
+        try:
+            low, high = bounds
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"`{name}` must be a (low, high) pair.") from error
+    elif legacy_budget is None:
+        low, high = 0.0, 1.0
+    else:
+        budget = _positive_finite(legacy_budget, name=name, allow_zero=True)
+        if budget > 1.0:
+            raise ValueError(f"`{name}` must lie in [0, 1].")
+        low = 0.0
+        high = 0.0 if budget == 0.0 else (budget if enforce_legacy_budget else 1.0)
+    low = _positive_finite(low, name=f"{name} lower", allow_zero=True)
+    high = _positive_finite(high, name=f"{name} upper", allow_zero=True)
+    if low > 1.0 or high > 1.0:
+        raise ValueError(f"`{name}` must lie in [0, 1].")
+    if low > high:
+        raise ValueError(
+            f"`{name}` is empty: a lower rejection bound of {low:g} exceeds the "
+            f"upper bound of {high:g}."
+        )
+    return float(low), float(high)
+
+
+def bounded_gate_counts(n: int, bounds: RejectionBounds) -> tuple[int, int]:
+    """Translate rejected-fraction bounds into retained-count limits.
+
+    Rounding precedes the ceiling and the floor because the arithmetic is not
+    exact: at a bound of 0.85, ``(1 - 0.85) * 1000`` evaluates to
+    150.00000000000003, and a bare ceiling would retain one cell more than
+    asked for.
+    """
+    low, high = bounds
+    minimum = max(0, min(n, int(ceil(round((1.0 - high) * n, 9)))))
+    maximum = max(0, min(n, int(floor(round((1.0 - low) * n, 9)))))
+    return minimum, maximum
+
+
+def _coverage_floor(n: int, rejection_budget: float, *, enforce: bool = True) -> int:
+    """Retained-count floor for one rejection budget.
+
+    Kept because ``traditional_ot.bidirectional`` re-exports it and existing
+    tests import it. New code should express the constraint as a rejection
+    interval and call :func:`bounded_gate_counts`.
+    """
+    return bounded_gate_counts(
+        n,
+        resolve_rejection_bounds(
+            None, legacy_budget=rejection_budget, enforce_legacy_budget=enforce
+        ),
+    )[0]
 
 
 def _validate_inner_terminal(result: UOTResult, *, context: str) -> None:
@@ -419,6 +476,7 @@ def constrained_gate_update(
     current_gate: ArrayLike,
     *,
     min_accepted: int = 1,
+    max_accepted: int | None = None,
     tau_s: float = 0.0,
     tolerance_scale: ArrayLike | None = None,
 ) -> GateUpdateDiagnostics:
@@ -430,7 +488,10 @@ def constrained_gate_update(
     ``abs(coefficients[k]) <= tau_s * tolerance_scale[k]``.  This permits a
     tolerance expressed in conditional-loss units while the constrained
     projection continues to rank the original objective coefficients.  The
-    returned gate always contains at least ``min_accepted`` indices.
+    returned gate always contains at least ``min_accepted`` indices, and at
+    most ``max_accepted`` when one is supplied.  The ceiling keeps the indices
+    with the smallest coefficients, so imposing one turns the result from a
+    partition the objective chose into a ranked selection of that size.
     """
     score = np.asarray(coefficients, dtype=np.float64)
     if score.ndim != 1 or score.size == 0 or not np.all(np.isfinite(score)):
@@ -479,16 +540,40 @@ def constrained_gate_update(
             tie_fill_count = int(np.count_nonzero(tie[chosen]))
             forced_acceptance_count = int(np.count_nonzero(positive[chosen]))
             gate[chosen] = True
+    forced_rejection_count = 0
+    if max_accepted is not None:
+        maximum = _positive_integer(max_accepted, name="max_accepted")
+        if maximum < minimum:
+            raise ValueError(
+                "`max_accepted` cannot be below `min_accepted`; a retention "
+                "ceiling below the rejection-budget floor has no solution."
+            )
+        accepted = int(np.count_nonzero(gate))
+        if accepted > maximum:
+            # Keep the smallest coefficients, the same ordering the floor uses
+            # to fill, so the two constraints agree on what "most compatible"
+            # means.
+            held = np.flatnonzero(gate)
+            order = sorted(
+                held.tolist(),
+                key=lambda index: (score[index], -int(old[index]), index),
+            )
+            dropped = np.asarray(order[maximum:], dtype=np.int64)
+            forced_rejection_count = int(dropped.size)
+            gate[dropped] = False
     return GateUpdateDiagnostics(
         gate=gate,
         tie_count=int(np.count_nonzero(tie)),
         tie_fill=tie_fill_count > 0,
-        constraint_active=forced_acceptance_count > 0,
+        constraint_active=forced_acceptance_count > 0 or forced_rejection_count > 0,
         approximate=tolerance > 0.0,
         min_accepted=minimum,
         accepted_before_projection=accepted_before_projection,
         tie_fill_count=tie_fill_count,
         forced_acceptance_count=forced_acceptance_count,
+        max_accepted=None if max_accepted is None else int(max_accepted),
+        ceiling_active=forced_rejection_count > 0,
+        forced_rejection_count=forced_rejection_count,
     )
 
 
@@ -528,6 +613,8 @@ def confidence_filtered_bidirectional_uot(
     source_rejection_budget: float = 0.10,
     target_rejection_budget: float = 0.10,
     enforce_budget: bool = False,
+    source_rejection_bounds: RejectionBounds | None = None,
+    target_rejection_bounds: RejectionBounds | None = None,
     update_source: bool = True,
     update_target: bool = True,
     tau_s: float = 0.0,
@@ -562,11 +649,19 @@ def confidence_filtered_bidirectional_uot(
     target_budget = _rejection_budget(
         target_rejection_budget, name="target_rejection_budget"
     )
-    source_min_accepted = _coverage_floor(
-        cost.shape[0], source_budget, enforce=enforce_budget
+    source_interval = resolve_rejection_bounds(
+        source_rejection_bounds, legacy_budget=source_budget,
+        enforce_legacy_budget=enforce_budget, name='source_rejection_bounds',
     )
-    target_min_accepted = _coverage_floor(
-        cost.shape[1], target_budget, enforce=enforce_budget
+    target_interval = resolve_rejection_bounds(
+        target_rejection_bounds, legacy_budget=target_budget,
+        enforce_legacy_budget=enforce_budget, name='target_rejection_bounds',
+    )
+    source_min_accepted, source_max_accepted = bounded_gate_counts(
+        cost.shape[0], source_interval
+    )
+    target_min_accepted, target_max_accepted = bounded_gate_counts(
+        cost.shape[1], target_interval
     )
     if variant not in ("exact", "reversible"):
         raise ValueError("`variant` must be 'exact' or 'reversible'.")
@@ -581,11 +676,11 @@ def confidence_filtered_bidirectional_uot(
 
     source_gate = _binary_gate(
         initial_source_gate, n=cost.shape[0], name="initial_source_gate",
-        allow_empty=not enforce_budget,
+        allow_empty=source_min_accepted == 0,
     )
     target_gate = _binary_gate(
         initial_target_gate, n=cost.shape[1], name="initial_target_gate",
-        allow_empty=not enforce_budget,
+        allow_empty=target_min_accepted == 0,
     )
     if int(np.count_nonzero(source_gate)) < source_min_accepted:
         raise ValueError(
@@ -666,6 +761,7 @@ def confidence_filtered_bidirectional_uot(
                 source_coeff,
                 source_gate,
                 min_accepted=source_min_accepted,
+        max_accepted=source_max_accepted,
                 tau_s=tau_s,
                 tolerance_scale=source_partner_mass,
             )
@@ -700,6 +796,7 @@ def confidence_filtered_bidirectional_uot(
                 target_coeff,
                 target_gate,
                 min_accepted=target_min_accepted,
+        max_accepted=target_max_accepted,
                 tau_s=tau_s,
                 tolerance_scale=target_partner_mass,
             )
@@ -795,6 +892,7 @@ def confidence_filtered_bidirectional_uot(
         reported_source_coeff,
         source_gate,
         min_accepted=source_min_accepted,
+        max_accepted=source_max_accepted,
         tau_s=tau_s,
         tolerance_scale=source_partner_mass,
     )
@@ -802,6 +900,7 @@ def confidence_filtered_bidirectional_uot(
         reported_target_coeff,
         target_gate,
         min_accepted=target_min_accepted,
+        max_accepted=target_max_accepted,
         tau_s=tau_s,
         tolerance_scale=target_partner_mass,
     )

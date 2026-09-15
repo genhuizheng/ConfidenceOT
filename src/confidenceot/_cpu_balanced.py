@@ -32,7 +32,9 @@ from traditional_ot.balanced import (
 from confidenceot._cpu_uot import (
     GateUpdateDiagnostics,
     _binary_gate,
-    _coverage_floor,
+    RejectionBounds,
+    bounded_gate_counts,
+    resolve_rejection_bounds,
     _rejection_budget,
     constrained_gate_update,
 )
@@ -257,6 +259,8 @@ def confidence_filtered_bidirectional_balanced_ot(
     source_rejection_budget: float = 0.10,
     target_rejection_budget: float = 0.10,
     enforce_budget: bool = False,
+    source_rejection_bounds: RejectionBounds | None = None,
+    target_rejection_bounds: RejectionBounds | None = None,
     update_source: bool = True,
     update_target: bool = True,
     tau_s: float = 0.0,
@@ -287,11 +291,19 @@ def confidence_filtered_bidirectional_balanced_ot(
     target_budget = _rejection_budget(
         target_rejection_budget, name="target_rejection_budget"
     )
-    source_min = _coverage_floor(
-        cost.shape[0], source_budget, enforce=enforce_budget
+    source_interval = resolve_rejection_bounds(
+        source_rejection_bounds, legacy_budget=source_budget,
+        enforce_legacy_budget=enforce_budget, name='source_rejection_bounds',
     )
-    target_min = _coverage_floor(
-        cost.shape[1], target_budget, enforce=enforce_budget
+    target_interval = resolve_rejection_bounds(
+        target_rejection_bounds, legacy_budget=target_budget,
+        enforce_legacy_budget=enforce_budget, name='target_rejection_bounds',
+    )
+    source_min, source_max_accepted = bounded_gate_counts(
+        cost.shape[0], source_interval
+    )
+    target_min, target_max_accepted = bounded_gate_counts(
+        cost.shape[1], target_interval
     )
     if variant not in ("exact", "reversible"):
         raise ValueError("`variant` must be 'exact' or 'reversible'.")
@@ -306,11 +318,11 @@ def confidence_filtered_bidirectional_balanced_ot(
 
     source_gate = _binary_gate(
         initial_source_gate, n=cost.shape[0], name="initial_source_gate",
-        allow_empty=not enforce_budget,
+        allow_empty=source_min == 0,
     )
     target_gate = _binary_gate(
         initial_target_gate, n=cost.shape[1], name="initial_target_gate",
-        allow_empty=not enforce_budget,
+        allow_empty=target_min == 0,
     )
     if np.count_nonzero(source_gate) < source_min:
         raise ValueError("`initial_source_gate` violates `source_rejection_budget`.")
@@ -384,6 +396,7 @@ def confidence_filtered_bidirectional_balanced_ot(
                 source_coefficient,
                 source_gate,
                 min_accepted=source_min,
+        max_accepted=source_max_accepted,
                 tau_s=tau_s,
                 tolerance_scale=source_partner_mass,
             )
@@ -412,6 +425,7 @@ def confidence_filtered_bidirectional_balanced_ot(
                 target_coefficient,
                 target_gate,
                 min_accepted=target_min,
+        max_accepted=target_max_accepted,
                 tau_s=tau_s,
                 tolerance_scale=target_partner_mass,
             )
@@ -497,6 +511,7 @@ def confidence_filtered_bidirectional_balanced_ot(
         source_coefficient,
         source_gate,
         min_accepted=source_min,
+        max_accepted=source_max_accepted,
         tau_s=tau_s,
         tolerance_scale=source_partner_mass,
     )
@@ -504,6 +519,7 @@ def confidence_filtered_bidirectional_balanced_ot(
         target_coefficient,
         target_gate,
         min_accepted=target_min,
+        max_accepted=target_max_accepted,
         tau_s=tau_s,
         tolerance_scale=target_partner_mass,
     )

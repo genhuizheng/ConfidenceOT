@@ -39,6 +39,8 @@ class ConfidenceOT:
         source_rejection_budget: float = 0.15,
         target_rejection_budget: float = 0.15,
         enforce_rejection_budget: bool = False,
+        source_rejection_bounds: tuple[float, float] | None = None,
+        target_rejection_bounds: tuple[float, float] | None = None,
         tolerance: float = 1e-3,
         gate_tolerance: float = 0.0,
         max_iterations: int = 20_000,
@@ -70,6 +72,13 @@ class ConfidenceOT:
         # incompatible cells the floor has nothing to protect, so it defaults to
         # a reported diagnostic.  Set True to restore the pre-2026-09 gate.
         self.enforce_rejection_budget = bool(enforce_rejection_budget)
+        # One interval per side on the *rejected* fraction supersedes the
+        # budget, the enforcement switch and a separate retention ceiling.
+        # (0, 1) is unconstrained; (0, 0) means the side never rejects, which
+        # is how a one-sided design is expressed; a non-zero lower bound caps
+        # retention and so turns the gate into a ranked selection of that size.
+        self.source_rejection_bounds = source_rejection_bounds
+        self.target_rejection_bounds = target_rejection_bounds
         self.tolerance = float(tolerance)
         self.gate_tolerance = float(gate_tolerance)
         self.max_iterations = int(max_iterations)
@@ -102,6 +111,8 @@ class ConfidenceOT:
             source_rejection_budget=self.source_rejection_budget,
             target_rejection_budget=self.target_rejection_budget,
             enforce_budget=self.enforce_rejection_budget,
+            source_rejection_bounds=self.source_rejection_bounds,
+            target_rejection_bounds=self.target_rejection_bounds,
             tau=self.gate_tolerance, threshold=self.tolerance,
             max_iterations=self.max_iterations,
             max_outer_iterations=self.max_outer_iterations,
@@ -183,6 +194,8 @@ class ConfidenceOT:
             source_rejection_budget=kwargs["source_rejection_budget"],
             target_rejection_budget=kwargs["target_rejection_budget"],
             enforce_budget=kwargs["enforce_budget"],
+            source_rejection_bounds=kwargs["source_rejection_bounds"],
+            target_rejection_bounds=kwargs["target_rejection_bounds"],
             tau_s=kwargs["tau"], threshold=kwargs["threshold"],
             max_iterations=kwargs["max_iterations"],
             max_outer_iterations=kwargs["max_outer_iterations"],
@@ -232,14 +245,34 @@ class ConfidenceOT:
             fitted.target_raw_gate,
             fitted.target_gate,
         )
-        source_budget = float(kwargs["source_rejection_budget"])
-        target_budget = float(kwargs["target_rejection_budget"])
-        budget_enforced = bool(kwargs["enforce_budget"])
+        from confidenceot._cpu_uot import resolve_rejection_bounds
+
+        source_interval = resolve_rejection_bounds(
+            kwargs["source_rejection_bounds"],
+            legacy_budget=kwargs["source_rejection_budget"],
+            enforce_legacy_budget=bool(kwargs["enforce_budget"]),
+            name="source_rejection_bounds",
+        )
+        target_interval = resolve_rejection_bounds(
+            kwargs["target_rejection_bounds"],
+            legacy_budget=kwargs["target_rejection_budget"],
+            enforce_legacy_budget=bool(kwargs["enforce_budget"]),
+            name="target_rejection_bounds",
+        )
         source_gate = np.asarray(fitted.source_gate, dtype=bool)
         target_gate = np.asarray(fitted.target_gate, dtype=bool)
-        # Reported rather than imposed: the gate is free to exceed the budget.
-        source_exceeded = bool(float(np.mean(~source_gate)) > source_budget + 1e-12)
-        target_exceeded = bool(float(np.mean(~target_gate)) > target_budget + 1e-12)
+        source_rate = float(np.mean(~source_gate))
+        target_rate = float(np.mean(~target_gate))
+        # A bound that binds means the parameter, not the data, set the answer
+        # at that end, so each end is reported separately.
+        source_bounds_active = (
+            bool(source_rate <= source_interval[0] + 1e-9 and source_interval[0] > 0.0),
+            bool(source_rate >= source_interval[1] - 1e-9 and source_interval[1] < 1.0),
+        )
+        target_bounds_active = (
+            bool(target_rate <= target_interval[0] + 1e-9 and target_interval[0] > 0.0),
+            bool(target_rate >= target_interval[1] - 1e-9 and target_interval[1] < 1.0),
+        )
         return ConfidenceOTResult(
             coupling=np.asarray(fitted.coupling),
             source_gate=np.asarray(fitted.source_gate),
@@ -253,11 +286,10 @@ class ConfidenceOT:
             backbone=backbone,
             variant=variant,
             rejection_cost=rejection_cost,
-            source_rejection_budget=source_budget,
-            target_rejection_budget=target_budget,
-            budget_enforced=budget_enforced,
-            source_budget_exceeded=source_exceeded,
-            target_budget_exceeded=target_exceeded,
+            source_rejection_bounds=source_interval,
+            target_rejection_bounds=target_interval,
+            source_bounds_active=source_bounds_active,
+            target_bounds_active=target_bounds_active,
             device="cpu",
             backend="numpy",
             inner_converged=bool(fitted.inner_converged),
