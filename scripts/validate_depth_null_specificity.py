@@ -180,8 +180,15 @@ def as_anndata(counts: np.ndarray, prefix: str):
     )
 
 
-def load_depth_pool(path: Path | None) -> np.ndarray | None:
-    """Read observed per-cell depths from a stored cell_confidence.csv."""
+def load_depth_pool(path: Path | None, cap: int | None = None) -> np.ndarray | None:
+    """Read observed per-cell depths from a stored cell_confidence.csv.
+
+    ``cap`` applies the transform that read subsampling performs on the depth
+    distribution: every cell above the shared target lands on it, every cell
+    already below keeps its depth. Passing the target used by
+    ``27_downsample_counts.py`` therefore predicts what the corrected data will
+    behave like, without refitting a single pair.
+    """
     if path is None:
         return None
     table = pd.read_csv(path)
@@ -191,7 +198,7 @@ def load_depth_pool(path: Path | None) -> np.ndarray | None:
             values = values[np.isfinite(values) & (values >= 100)]
             if values.size < 100:
                 raise RuntimeError(f"{path}: only {values.size} usable depths")
-            return values
+            return np.minimum(values, float(cap)) if cap else values
     raise RuntimeError(f"{path} has neither total_counts nor a pre-downsample column")
 
 
@@ -396,13 +403,19 @@ def main() -> None:
              "observed depth distribution; enables the *_observed arms",
     )
     parser.add_argument(
+        "--depth-cap", type=int, default=None,
+        help="Clip the observed depths at this shared target, which is what "
+             "read subsampling does to the distribution; use the target_depth "
+             "from 27_downsample_counts.py to predict the corrected behaviour",
+    )
+    parser.add_argument(
         "--arm", action="append", choices=sorted({*ARMS, *OBSERVED_ARMS}),
         help="Restrict to these arms; default runs all available",
     )
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
 
-    depth_pool = load_depth_pool(args.depth_source)
+    depth_pool = load_depth_pool(args.depth_source, args.depth_cap)
     available = dict(ARMS)
     if depth_pool is not None:
         available.update(OBSERVED_ARMS)
@@ -449,6 +462,7 @@ def main() -> None:
         "replicates_per_arm": args.replicates,
         "cells_per_side": args.n_cells,
         "depth_source": str(args.depth_source) if args.depth_source else None,
+        "depth_cap": args.depth_cap,
         "arms": {arm: available[arm] for arm in selected},
         "expected_outcomes": {
             "homogeneous arms": (
