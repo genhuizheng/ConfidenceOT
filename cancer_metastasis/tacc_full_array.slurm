@@ -48,6 +48,22 @@ calibration_null=${CONFIDENCEOT_CALIBRATION_NULL:-within_side_split}
 source_bounds=${CONFIDENCEOT_SOURCE_REJECTION_BOUNDS:-}
 target_bounds=${CONFIDENCEOT_TARGET_REJECTION_BOUNDS:-}
 enforce_budget=${CONFIDENCEOT_ENFORCE_REJECTION_BUDGET:-0}
+# An unset path variable used to fall through to mkdir at the filesystem root,
+# which failed with a permission error and then a confusing "manifest does not
+# exist" for a path missing its prefix. sbatch cannot be submitted from a
+# compute node, so variables exported inside an idev session are absent from
+# the login shell that actually submits, which is how this happens.
+for name in repo result output_root eligible; do
+  value=${!name}
+  if [[ -z "$value" ]]; then
+    echo "$name is empty; export the paths in the submitting shell" >&2
+    exit 2
+  fi
+  if [[ "$value" != /* ]]; then
+    echo "$name is not an absolute path: $value" >&2
+    exit 2
+  fi
+done
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -58,9 +74,7 @@ export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=${CONFIDENCEOT_THREADS:-16}
 export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
-export OPENBLAS_NUM_THREADS=16
-export MKL_NUM_THREADS=16
-export NUMEXPR_NUM_THREADS=16
+export NUMEXPR_NUM_THREADS=$OMP_NUM_THREADS
 export PYTHONUNBUFFERED=1
 
 pair_count=${CONFIDENCEOT_PAIR_COUNT:-}
