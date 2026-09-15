@@ -28,6 +28,9 @@ target_budget=${CONFIDENCEOT_TARGET_REJECTION_BUDGET:-$shared_budget}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 save_pairing_edges=${CONFIDENCEOT_SAVE_PAIRING_EDGES:-0}
 cell_qc=${CONFIDENCEOT_CELL_QC:-0}
+# cuda is right for the gh queue; gg nodes are CPU-only and need cpu here.
+device=${CONFIDENCEOT_DEVICE:-cuda}
+solver_workers=${CONFIDENCEOT_WORKERS:-1}
 # Thresholds are separate from the switch because a run on depth-equalised
 # counts needs the QC metrics recorded, since the gate diagnostics read them,
 # while filtering again would discard cells that were already selected:
@@ -41,7 +44,13 @@ enforce_budget=${CONFIDENCEOT_ENFORCE_REJECTION_BUDGET:-0}
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
 export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
-export OMP_NUM_THREADS=16
+# A Grace-Grace allocation hands over a whole 144-core node, so leaving this at
+# a small value wastes most of it. The transport fits are CPU-feasible at the
+# scale these pairs actually reach: the median pair is about 1,600 by 1,700
+# cells, which a 16-thread CPU fit completes in roughly two minutes.
+export OMP_NUM_THREADS=${CONFIDENCEOT_THREADS:-16}
+export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS
+export MKL_NUM_THREADS=$OMP_NUM_THREADS
 export OPENBLAS_NUM_THREADS=16
 export MKL_NUM_THREADS=16
 export NUMEXPR_NUM_THREADS=16
@@ -121,8 +130,8 @@ for ((index=task_id; index<pair_count; index+=task_count)); do
     --null-validation-replicates 5 \
     --calibration-grid-size 5 \
     --tolerance 1e-4 \
-    --workers 1 \
-    --device cuda \
+    --workers "$solver_workers" \
+    --device "$device" \
     --skip-completed; then
     echo "===== COMPLETE index=$index $(date --iso-8601=seconds) ====="
   else
