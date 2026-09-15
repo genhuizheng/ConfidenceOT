@@ -40,6 +40,13 @@ qc_minimum_counts=${CONFIDENCEOT_MINIMUM_TOTAL_COUNTS:-1000}
 qc_minimum_genes=${CONFIDENCEOT_MINIMUM_DETECTED_GENES:-500}
 qc_maximum_mito=${CONFIDENCEOT_MAXIMUM_MITOCHONDRIAL_PERCENT:-20.0}
 calibration_null=${CONFIDENCEOT_CALIBRATION_NULL:-within_side_split}
+# Space-separated "LOW HIGH" bounds on each side's rejected fraction. Left
+# empty the legacy budgets apply, which give an unconstrained source and a
+# target that never rejects. Set a non-zero LOW to cap retention, which makes
+# the gate a ranked selection of that size rather than a partition the
+# objective chose.
+source_bounds=${CONFIDENCEOT_SOURCE_REJECTION_BOUNDS:-}
+target_bounds=${CONFIDENCEOT_TARGET_REJECTION_BOUNDS:-}
 enforce_budget=${CONFIDENCEOT_ENFORCE_REJECTION_BUDGET:-0}
 mkdir -p "$result/logs" "$output_root"
 cd "$repo"
@@ -104,6 +111,12 @@ if [[ "$cell_qc" == "1" ]]; then
 fi
 if [[ "$enforce_budget" == "1" ]]; then
   qc_args+=(--enforce-rejection-budget)
+fi
+if [[ -n "$source_bounds" ]]; then
+  qc_args+=(--source-rejection-bounds $source_bounds)
+fi
+if [[ -n "$target_bounds" ]]; then
+  qc_args+=(--target-rejection-bounds $target_bounds)
 fi
 if [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
