@@ -24,7 +24,12 @@
 #   bash cancer_metastasis/submit_downsampled_gse180661.sh free
 #   bash cancer_metastasis/submit_downsampled_gse180661.sh bounded
 #   bash cancer_metastasis/submit_downsampled_gse180661.sh mismatched
-set -euo pipefail
+#
+# No `set -u`. It fires on things that are fine here, such as an empty array
+# expansion, while missing the failure that actually cost this project two job
+# numbers: a path variable that was defined but empty, which `-u` permits. The
+# explicit non-empty absolute-path check below is the protection that matters.
+set -eo pipefail
 
 config=${1:-}
 case "$config" in

@@ -14,7 +14,12 @@
 # pair manifest. Batch rather than interactive because reading 646 million
 # nonzeros needs more memory than a login node grants -- an earlier attempt
 # there failed allocating 89 MiB.
-set -euo pipefail
+#
+# No `set -u`. It fires on things that are fine here, such as an empty array
+# expansion, while missing the failure that actually cost this project two job
+# numbers: a path variable that was defined but empty, which `-u` permits. The
+# explicit non-empty absolute-path check below is the protection that matters.
+set -eo pipefail
 
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
