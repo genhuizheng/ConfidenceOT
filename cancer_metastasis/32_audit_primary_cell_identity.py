@@ -82,6 +82,23 @@ def load_cluster_markers(path: Path, top_n: int) -> dict[str, list[str]]:
     }
 
 
+def gene_symbols(data) -> np.ndarray:
+    """Resolve HGNC symbols for matching published marker lists.
+
+    ``common.gene_keys`` prefers ``gene_id`` and so returns Ensembl
+    identifiers when the H5AD carries them, which match no marker list. The
+    symbol column is what the published tables are written in.
+    """
+    symbols = np.asarray(data.var_names.astype(str), dtype=str)
+    if "gene_symbol" in data.var:
+        candidate = data.var["gene_symbol"].astype(str).str.strip().to_numpy(dtype=str)
+        valid = ~pd.Series(candidate).str.lower().isin(
+            {"", "na", "n/a", "nan", "none", "null", "<na>"}
+        ).to_numpy()
+        symbols = np.where(valid, candidate, symbols)
+    return np.asarray([str(value).strip() for value in symbols], dtype=str)
+
+
 def log_cpm(data) -> tuple[sparse.csr_matrix, dict[str, int]]:
     matrix = sparse.csr_matrix(expression_matrix(data), dtype=np.float64)
     totals = np.asarray(matrix.sum(axis=1)).ravel()
@@ -89,7 +106,7 @@ def log_cpm(data) -> tuple[sparse.csr_matrix, dict[str, int]]:
     scaled = (sparse.diags(1e6 / totals) @ matrix).tocsr()
     scaled.data = np.log1p(scaled.data)
     index: dict[str, int] = {}
-    for position, gene in enumerate(np.asarray(data.var_names.astype(str))):
+    for position, gene in enumerate(gene_symbols(data)):
         index.setdefault(gene, position)
     return scaled, index
 
@@ -128,6 +145,7 @@ def main() -> None:
     manifest = pd.read_csv(args.manifest_csv)
     side = args.side
     frames, seen, marker_n = [], set(), {}
+    symbol_sample: list[str] = []
     for row in manifest.to_dict("records"):
         sample = str(row[f"{side}_sample"])
         key = (str(row["patient_id"]), sample)
@@ -148,6 +166,8 @@ def main() -> None:
             [str(value) for value in json.loads(str(row[f"{side}_h5ads_json"]))], sample
         )
         scaled, index = log_cpm(data)
+        if not symbol_sample:
+            symbol_sample = sorted(index)[:8]
         cluster_scores, cluster_n = set_scores(scaled, index, clusters)
         other_scores, other_n = set_scores(scaled, index, CONTAMINATION_SETS)
         marker_n = {**cluster_n, **other_n}
@@ -169,9 +189,21 @@ def main() -> None:
     cells = pd.concat(frames, ignore_index=True)
     cells["retained"] = cells["retained"].astype(bool)
 
+    # A marker set that matched no gene scores NaN for every cell, and the
+    # assignment must not silently proceed on what is left. When the symbols do
+    # not match at all the cause is the identifier space, not the biology, so
+    # say which one the matrix is in.
+    names = sorted(name for name in clusters if marker_n.get(name, 0) > 0)
+    empty = sorted(name for name in clusters if marker_n.get(name, 0) == 0)
+    if len(names) < 2:
+        raise RuntimeError(
+            f"Only {len(names)} of {len(clusters)} marker sets matched any gene. "
+            f"The matrix appears not to be indexed by HGNC symbol; first names "
+            f"seen: {symbol_sample}"
+        )
+
     # Standardised within this cohort so the argmax is not decided by which
     # marker set happens to sit highest on the expression scale.
-    names = sorted(clusters)
     block = cells[names].to_numpy(float)
     centred = (block - np.nanmean(block, axis=0)) / np.where(
         np.nanstd(block, axis=0) > 0, np.nanstd(block, axis=0), 1.0
@@ -210,6 +242,8 @@ def main() -> None:
         "rejected_n": int((~cells["retained"]).sum()),
         "cluster_markers": str(args.cluster_markers),
         "markers_found_per_set": marker_n,
+        "marker_sets_with_no_match": empty,
+        "gene_symbol_sample": symbol_sample,
         "ciliated_share_of_retained": float(is_ciliated[cells["retained"]].mean()),
         "ciliated_share_of_rejected": float(is_ciliated[~cells["retained"]].mean()),
         "reading": (
