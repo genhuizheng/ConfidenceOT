@@ -85,10 +85,37 @@ def unique_samples(
     return sorted(seen.items())
 
 
+def subtype_mask(data, column: str, excluded: list[str]) -> np.ndarray:
+    """Keep cells whose author subtype is not in ``excluded``.
+
+    ``cell_type`` is ``Ovarian.cancer.cell`` for every epithelial cell in the
+    sample, because the study's CellAssign run offers nine categories and none
+    of them is normal epithelium. The finer ``cell_subtype`` column carries the
+    authors' own sub-clustering, including ``Ciliated.cell.1`` and
+    ``Ciliated.cell.2`` -- a non-malignant tube lineage -- and ``NA`` for cells
+    their clustering left unassigned or placed in patient-specific clusters
+    that the paper disregarded by relative entropy.
+
+    That column is what makes the re-run interpretable: ``NA`` cells are 18% of
+    this gate's rejected set against 5.9% of its retained set, so a gate fitted
+    without them answers a different and better-posed question.
+    """
+    if column not in data.obs:
+        raise RuntimeError(
+            f"H5AD has no {column!r} column; found {sorted(data.obs.columns)[:12]}"
+        )
+    values = data.obs[column].astype(str).str.strip()
+    return ~values.isin(set(excluded)).to_numpy()
+
+
 def analysed_subset(sample: str, files: tuple[str, ...], args: argparse.Namespace):
     """Load one sample and keep only the cells the analysis would use."""
     data = load_exact_side(list(files), sample)
     data = data[malignant_annotation_mask(data, args.malignant_annotations)].copy()
+    if args.excluded_subtypes and data.n_obs:
+        data = data[
+            subtype_mask(data, args.subtype_column, args.excluded_subtypes)
+        ].copy()
     if data.n_obs == 0:
         return data, None
     qc = cell_qc_table(
@@ -153,6 +180,13 @@ def main() -> None:
         "--target-depth", type=int, default=None,
         help="Explicit shared depth; overrides --target-quantile",
     )
+    parser.add_argument(
+        "--exclude-subtype", action="append", dest="excluded_subtypes", default=None,
+        help="Author cell_subtype value to drop; may be repeated. 'NA' drops "
+             "cells their sub-clustering left unassigned, 'Ciliated.cell.1' "
+             "and 'Ciliated.cell.2' drop the non-malignant tube lineage.",
+    )
+    parser.add_argument("--subtype-column", default="cell_subtype")
     parser.add_argument("--seed", type=int, default=20260914)
     args = parser.parse_args()
     if not 0.0 < args.target_quantile < 1.0:
@@ -257,6 +291,12 @@ def main() -> None:
     report = {
         "target_depth": target,
         "target_quantile": None if args.target_depth is not None else args.target_quantile,
+        "excluded_subtypes": args.excluded_subtypes or [],
+        "subtype_column": args.subtype_column,
+        # Pass --target-depth to reproduce an earlier run's depth exactly. With
+        # a quantile, changing the cell set also changes the target, and two
+        # runs then differ in two ways at once.
+        "target_depth_was_explicit": args.target_depth is not None,
         "pooled_analysed_cell_n": int(all_depth.size),
         "pooled_median_depth_before": float(np.median(all_depth)),
         "sample_n": int(len(rows)),
