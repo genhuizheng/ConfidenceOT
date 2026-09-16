@@ -32,6 +32,11 @@ if [[ -n "${CONFIDENCEOT_SENSITIVITY_ROOT:-}" ]]; then
   extra+=(--sensitivity-root "$CONFIDENCEOT_SENSITIVITY_ROOT")
   extra+=(--sensitivity-label "${CONFIDENCEOT_SENSITIVITY_LABEL:-source090}")
 fi
+# Names the largest lesion by malignant QC-passing cells rather than by the
+# manifest's all-cell-type count.
+if [[ -n "${CONFIDENCEOT_METASTASIS_SIZE_CSV:-}" ]]; then
+  extra+=(--metastasis-size-csv "$CONFIDENCEOT_METASTASIS_SIZE_CSV")
+fi
 
 # Two submissions were lost earlier to a path variable arriving empty, so the
 # job refuses to start rather than creating directories at the filesystem root.

@@ -52,6 +52,22 @@ agreement between them would exclude precisely the cells where the interval
 bit, which filters on the prior instead of hedging against it.  They are
 therefore run as two separate analyses -- pass each gate root in turn and
 compare the results -- rather than intersected into one.
+
+**One contrast by default.**  Rejection is one-sided in this analysis: the
+target budget is 0.00, so the metastatic side is never gate-filtered and has no
+rejected state.  That leaves ``primary_rejected_vs_primary_retained`` as the
+only contrast that isolates the gate.  A metastasis-versus-primary contrast
+would mix the difference the gate makes with the difference between two
+tissues, in clonal composition, microenvironment and dissociation, and nothing
+downstream can separate those afterwards.  The primary contrast holds patient,
+sample and tissue fixed and varies the label alone.  The others remain
+reachable through ``--contrast``, for exploration rather than for the claim.
+
+The same-compartment background contrasts are structurally empty here, because
+the depth-equalised H5ADs carry only the malignant cells the analysis selected.
+That is not worth undoing: the non-malignant cells were never depth-corrected,
+so restoring them would reintroduce across-compartment depth differences of the
+kind this whole correction exists to remove.
 """
 
 from __future__ import annotations
@@ -79,6 +95,16 @@ M4E_CALIBRATION_FIELDS = (
     "calibration_m4e_inference_valid",
 )
 
+# Only one contrast is emitted by default. Rejection is one-sided here, so the
+# metastatic side is never gate-filtered, and a metastasis-versus-primary
+# contrast mixes the difference the gate makes with the difference between two
+# tissues -- clonal composition, microenvironment, dissociation -- which no
+# amount of modelling separates afterwards. The primary contrast holds the
+# patient, the sample and the tissue fixed and varies the gate label alone, so
+# it is the only one that answers the question the gate was built to ask. The
+# others stay reachable through --contrast for exploratory use.
+DEFAULT_CONTRASTS = ("primary_rejected_vs_primary_retained",)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -105,6 +131,17 @@ def parse_args() -> argparse.Namespace:
         help="'largest' names one lesion per patient and gates each primary "
              "cell once against it. 'all' keeps every lesion and requires a "
              "cell to carry the same label against all of them.",
+    )
+    parser.add_argument(
+        "--metastasis-size-csv", type=Path, default=None,
+        help="downsample_per_sample.csv, whose analysed_cell_n counts the "
+             "malignant QC-passing cells. Without it the manifest's target_n "
+             "is used, which counts every cell type.",
+    )
+    parser.add_argument(
+        "--contrast", action="append", dest="contrasts", default=None,
+        help=f"Contrast to emit; repeatable. Defaults to "
+             f"{DEFAULT_CONTRASTS[0]} alone.",
     )
     parser.add_argument("--malignant-annotation", default=MALIGNANT)
     parser.add_argument("--include-exact-winner-unstable", action="store_true")
@@ -187,32 +224,62 @@ def analysis_groups(
     return groups
 
 
-def designate_metastasis(groups: pd.DataFrame, manifest: pd.DataFrame) -> pd.DataFrame:
+def metastasis_sizes(
+    manifest: pd.DataFrame, size_csv: Path | None
+) -> tuple[pd.DataFrame, str]:
+    """Cells per metastatic sample, and the name of where the count came from.
+
+    ``target_n`` in the manifest counts every cell in the sample, including
+    stroma and immune, and ``27_downsample_counts.py`` carries it across
+    unchanged when it rewrites the manifest. The malignant, QC-passing count
+    that actually enters the transport is in that script's
+    ``downsample_per_sample.csv``, so it is preferred when available and the
+    manifest figure is the documented fallback.
+    """
+    if size_csv is not None:
+        table = pd.read_csv(size_csv)
+        required = ["patient_id", "sample_id", "analysed_cell_n"]
+        missing = [name for name in required if name not in table.columns]
+        if missing:
+            raise RuntimeError(f"{size_csv}: missing columns {missing}")
+        sizes = table[required].rename(
+            columns={"sample_id": "target_sample", "analysed_cell_n": "size"}
+        )
+        source = f"analysed_cell_n from {size_csv}"
+    else:
+        sizes = manifest[["patient_id", "target_sample", "target_n"]].rename(
+            columns={"target_n": "size"}
+        )
+        source = "target_n from the manifest, which counts every cell type"
+    sizes = sizes.assign(
+        patient_id=lambda frame: frame["patient_id"].astype(str),
+        target_sample=lambda frame: frame["target_sample"].astype(str),
+    )
+    return sizes.groupby(
+        ["patient_id", "target_sample"], as_index=False
+    )["size"].max(), source
+
+
+def designate_metastasis(
+    groups: pd.DataFrame, sizes: pd.DataFrame
+) -> tuple[pd.DataFrame, dict[str, str]]:
     """Keep the largest metastatic sample per patient and drop the rest.
 
     Cell count is fixed before any gate is fitted, so naming the largest lesion
     cannot be steered by the result, and the larger lesion is the one whose
     transport plan rests on more observations.
     """
-    sizes = (
-        manifest[["patient_id", "target_sample", "target_n"]]
-        .assign(
-            patient_id=lambda frame: frame["patient_id"].astype(str),
-            target_sample=lambda frame: frame["target_sample"].astype(str),
-        )
-        .groupby(["patient_id", "target_sample"], as_index=False)["target_n"].max()
-        .sort_values(
-            ["patient_id", "target_n", "target_sample"],
-            ascending=[True, False, True], kind="stable",
-        )
+    ordered = sizes.sort_values(
+        ["patient_id", "size", "target_sample"],
+        ascending=[True, False, True], kind="stable",
     )
-    selected = sizes.drop_duplicates("patient_id", keep="first")
-    chosen = set(zip(selected["patient_id"], selected["target_sample"]))
+    selected = ordered.drop_duplicates("patient_id", keep="first")
+    chosen = dict(zip(selected["patient_id"], selected["target_sample"]))
     keep = [
-        (str(patient), str(target)) in chosen
+        chosen.get(str(patient)) == str(target)
         for patient, target in zip(groups["patient_id"], groups["target_sample"])
     ]
-    return groups[keep].copy()
+    return groups[keep].copy(), chosen
 
 
 def target_never_rejects(caps: set) -> bool:
@@ -423,8 +490,11 @@ def main() -> None:
     groups = analysis_groups(manifest, robustness, args.sensitivity_label)
     if not args.include_exact_winner_unstable:
         groups = groups[groups["recommended_range_exact_robust"]].copy()
+    designated: dict[str, str] = {}
+    size_source = "not used"
     if args.metastasis_selection == "largest":
-        groups = designate_metastasis(groups, manifest)
+        sizes, size_source = metastasis_sizes(manifest, args.metastasis_size_csv)
+        groups, designated = designate_metastasis(groups, sizes)
     patients = sorted(groups["patient_id"].astype(str).unique())
     if args.print_patient_count:
         print(len(patients))
@@ -594,6 +664,16 @@ def main() -> None:
         ("metastasis_retained_vs_metastasis_nonmalignant", "metastasis_retained", "metastasis_nonmalignant"),
         ("metastasis_rejected_vs_metastasis_nonmalignant", "metastasis_rejected", "metastasis_nonmalignant"),
     ]
+    selected_names = tuple(args.contrasts) if args.contrasts else DEFAULT_CONTRASTS
+    catalogue = {value[0] for value in (*core, *background)}
+    unknown = [name for name in selected_names if name not in catalogue]
+    if unknown:
+        raise ValueError(
+            f"Unknown contrast(s) {unknown}; available: {sorted(catalogue)}"
+        )
+    core = [value for value in core if value[0] in selected_names]
+    background = [value for value in background if value[0] in selected_names]
+
     one_sided = target_never_rejects(target_caps)
     core, core_dropped = usable_contrasts(core, cell_n, one_sided)
     background, background_dropped = usable_contrasts(background, cell_n, one_sided)
@@ -652,6 +732,9 @@ def main() -> None:
             "origin_ranking_winner" if robustness is not None else "every_primary"
         ),
         "metastasis_selection": args.metastasis_selection,
+        "metastasis_size_source": size_source,
+        "designated_metastasis": designated.get(patient),
+        "requested_contrasts": list(selected_names),
         "one_sided_rejection": one_sided,
         "target_rejection_budget_cap": sorted(
             str(cap) for cap in target_caps
