@@ -200,8 +200,14 @@ def main() -> None:
     # higher on those, the marker set is tracking the tissue rather than the
     # contaminant, and the flag is worse than no filter. This check exists
     # because that is exactly what happened with an earlier plasma set.
+    # Only meaningful while the flagged group is large. A doublet legitimately
+    # scores higher on epithelial identity than a single cell, because the
+    # droplet holds two cells' RNA, so once the flag is down to a fraction of a
+    # percent a higher epithelial score is the doublet signature rather than
+    # evidence that the marker set tracks the tissue.
     warnings: list[str] = []
-    if bool(flagged.any()) and bool((~flagged).any()):
+    tissue_check_applies = float(flagged.mean()) > 0.05
+    if tissue_check_applies and bool(flagged.any()) and bool((~flagged).any()):
         for lineage in ("epithelial", "androgen_response"):
             if lineage not in scores:
                 continue
