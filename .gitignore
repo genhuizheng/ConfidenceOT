@@ -56,6 +56,9 @@ scripts/tacc/*
 *.MD
 !/README.md
 !/CURRENT_WORK_SUMMARY_2026-09-13.md
+# A prespecification is only worth what its commit timestamp says, so it is
+# tracked rather than folded into the summary after the fact.
+!/cancer_metastasis/DEG_PRESPECIFICATION_2026-09-15.md
 
 # OS/editor files
 .DS_Store
