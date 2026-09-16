@@ -1,58 +1,77 @@
 """Assemble the PI report deck from the generated figures.
 
-Thirteen slides in the order the work happened: what we set out to find, the
-result that did not hold, the causes we traced, and what the prostate dataset
-added. The audience is biological, so every number on a slide is one a
-biologist can act on and the wording avoids the method's vocabulary.
+Fourteen slides in the order the work happened: the question, the result that
+did not hold, the two confounders behind it, the controls, and what the prostate
+dataset added.
 
-Every figure is one of the PNGs from ``make_report_figures.py`` and every number
-written here was read back out of the collected summaries rather than carried
-over from a previous draft. Where a slide quotes a statistic, the arm it came
-from is named, because the retained fraction differs tenfold between the free
-and capped rules and a number without its arm is not checkable.
+The layout follows the lab's own progress-report template, measured off
+``Progress_report7.pptx`` rather than guessed: white page, the Oden Institute
+logo at the top left, a running header, and the burnt-orange footer band with
+the slide number in a lighter block at the right. Colours were sampled from a
+render of that deck (#BF5700 band, #EB8F2F number block) and the band geometry
+measured from the same image.
 
-The chrome is deliberately colourless -- slate and white -- because the figures
-already carry a validated blue and orange, and a second palette competing with
-them would make identity ambiguous across slides. The one accent is the same
-orange the figures use for "the cells the method kept", so a reader who learns
-it on slide 2 keeps it for the rest of the deck.
+Each slide carries a text block in that deck's register -- a bulleted section
+label, then numbered headings with an explanation line under each, English for
+the technical terms and Chinese for the connective prose. The figures were
+readable on their own but did not say what had been done or what followed from
+it, which is what this rewrite adds.
+
+Every number was read back out of the collected summaries rather than carried
+over from a draft. Where a slide quotes a statistic the arm it came from is
+named, because the retained fraction differs tenfold between the free and capped
+rules and a number without its arm is not checkable.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 from pathlib import Path
 
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
+# Sampled from a render of Progress_report7.pptx.
+ORANGE = RGBColor(0xBF, 0x57, 0x00)
+ORANGE_LIGHT = RGBColor(0xEB, 0x8F, 0x2F)
 SLATE = RGBColor(0x1F, 0x29, 0x33)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-PALE = RGBColor(0xDE, 0xDE, 0xD8)
-DIM = RGBColor(0x9A, 0x9A, 0x92)
 INK = RGBColor(0x14, 0x18, 0x1C)
-BODY = RGBColor(0x45, 0x4C, 0x52)
-MUTED = RGBColor(0x8A, 0x8A, 0x85)
-ACCENT = RGBColor(0xEB, 0x68, 0x34)
-BLUE = RGBColor(0x2A, 0x78, 0xD6)
+BODY = RGBColor(0x33, 0x38, 0x3D)
+MUTED = RGBColor(0x7A, 0x7A, 0x75)
 
-TITLE_FONT = "Cambria"
-BODY_FONT = "Calibri"
+LATIN = "Calibri"
+EAST = "Microsoft YaHei"
 
 WIDE, TALL = 13.333, 7.5
-MARGIN = 0.62
+MARGIN = 0.5
+BAND_TOP, BAND_HEIGHT, BAND_SPLIT = 7.162, 0.338, 11.94
+HEADER = "Progress Report"
+CONTENT_TOP = 0.78
+CONTENT_BOTTOM = BAND_TOP - 0.12
 
 
-def add_slide(presentation: Presentation, dark: bool = False):
-    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-    if dark:
-        fill = slide.background.fill
-        fill.solid()
-        fill.fore_color.rgb = SLATE
-    return slide
+def set_fonts(run) -> None:
+    """Name the Latin and East Asian typefaces on one run.
+
+    ``font.name`` only writes the Latin typeface, so mixed Chinese and English
+    text would leave the Chinese characters on whatever the theme happens to
+    supply. Both attributes are set so a run renders the same everywhere.
+    """
+    run.font.name = LATIN
+    properties = run.font._rPr
+    for tag, typeface in ((qn("a:ea"), EAST), (qn("a:cs"), EAST)):
+        element = properties.find(tag)
+        if element is None:
+            element = properties.makeelement(tag, {})
+            properties.append(element)
+        element.set("typeface", typeface)
 
 
 def text_box(slide, left, top, width, height, *, align=PP_ALIGN.LEFT,
@@ -68,351 +87,548 @@ def text_box(slide, left, top, width, height, *, align=PP_ALIGN.LEFT,
     return frame
 
 
-def write(frame, runs, *, space_after=0, line_spacing=None, first=False):
-    """Append a paragraph built from (text, size, bold, colour, font) runs."""
+def write(frame, runs, *, space_after=0, line_spacing=None, first=False,
+          indent=0.0, align=None):
+    """Append a paragraph built from (text, size, bold, colour) runs."""
     paragraph = frame.paragraphs[0] if first else frame.add_paragraph()
     paragraph.space_after = Pt(space_after)
     if line_spacing:
         paragraph.line_spacing = line_spacing
-    for text, size, bold, colour, font in runs:
+    if indent:
+        # python-pptx exposes no paragraph_format on _Paragraph, so the left
+        # margin is written straight onto the paragraph properties.
+        paragraph._p.get_or_add_pPr().set("marL", str(int(Inches(indent))))
+    if align is not None:
+        paragraph.alignment = align
+    for text, size, bold, colour in runs:
         run = paragraph.add_run()
         run.text = text
         run.font.size = Pt(size)
         run.font.bold = bold
         run.font.color.rgb = colour
-        run.font.name = font
+        set_fonts(run)
     return paragraph
 
 
-def slide_title(slide, title, subtitle=None):
-    frame = text_box(slide, MARGIN, 0.40, WIDE - 2 * MARGIN, 0.9)
-    write(frame, [(title, 30, True, INK, TITLE_FONT)], first=True)
-    if subtitle:
-        sub = text_box(slide, MARGIN, 1.26, WIDE - 2 * MARGIN, 0.55)
-        write(sub, [(subtitle, 15, False, BODY, BODY_FONT)], first=True,
-              line_spacing=1.15)
+def rectangle(slide, left, top, width, height, colour):
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left),
+                                   Inches(top), Inches(width), Inches(height))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = colour
+    shape.line.fill.background()
+    shape.shadow.inherit = False
+    return shape
 
 
-def place_image(slide, path: Path, left, top, width, height):
-    """Fit an image inside a box, preserving its aspect ratio."""
-    with Image.open(path) as image:
-        ratio = image.width / image.height
-    if width / height > ratio:
-        drawn_height, drawn_width = height, height * ratio
-    else:
-        drawn_width, drawn_height = width, width / ratio
-    slide.shapes.add_picture(
-        str(path), Inches(left + (width - drawn_width) / 2),
-        Inches(top + (height - drawn_height) / 2),
-        width=Inches(drawn_width), height=Inches(drawn_height),
-    )
+class Deck:
+    """The template: page furniture, then one method per slide kind."""
 
+    def __init__(self, logo: Path | None):
+        self.presentation = Presentation()
+        self.presentation.slide_width = Inches(WIDE)
+        self.presentation.slide_height = Inches(TALL)
+        self.logo = logo if logo and logo.exists() else None
+        # The title slide carries no furniture but still counts as page one, so
+        # the first content page is numbered 2 as in the reference deck.
+        self.number = 1
 
-def stat(slide, left, top, width, number, label, colour=ACCENT, size=44):
-    frame = text_box(slide, left, top, width, 1.6)
-    write(frame, [(number, size, True, colour, TITLE_FONT)], first=True,
-          space_after=3)
-    write(frame, [(label, 13, False, BODY, BODY_FONT)], line_spacing=1.12)
+    # -- page furniture ---------------------------------------------------
+    def blank(self, dark: bool = False):
+        slide = self.presentation.slides.add_slide(
+            self.presentation.slide_layouts[6])
+        if dark:
+            fill = slide.background.fill
+            fill.solid()
+            fill.fore_color.rgb = SLATE
+        return slide
 
+    def page(self, header: str | None = None):
+        """A content page: logo, running header, footer band, slide number."""
+        slide = self.blank()
+        self.number += 1
+        if self.logo:
+            slide.shapes.add_picture(str(self.logo), Inches(0.1), Inches(0.1),
+                                     width=Inches(3.29), height=Inches(0.57))
+        frame = text_box(slide, 5.2, 0.06, 8.2, 0.5, align=PP_ALIGN.CENTER)
+        write(frame, [(header or HEADER, 22, False, INK)], first=True,
+              align=PP_ALIGN.CENTER)
+        rectangle(slide, 0, BAND_TOP, BAND_SPLIT, BAND_HEIGHT, ORANGE)
+        rectangle(slide, BAND_SPLIT, BAND_TOP, WIDE - BAND_SPLIT, BAND_HEIGHT,
+                  ORANGE_LIGHT)
+        number = text_box(slide, BAND_SPLIT, BAND_TOP + 0.04,
+                          WIDE - BAND_SPLIT - 0.18, BAND_HEIGHT,
+                          align=PP_ALIGN.RIGHT)
+        write(number, [(str(self.number), 13, False, WHITE)], first=True,
+              align=PP_ALIGN.RIGHT)
+        return slide
 
-def bullets(slide, left, top, width, height, items, size=15, gap=11):
-    frame = text_box(slide, left, top, width, height)
-    for index, item in enumerate(items):
-        runs = []
-        if isinstance(item, tuple):
-            head, rest = item
-            runs.append((head, size, True, INK, BODY_FONT))
-            runs.append((rest, size, False, BODY, BODY_FONT))
+    # -- content ----------------------------------------------------------
+    def label(self, slide, text, top, left=MARGIN, size=16):
+        """The bulleted section label the template puts above each block."""
+        frame = text_box(slide, left, top, WIDE - left - MARGIN, 0.34)
+        write(frame, [("•  ", size, True, ORANGE), (text, size, True, INK)],
+              first=True)
+        return top + 0.4
+
+    def block(self, slide, left, top, width, items, *, size=14.5,
+              gap=9, lead=1.22):
+        """Numbered headings, each with its explanation on the lines below."""
+        frame = text_box(slide, left, top, width, CONTENT_BOTTOM - top)
+        first = True
+        for index, item in enumerate(items, 1):
+            if isinstance(item, str):
+                # A closing line, marked with an arrow instead of a number.
+                write(frame, [("→  " + item, size, True, ORANGE)],
+                      first=first, space_after=gap, line_spacing=lead)
+                first = False
+                continue
+            heading, detail = item
+            write(frame, [(f"{index}. ", size, True, INK),
+                          (heading, size, True, INK)],
+                  first=first, space_after=2, line_spacing=lead)
+            first = False
+            write(frame, [(detail, size, False, BODY)], space_after=gap,
+                  line_spacing=lead, indent=0.2)
+        return frame
+
+    def figure(self, slide, image: Path, left, top, width, height,
+               anchor="middle"):
+        """Fit an image in a box, preserving aspect. `anchor` sets the vertical
+        placement: a wide figure in a tall box otherwise floats in the middle
+        of it, which reads as a gap under the text rather than as a layout."""
+        with Image.open(image) as handle:
+            ratio = handle.width / handle.height
+        if width / height > ratio:
+            drawn_height, drawn_width = height, height * ratio
         else:
-            runs.append((item, size, False, BODY, BODY_FONT))
-        write(frame, runs, space_after=gap, line_spacing=1.18, first=index == 0)
-    return frame
+            drawn_width, drawn_height = width, width / ratio
+        offset = 0.0 if anchor == "top" else (height - drawn_height) / 2
+        slide.shapes.add_picture(
+            str(image), Inches(left + (width - drawn_width) / 2),
+            Inches(top + offset),
+            width=Inches(drawn_width), height=Inches(drawn_height))
+
+    def split(self, label, items, image: Path, *, text_width=4.5):
+        """Explanation on the left, figure on the right."""
+        slide = self.page()
+        top = self.label(slide, label, CONTENT_TOP)
+        self.block(slide, MARGIN, top, text_width, items)
+        figure_left = MARGIN + text_width + 0.3
+        self.figure(slide, image, figure_left, top - 0.05,
+                    WIDE - MARGIN - figure_left, CONTENT_BOTTOM - top + 0.05,
+                    anchor="top")
+        return slide
+
+    def stacked(self, label, items, image: Path, *, text_height=1.85):
+        """Explanation across the top, wide figure underneath."""
+        slide = self.page()
+        top = self.label(slide, label, CONTENT_TOP)
+        self.block(slide, MARGIN, top, WIDE - 2 * MARGIN, items, gap=4)
+        image_top = top + text_height
+        self.figure(slide, image, MARGIN, image_top, WIDE - 2 * MARGIN,
+                    CONTENT_BOTTOM - image_top)
+        return slide
+
+    def save(self, output: Path) -> None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        self.presentation.save(str(output))
+        print(f"wrote {output}  ({len(self.presentation.slides._sldIdLst)} slides)")
 
 
-def caption(slide, text, top=None):
-    frame = text_box(slide, MARGIN, top if top is not None else TALL - 0.66,
-                     WIDE - 2 * MARGIN, 0.48)
-    write(frame, [(text, 11, False, MUTED, BODY_FONT)], first=True,
-          line_spacing=1.12)
-
-
-def figure_slide(presentation, title, subtitle, image: Path, note=None,
-                 image_top=1.95):
-    slide = add_slide(presentation)
-    slide_title(slide, title, subtitle)
-    bottom = TALL - (0.82 if note else 0.42)
-    place_image(slide, image, MARGIN, image_top, WIDE - 2 * MARGIN,
-                bottom - image_top)
-    if note:
-        caption(slide, note)
-    return slide
-
-
-def build(figures: Path, output: Path, reference: bool) -> None:
-    presentation = Presentation()
-    presentation.slide_width = Inches(WIDE)
-    presentation.slide_height = Inches(TALL)
+def build(figures: Path, output: Path, reference: bool, logo: Path | None,
+          month: str) -> None:
+    deck = Deck(logo)
 
     # 1 -- title
-    slide = add_slide(presentation, dark=True)
-    frame = text_box(slide, 1.0, 2.3, WIDE - 2.0, 2.5)
-    write(frame, [("Which primary tumour cells can metastasise?", 40, True,
-                   WHITE, TITLE_FONT)], first=True, space_after=14,
-          line_spacing=1.05)
-    write(frame, [("What we found, why the first answer did not hold, and what "
-                   "the prostate data added", 18, False,
-                   RGBColor(0xC3, 0xC2, 0xB7), BODY_FONT)], line_spacing=1.2)
-    footer = text_box(slide, 1.0, 5.65, WIDE - 2.0, 0.5)
-    write(footer, [("Ovarian, 29 patients  ·  head and neck  ·  "
-                    "colorectal  ·  prostate, 4 patients", 13, False, DIM,
-                    BODY_FONT)], first=True)
+    slide = deck.blank(dark=True)
+    if logo and logo.exists():
+        white = logo.with_name("logo_white.png")
+        if white.exists():
+            slide.shapes.add_picture(str(white), Inches(0.5), Inches(0.4),
+                                     width=Inches(3.29), height=Inches(0.57))
+    frame = text_box(slide, 0.62, 2.85, 11.0, 1.1)
+    write(frame, [("Progress Report", 36, True, WHITE)], first=True)
+    line = rectangle(slide, 0.62, 4.05, 8.6, 0.03, ORANGE)
+    line.line.fill.background()
+    frame = text_box(slide, 0.62, 1.75, 6.0, 0.4)
+    write(frame, [(month, 14, False, ORANGE_LIGHT)], first=True)
+    frame = text_box(slide, 0.62, 4.3, 11.0, 0.9)
+    write(frame, [("ConfidenceOT — which primary tumour cells can "
+                   "metastasise?", 18, False, RGBColor(0xC3, 0xC2, 0xB7))],
+          first=True, line_spacing=1.2)
+    frame = text_box(slide, 0.62, 6.5, 9.0, 0.4)
+    write(frame, [("Genhui Zheng, PhD candidate, The University of Texas at "
+                   "Austin", 14, False, MUTED)], first=True)
 
-    # 2 -- the question
-    figure_slide(
-        presentation,
-        "The question",
-        "Given a patient's primary tumour and their metastasis, which primary "
-        "cells look like they could have seeded it?",
-        figures / "fig_umap_ovarian.png",
-        "Ovarian cancer, 187,383 cells. Left: the two tissues overlap almost "
-        "completely. Middle: the cells the method kept. Right: how fast those "
-        "cells are dividing.",
-        image_top=2.02)
+    # 2 -- what this report says
+    slide = deck.page()
+    top = deck.label(slide, "本次汇报的核心",
+                     CONTENT_TOP)
+    deck.block(slide, MARGIN, top, WIDE - 2 * MARGIN, [
+        ("要回答的问题",
+         "给定同一病人的 primary 和 "
+         "metastasis，哪些 primary malignant cells 可能是"
+         "转移的来源？方法给出 "
+         "retain / reject 的二分，对比始终在 "
+         "primary 内部。"),
+        ("上次的结论不成立",
+         "三个数据集里方向都是反的"
+         "；effect 极小而 p 极显著，这是 "
+         "systematic artefact 的特征，不是小的"
+         "生物学差异。"),
+        ("找到了两个混杂",
+         "Sequencing depth — 已解决；cell division — "
+         "新发现，且在卵巢和前列腺"
+         "两种癌里一致。"),
+        ("retained fraction 实际在量什么",
+         "不是转移潜能，而是两侧"
+         "组织的相似度（rho = 0.76，188 pairs"
+         "）。"),
+        ("前列腺数据的结果",
+         "在两侧真有差异的数据集"
+         "上，方法只留下 1.6%，而卵"
+         "巢留 29%。两侧越不同，它留"
+         "得越少。"),
+    ], size=14, gap=10)
 
-    # 3 -- the negative result
-    slide = add_slide(presentation)
-    slide_title(slide, "The first answer did not hold",
-                "In all three original datasets the biology came out backwards")
-    stat(slide, MARGIN, 2.15, 3.6, "0.005",
-         "Difference in metastasis-signature score between the two groups of "
-         "primary cells")
-    stat(slide, MARGIN + 4.05, 2.15, 3.6, "2 × 10⁻⁸",
-         "p value for that same difference", colour=BLUE)
-    stat(slide, MARGIN + 8.1, 2.15, 3.6, "3.1×",
-         "Sequencing depth between the two groups, in the worst dataset")
-    bullets(slide, MARGIN, 4.55, WIDE - 2 * MARGIN, 2.1, [
-        ("A tiny effect with an overwhelming p value is the signature of a "
-         "systematic artefact, ", "not of a small biological difference."),
-        ("The genes separating the two groups were keratins and SPRR family "
-         "members in all three cancers ",
-         "— the same answer regardless of the biology, which is what a "
-         "technical confounder looks like."),
-    ])
-    caption(slide, "Ovarian (GSE180661), head and neck (GSE181919) and "
-                   "colorectal (GSE225857). Signature scoring: UCell on "
-                   "metastasis-derived gene sets. Depth ratio between the two "
-                   "groups: 1.3×, 2.0× and 3.1×.")
+    # 3 -- the question and the data
+    deck.stacked(
+        "问题定义与数据",
+        [("数据",
+          "GSE180661 HGSOC，29 patients，187,383 malignant cells"
+          "（depth-equalised），94 个 primary–metastasis "
+          "pairs，每个病人指定一个 lesion。"),
+         ("图怎么读",
+          "左：两侧组织在 embedding 上几"
+          "乎完全重叠。中：方法留"
+          "下的 29% primary cells。右：这些细"
+          "胞的 cell division score。")],
+        figures / "fig_umap_ovarian.png", text_height=1.35)
 
-    # 4 -- cause one
-    figure_slide(
-        presentation,
-        "Cause 1: the method was reading sequencing depth",
-        "Cells sequenced more deeply were systematically kept or dropped, in "
-        "both cancers",
-        figures / "fig1_depth_in_gate.png",
-        "Equalising every cell's read count helped but did not finish the job: "
-        "depth also changes which genes are detected at all, not only how many "
-        "reads they get.")
+    # 4 -- the negative result
+    slide = deck.page()
+    top = deck.label(slide, "上次的结论：方向"
+                            "是反的", CONTENT_TOP)
+    deck.block(slide, MARGIN, top, 7.2, [
+        ("Effect 极小，p 极显著",
+         "UCell metastasis signature 在 retained 与 rejected 之"
+         "间只差 0.005，而 p = 2 × 10⁻⁸。"),
+        ("三个数据集给出同一个答"
+         "案",
+         "Top DEG 都是 keratins 和 SPRR family，与各"
+         "自的生物学无关 — 这正是 "
+         "technical confounder 的样子。"),
+        ("两组的 sequencing depth 本身就不同",
+         "卵巢 1.3×，头颈 2.0×，结肠 "
+         "3.1×。"),
+        "极小 effect 加极显著 p 是 systematic "
+        "artefact 的特征。",
+    ], size=14, gap=10)
+    for x, number, text, colour in (
+            (8.0, "0.005", "signature 分数差值", ORANGE),
+            (10.55, "2×10⁻⁸", "对应的 p 值",
+             RGBColor(0x2A, 0x78, 0xD6))):
+        frame = text_box(slide, x, 1.85, 2.5, 1.5)
+        write(frame, [(number, 40, True, colour)], first=True, space_after=3)
+        write(frame, [(text, 13, False, BODY)], line_spacing=1.12)
+    frame = text_box(slide, 8.0, 3.7, 4.8, 2.0)
+    write(frame, [("三个数据集", 14, True, INK)],
+          first=True, space_after=7)
+    for name, depth in (("Ovarian  GSE180661", "1.3×"),
+                        ("Head and neck  GSE181919", "2.0×"),
+                        ("Colorectal  GSE225857", "3.1×")):
+        write(frame, [(name + "   ", 13, False, BODY),
+                      (depth, 13, True, ORANGE)], space_after=5,
+              line_spacing=1.15)
+    write(frame, [("两组之间的 depth 比值", 12,
+                   False, MUTED)], line_spacing=1.15)
 
-    # 5 -- the fix. The callout gets its own column rather than floating over
-    # the plot, which is where it landed when the image used the full width.
-    slide = add_slide(presentation)
-    slide_title(slide, "What fixed it: ranking genes inside each cell",
-                "Tested on simulated tumours where the correct answer is known")
-    column = 2.95
-    place_image(slide, figures / "fig2_representation_benchmark.png",
-                MARGIN, 2.0, WIDE - 2 * MARGIN - column - 0.35, TALL - 0.86 - 2.0)
-    box = text_box(slide, WIDE - MARGIN - column, 2.35, column, 2.6)
-    write(box, [("Ovarian, after the fix", 14, True, INK, BODY_FONT)],
-          first=True, space_after=9)
-    for head, value in (("read depth", "0.59 → 0.53"),
-                        ("genes detected", "0.42 → 0.51")):
-        write(box, [(head + "  ", 13, False, BODY, BODY_FONT),
-                    (value, 13, True, ACCENT, BODY_FONT)],
-              line_spacing=1.2, space_after=6)
-    write(box, [("Neither is significant any more. 0.50 would mean no depth "
-                 "effect at all.", 12, False, MUTED, BODY_FONT)],
-          line_spacing=1.22)
-    caption(slide,
-            "Ranking each cell's genes by how unusual their level is for that "
-            "gene removes the depth scale. Ranking without that per-gene step "
-            "does nothing, and ranking cannot replace read equalisation "
-            "— both are needed.")
+    # 5 -- cause one
+    deck.split(
+        "原因一：gate 在读 sequencing depth",
+        [("怎么量的",
+          "用 depth 预测 retain / reject 的 AUC。"
+          "0.5 = 完全无关，图上画的是"
+          "偏离 0.5 的幅度，越短越好。"),
+         ("结果",
+          "卵巢 0.09，前列腺 0.19；前列"
+          "腺完全不做 depth 处理时是 "
+          "0.44，即 gate 几乎完全由 depth 决"
+          "定。"),
+         ("Read equalisation 有用但不够",
+          "前列腺 0.44 → 0.19。depth 还会改"
+          "变哪些基因能被检出，不"
+          "只是 reads 数量，所以没能收"
+          "尾。")],
+        figures / "fig1_depth_in_gate.png")
 
-    # 6 -- the control
-    figure_slide(
-        presentation,
-        "A control the project had never run",
-        "Give a patient's primary tumour somebody else's metastasis and see "
-        "what happens",
-        figures / "fig4_mismatched_control.png",
-        "The method does use the metastasis it is given: with the wrong "
-        "patient's metastasis it keeps essentially nothing (35% → 0%, "
-        "p = 8 × 10⁻¹⁷), and the two kept sets overlap no "
-        "more than chance. So the split is patient-specific.",
-        image_top=2.0)
+    # 6 -- the fix
+    deck.split(
+        "解决办法：gene rank 表示",
+        [("做法",
+          "每个 cell 内把基因按“相"
+          "对该基因自身的异常程度"
+          "”排序，取 top 256，depth 的尺"
+          "度完全消掉。"),
+         ("在 simulation 上验证",
+          "模拟数据的正确答案已知"
+          "。rank 是唯一把 depth effect 压到 0 "
+          "的表示；去掉 per-gene median 那一"
+          "步完全无效。"),
+         ("两个都需要",
+          "只做 rank 不做 read equalisation 时 AUC "
+          "0.06，比不处理还差。"),
+         ("结果",
+          "卵巢 depth AUC 0.59 → 0.53、genes detected "
+          "0.42 → 0.51，均不再显著；前"
+          "列腺 0.31 → 0.49。")],
+        figures / "fig2_representation_benchmark.png")
 
-    # 7 -- what it measures
-    figure_slide(
-        presentation,
-        "But what the kept fraction measures is similarity",
-        "Not how many cells could metastasise, but how alike the two tissues "
-        "are",
-        figures / "fig3_similarity_readout.png",
-        "Correlation 0.76 across 188 pairs, against a measure the method never "
-        "sees and that uses no transport at all. It is not a cell-number "
-        "effect: cell number predicts similarity but not the kept fraction "
-        "(rho = −0.06, p = 0.43).",
-        image_top=2.0)
+    # 7 -- the control
+    deck.split(
+        "对照：给错病人的 metastasis",
+        [("做法",
+          "把 A 病人的 primary 配 B 病人的 "
+          "metastasis，其余 pipeline 一行不改。"),
+         ("结果",
+          "retained fraction 从 0.351 降到 0.000，"
+          "p = 8 × 10⁻¹⁷；两次留下"
+          "的细胞集 Jaccard = 0，等于随机"
+          "水平。"),
+         ("说明什么",
+          "gate 确实用到了 metastasis 一侧，"
+          "不是只看 primary 自己。所以"
+          "这个划分是 patient-specific 的。"),
+         "这个对照项目之前从没做"
+         "过。"],
+        figures / "fig4_mismatched_control.png")
 
-    # 8 -- why that is a problem
-    figure_slide(
-        presentation,
-        "Which is why the number cannot mean metastatic potential",
-        "Every one of these 29 patients already had a metastasis",
-        figures / "fig5_patient_spread.png",
-        "The same measure reads 0% in one patient and 88% in another, median "
-        "33%. Not a sample-size artefact: across the 26 patients with at least "
-        "500 primary cells it still spans 0.5% to 87%, median 32%. Ascitic "
-        "metastases are four of the seven lowest — free-floating tumour "
-        "cells are transcriptionally far from the primary.",
-        image_top=2.0)
+    # 8 -- what it measures
+    deck.split(
+        "retained fraction 实际在量什么",
+        [("检验方式",
+          "用 pseudobulk correlation 去预测 retained "
+          "fraction — 这个量不做 PCA、不"
+          "做 transport，方法从来看不到"
+          "它。"),
+         ("结果",
+          "rho = 0.76，188 pairs。只看同一病"
+          "人的 pair、或只看实体转移"
+          "，关系依然成立。"),
+         ("不是细胞数效应",
+          "cell number 能预测 similarity，却预测"
+          "不了 retained fraction（rho = −0.06，"
+          "p = 0.43）。"),
+         "这个数字是“两侧组织有"
+         "多像”，不是“有多少细"
+         "胞能转移”。"],
+        figures / "fig3_similarity_readout.png")
 
-    # 9 -- prostate dataset
-    slide = add_slide(presentation)
-    slide_title(slide, "Prostate cancer: a dataset where the two sides differ",
-                "GSE271675, re-annotated by Faming — matched primary "
-                "tumours and lymph-node metastases")
-    bullets(slide, MARGIN, 2.05, 6.0, 4.4, [
-        ("Why it matters: ", "in ovarian cancer the primary and the metastasis "
-         "are nearly identical — correlation 0.94, and no genes separate "
-         "the two tissues at all. There was almost nothing for the method to "
-         "find."),
-        ("In prostate they genuinely differ: ", "androgen signalling down, "
-         "invasion and interferon up in the lymph node."),
-        ("236,507 malignant cells across 38 specimens, 24 primary-metastasis "
-         "pairs from 4 patients. ",
-         "A fifth patient had no metastatic cells in the object."),
-    ])
-    stat(slide, MARGIN + 6.7, 2.2, 2.8, "29%",
-         "of primary cells kept\novarian")
-    stat(slide, MARGIN + 9.6, 2.2, 2.8, "1.6%",
-         "of primary cells kept\nprostate")
-    frame = text_box(slide, MARGIN + 6.7, 4.2, WIDE - MARGIN - 6.7 - MARGIN, 2.1)
-    write(frame, [("The more the two tissues differ, the less the method keeps.",
-                   16, True, INK, BODY_FONT)], first=True, space_after=9,
-          line_spacing=1.14)
-    write(frame, [("That is the wrong way round. Real divergence between a "
-                   "primary and its metastasis is the interesting case, and it "
-                   "is the case where the method returns almost nothing.",
-                   14, False, BODY, BODY_FONT)], line_spacing=1.16)
-    caption(slide, "Both percentages come from the same pipeline (gene ranking "
-                   "plus read equalisation). 1.6% is too few cells for "
-                   "gene-level statistics in most patients, so the next two "
-                   "slides use the capped rule, which keeps 15%.")
+    # 9 -- patient spread
+    deck.stacked(
+        "所以它不能叫 metastatic potential",
+        [("同一指标跳了 100 倍",
+          "29 个病人全部已经发生转"
+          "移，而这个数从 0% 跳到 88%"
+          "，中位 33%。"),
+         ("不是样本量问题",
+          "只看 n ≥ 500 的 26 个病人仍"
+          "然是 0.5%–87%，中位 32%；cell "
+          "number 与这个比例的相关只"
+          "有 −0.16。Ascites 占最低 7 个里"
+          "的 4 个。")],
+        figures / "fig5_patient_spread.png", text_height=1.32)
 
-    # 10 -- against the reference signature. The figure only carries the
-    # reference bars when the workbook was available to make_report_figures.py,
-    # so the wording follows the same switch rather than claiming a comparison
-    # the slide does not show.
+    # 10 -- prostate dataset
+    slide = deck.page()
+    top = deck.label(slide, "前列腺：两侧真有"
+                            "差异的数据集", CONTENT_TOP)
+    deck.block(slide, MARGIN, top, 7.7, [
+        ("数据",
+         "GSE271675，由 Faming 重新注释。"
+         "236,507 malignant cells，38 specimens，4 个病"
+         "人共 24 个 pairs；第五个病人"
+         "对象里没有 metastatic cells。"),
+        ("为什么需要它",
+         "卵巢两侧 pseudobulk r = 0.94，组织"
+         "间 zero DEG — 方法几乎没东西"
+         "可找。前列腺是 AR 下调、"
+         "invasion 和 interferon 上调，是真存"
+         "在的差异。"),
+        ("结果",
+         "同一 pipeline 下卵巢留 29%，前"
+         "列腺只留 1.6%。两侧越不同"
+         "，方法留下的越少 — 而"
+         "两侧真不同才是有意义的"
+         "情形。"),
+    ], size=14, gap=8)
+    for x, number, text in ((8.5, "29%", "卵巢：留下"
+                                         "的 primary 细胞"),
+                            (10.9, "1.6%", "前列腺：同"
+                                           "一 pipeline")):
+        frame = text_box(slide, x, 1.15, 2.4, 1.5)
+        write(frame, [(number, 42, True, ORANGE)], first=True, space_after=3)
+        write(frame, [(text, 13, False, BODY)], line_spacing=1.14)
+    # The embedding below was exported from the capped arm, which keeps 18%,
+    # not from the free rule this slide's 1.6% comes from. Saying so here is
+    # not optional: the panel prints its own retained percentage, so an
+    # unlabelled figure would appear to contradict the headline number.
+    frame = text_box(slide, 8.5, 2.62, 4.35, 1.6)
+    write(frame, [("Arm 说明", 14, True, INK)], first=True,
+          space_after=6)
+    write(frame, [("free rule 留 1.6%，对大多数"
+                   "病人不够做 gene-level 统计"
+                   "。下方 UMAP 与后两页的 "
+                   "DEG / GSEA 都用 cap 0.85 arm：每个"
+                   "病人 15%，Patient5 24%，合计 "
+                   "18%。", 13, False, BODY)], line_spacing=1.2)
+    # The prostate embedding goes here rather than on a page of its own: it is
+    # the same three panels as the ovarian one, so the two read together.
+    deck.figure(slide, figures / "fig_umap_prostate.png", MARGIN, 4.3,
+                WIDE - 2 * MARGIN, CONTENT_BOTTOM - 4.3, anchor="top")
+
+    # 11 -- enrichment
     if reference:
-        figure_slide(
-            presentation,
-            "Checked against an independent metastasis signature",
-            "Faming's primary-versus-metastasis tissue comparison, against the "
-            "cells our method kept",
-            figures / "fig6_gsea_agreement.png",
-            "Androgen response agrees. Proliferation is reversed, and it is by "
-            "far the strongest signal on our side (E2F +3.4, G2M +2.8, both "
-            "FDR < 0.001), which points at what the method is really "
-            "separating.",
-            image_top=2.0)
+        items = [
+            ("对比对象",
+             "Faming 的 primary vs metastasis 组织比较"
+             "（蓝）对我们的 retained cells"
+             "（橙）。同向则说明 retained "
+             "像 metastasis。"),
+            ("Proliferation 方向是反的",
+             "E2F +3.4，G2M +2.8，mitotic spindle +1.7，"
+             "FDR ≤ 0.002 — 而且是我们这"
+             "边最强的信号。"),
+            ("Androgen response 是唯一一致的",
+             "我们 −1.4（FDR 0.046），与师"
+             "兄 tissue 比较同向。EMT 和 "
+             "interferon 都不显著。"),
+        ]
+        title = "富集分析：对比独立的 " \
+                "metastasis signature"
     else:
-        figure_slide(
-            presentation,
-            "What actually separates the cells we kept",
-            "Pathway enrichment on the prostate pairs, capped rule",
-            figures / "fig6_gsea_agreement.png",
-            "Proliferation dominates: E2F +3.4 and G2M +2.8, both "
-            "FDR < 0.001, against androgen response at −1.4 (FDR 0.046) "
-            "and nothing significant for invasion or interferon.",
-            image_top=2.0)
+        items = [
+            ("做法",
+             "对 primary rejected vs retained 的 preranked GSEA"
+             "，正值 = 在 retained 中富集。"),
+            ("Proliferation 完全主导",
+             "E2F +3.4，G2M +2.8，mitotic spindle +1.7，"
+             "FDR ≤ 0.002。"),
+            ("其余通路很弱",
+             "Androgen response −1.4（FDR 0.046，是显"
+             "著项里最弱的）；EMT 和 "
+             "interferon 不显著。"),
+            "师兄那份 Hallmark GSEA 的 xlsx 本机"
+            "未找到，蓝色对比柱待"
+            "补。",
+        ]
+        title = "富集分析：到底是什么" \
+                "把 retained 分出来的"
+    deck.split(title, items, figures / "fig6_gsea_agreement.png")
 
-    # 11 -- cause two
-    figure_slide(
-        presentation,
-        "Cause 2: the kept cells are the dividing cells",
-        "Of the 598 genes that separate the two groups, the strongest are the "
-        "cell-division programme",
-        figures / "fig7_cell_cycle.png",
-        "DIAPH3, TOP2A, NUSAP1, KIF11, ASPM, CENPF and MKI67 are all enriched "
-        "in the kept cells. Prostate, capped rule, paired across 4 patients. "
-        "The mitochondrial genes in the list are not dying cells: these are "
-        "isolated nuclei, median mitochondrial content 0.2%, and the gate's "
-        "mitochondrial bias fell from 0.82 to 0.55 with the same fix that "
-        "removed depth.",
-        image_top=2.0)
+    # 12 -- cause two
+    deck.split(
+        "原因二：retained 就是正在分"
+        "裂的细胞",
+        [("598 个显著基因里最强的那"
+          "一批",
+          "DIAPH3、TOP2A、NUSAP1、KIF11、ASPM、CENPF"
+          "、MKI67 — 全是 cell-division programme。"),
+         ("MT- 基因的说明",
+          "这批是 multiome 细胞核，MT 中"
+          "位数 0.2%，不是垓死细胞。"
+          "MT 偏倒 AUC 从 0.82 降到 0.55，和 "
+          "depth 被同一个修正解决。"),
+         ("这也解释了 androgen 那一条",
+          "AR 驱动分化，与 proliferation 反"
+          "相关；挑出分裂细胞就"
+          "自动得到低 AR。")],
+        figures / "fig7_cell_cycle.png")
 
-    # 12 -- replication
-    figure_slide(
-        presentation,
-        "And it happens in both cancers",
-        "Kept versus rejected primary cells, within each patient — the "
-        "kept cells divide faster",
-        figures / "fig_hallmark_ovarian.png",
-        "Ovarian, 26 patients: kept cells +0.089 against the rejected ones, in "
-        "17 of 26 patients, while the metastasis moves only +0.015 on the same "
-        "baseline. Prostate, 4 patients: +0.040 against +0.006, in 4 of 4. "
-        "Interferon and invasion show no consistent shift in either cancer.",
-        image_top=2.0)
+    # 13 -- replication
+    deck.split(
+        "两种癌里都一致",
+        [("Contrast",
+          "kept vs rejected primary cells，先在每个病"
+          "人内部做差 — 与 DEG 的 paired "
+          "design 一致。池在一起看会"
+          "被病人间差异淹掉。"),
+         ("卵巢 26 个病人",
+          "kept +0.089，17/26 为正；metastasis 在同"
+          "一基线上只 +0.015。"),
+         ("前列腺 4 个病人",
+          "kept +0.040，4/4 为正；metastasis +0.006。"),
+         ("Interferon 和 mesenchymal",
+          "两种癌里都没有一致位"
+          "移。"),
+         "cell division 是唯一在两种癌里"
+         "都复现的信号，kept 的位移"
+         "比 metastasis 大 6–7 倍。"],
+        figures / "fig_hallmark_ovarian.png")
 
-    # 13 -- where we are
-    slide = add_slide(presentation, dark=True)
-    frame = text_box(slide, MARGIN + 0.3, 0.72, WIDE - 2 * MARGIN - 0.6, 1.0)
-    write(frame, [("Where this leaves us", 34, True, WHITE, TITLE_FONT)],
-          first=True)
+    # 14 -- status
+    slide = deck.page()
+    top = deck.label(slide, "现状与下一步", CONTENT_TOP)
+    frame = text_box(slide, MARGIN, top + 0.05, 5.9, 2.2)
+    write(frame, [("已解决", 17, True, ORANGE)], first=True,
+          space_after=10)
+    for item in ("Sequencing depth — 两种癌加 "
+                 "simulation ground truth 上都验证过",
+                 "让 retained fraction 失去意义的 "
+                 "calibration",
+                 "项目此前从未做过的 "
+                 "cross-patient control"):
+        write(frame, [("—  " + item, 14, False, BODY)], space_after=9,
+              line_spacing=1.2)
 
-    left = text_box(slide, MARGIN + 0.3, 1.95, 5.6, 4.5)
-    write(left, [("Fixed", 20, True, ACCENT, BODY_FONT)], first=True,
-          space_after=11)
-    for item in ("Sequencing depth, in both cancers and against simulated "
-                 "ground truth",
-                 "The calibration that made the kept fraction meaningless",
-                 "The cross-patient control the project had never run"):
-        write(left, [("—  " + item, 14, False, PALE, BODY_FONT)],
-              space_after=9, line_spacing=1.16)
+    frame = text_box(slide, 6.9, top + 0.05, 6.0, 2.2)
+    write(frame, [("未解决", 17, True, ORANGE)], first=True,
+          space_after=10)
+    for item in ("Cell division 现在是最强的混"
+                 "杂 — 可以 regress out，是标"
+                 "准做法",
+                 "两侧越分歧 threshold 越紧"
+                 "，criterion 需要换一个 null",
+                 "与“已适应的 metastasis”"
+                 "相似不等于同源 — "
+                 "这一层算法解决不了"):
+        write(frame, [("—  " + item, 14, False, BODY)], space_after=9,
+              line_spacing=1.2)
 
-    right = text_box(slide, MARGIN + 6.7, 1.95, 5.7, 4.5)
-    write(right, [("Open", 20, True, ACCENT, BODY_FONT)], first=True,
-          space_after=11)
-    for item in ("Cell division is now the strongest confounder — it can "
-                 "be regressed out, which is a standard step",
-                 "The threshold tightens as the two tissues diverge, so the "
-                 "rule needs a different comparison built into it",
-                 "Transcriptional similarity to an adapted metastasis is not "
-                 "evidence of ancestry — that limit no algorithm removes"):
-        write(right, [("—  " + item, 14, False, PALE, BODY_FONT)],
-              space_after=9, line_spacing=1.16)
+    top = deck.label(slide, "下一步", 3.32)
+    deck.block(slide, MARGIN, top, WIDE - 2 * MARGIN, [
+        ("重跑卵巢 DEG",
+         "在 depth-corrected gate 上重跑，并把 "
+         "cell cycle 回归掉 — 这是判定"
+         "剩下的信号是不是真的"
+         "生物学的关键一步。"),
+        ("补两个检查",
+         "回 TACC 查 MT% 的上尾分布；"
+         "把师兄 Hallmark GSEA 的对比柱补"
+         "到富集那一页。"),
+        ("换 criterion",
+         "当前阈值是 within 除以 cross 的"
+         "比值，所以两侧越分歧"
+         "留得越少。正在试两种"
+         "形式：用目标侧自己的"
+         "散度，或 kNN 归属检验。"),
+    ], size=14, gap=8)
 
-    note = text_box(slide, MARGIN + 0.3, 6.6, WIDE - 2 * MARGIN - 0.6, 0.5)
-    write(note, [("Next: rerun the ovarian differential expression on the "
-                  "depth-corrected cells, with cell cycle removed.", 13, False,
-                  DIM, BODY_FONT)], first=True)
-
-    output.parent.mkdir(parents=True, exist_ok=True)
-    presentation.save(str(output))
-    print(f"wrote {output}  ({len(presentation.slides._sldIdLst)} slides)")
+    deck.save(output)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("figures", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--logo", type=Path, default=None,
+                        help="the lab logo for the top left of every page")
+    parser.add_argument("--month", default="September 2026")
     parser.add_argument("--reference-gsea", action="store_true",
                         help="the enrichment figure carries the reference bars, "
-                             "so slide 10 is written as a comparison")
+                             "so its slide is written as a comparison")
     args = parser.parse_args()
-    build(args.figures, args.output, args.reference_gsea)
+    build(args.figures, args.output, args.reference_gsea, args.logo, args.month)
 
 
 if __name__ == "__main__":
