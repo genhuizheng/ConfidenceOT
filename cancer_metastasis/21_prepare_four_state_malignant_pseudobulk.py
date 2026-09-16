@@ -255,6 +255,19 @@ def metastasis_sizes(
         patient_id=lambda frame: frame["patient_id"].astype(str),
         target_sample=lambda frame: frame["target_sample"].astype(str),
     )
+    # downsample_per_sample.csv carries one row per sample, primary sides
+    # included, and a patient's largest sample is often its own primary. Left
+    # in, it wins the selection, matches no pair, and removes that patient from
+    # the analysis without saying so.
+    targets = (
+        manifest[["patient_id", "target_sample"]]
+        .astype(str).drop_duplicates()
+    )
+    sizes = sizes.merge(targets, on=["patient_id", "target_sample"], how="inner")
+    if sizes.empty:
+        raise RuntimeError(
+            f"No metastatic sample matched the manifest; size source was {source}"
+        )
     return sizes.groupby(
         ["patient_id", "target_sample"], as_index=False
     )["size"].max(), source
@@ -279,7 +292,20 @@ def designate_metastasis(
         chosen.get(str(patient)) == str(target)
         for patient, target in zip(groups["patient_id"], groups["target_sample"])
     ]
-    return groups[keep].copy(), chosen
+    kept = groups[keep].copy()
+    # Patients are addressed by position in the sorted list, so losing one
+    # silently renumbers every patient after it and the array's last indices
+    # fall off the end. Naming one lesion must never remove a patient.
+    lost = sorted(
+        set(groups["patient_id"].astype(str)) - set(kept["patient_id"].astype(str))
+    )
+    if lost:
+        raise RuntimeError(
+            f"Designating one metastasis dropped {len(lost)} patient(s) "
+            f"entirely: {lost[:5]}. The size table names a sample that is not "
+            "a metastatic side of any pair for them."
+        )
+    return kept, chosen
 
 
 def target_never_rejects(caps: set) -> bool:
