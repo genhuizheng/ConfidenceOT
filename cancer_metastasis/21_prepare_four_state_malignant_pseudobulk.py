@@ -676,8 +676,23 @@ def main() -> None:
             add_vector(counts[state], genes, values)
             cell_n[state] += len(background)
 
+    # The ungated tissue comparison. The gate retains primary cells that sit
+    # close to the metastasis, so rejected-versus-retained is a diluted form of
+    # primary-versus-metastasis by construction. Emitting both makes that
+    # overlap measurable instead of assumed: a gate contrast whose genes are
+    # the tissue contrast's genes has added nothing.
+    for prefix in ("primary", "metastasis"):
+        state = f"{prefix}_all"
+        counts[state] = defaultdict(int)
+        cell_n[state] = 0
+        for part in (f"{prefix}_retained", f"{prefix}_rejected"):
+            for gene, value in counts[part].items():
+                counts[state][gene] += value
+            cell_n[state] += cell_n[part]
+
     core = [
         ("primary_rejected_vs_primary_retained", "primary_rejected", "primary_retained"),
+        ("metastasis_all_vs_primary_all", "metastasis_all", "primary_all"),
         ("metastasis_rejected_vs_metastasis_retained", "metastasis_rejected", "metastasis_retained"),
         ("metastasis_retained_vs_primary_retained", "metastasis_retained", "primary_retained"),
         ("metastasis_rejected_vs_primary_retained", "metastasis_rejected", "primary_retained"),
