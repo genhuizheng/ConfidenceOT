@@ -100,25 +100,21 @@ def figure_depth(source: Path, out: Path) -> None:
         print("  skip: no depth summaries")
         return
 
-    fig, axis = plt.subplots(figsize=(9.5, 5.2))
-    distance = [abs(v - 0.5) for v in values]
-    # Sequential by magnitude of the problem: one hue, light to dark.
-    shades = [plt.matplotlib.colors.to_hex(plt.cm.Blues(0.35 + 0.5 * d / max(distance + [0.01])))
-              for d in distance]
-    bars = axis.bar(labels, values, color=shades, width=0.62, zorder=3)
-    axis.axhline(0.5, color=INK2, linewidth=1.4, linestyle="--", zorder=2)
-    axis.text(len(labels) - 0.42, 0.512, "no depth effect", fontsize=11, color=INK2, ha="right")
-    for bar, value in zip(bars, values):
-        offset = 0.022 if value >= 0.5 else -0.05
-        axis.text(bar.get_x() + bar.get_width() / 2, value + offset, f"{value:.2f}",
-                  ha="center", fontsize=13, color=INK, fontweight="semibold")
-    axis.set_ylim(0, max(1.0, max(values) + 0.12))
-    axis.set_ylabel("how well depth predicts the gate\n(AUC; 0.5 = not at all)")
-    axis.set_title("The gate was largely reading sequencing depth")
+    # Plotted as the size of the depth effect, so zero is the goal and shorter
+    # is better. The signed AUC needs the reader to hold "0.5 is perfect and
+    # either direction is bad" in mind, which is one thought too many.
+    sizes = [abs(v - 0.5) for v in values]
+    fig, axis = plt.subplots(figsize=(9.5, 5.0))
+    bars = axis.bar(labels, sizes, color=BLUE, width=0.6, zorder=3)
+    for bar, size in zip(bars, sizes):
+        axis.text(bar.get_x() + bar.get_width() / 2, size + 0.012, f"{size:.2f}",
+                  ha="center", fontsize=14, color=INK, fontweight="semibold")
+    axis.set_ylim(0, max(sizes) + 0.09)
+    axis.set_ylabel("size of the depth effect\n(0 = none)")
+    axis.set_title("How much of the gate was sequencing depth")
     axis.grid(axis="y", zorder=0)
     axis.set_axisbelow(True)
-    finish(fig, out / "fig1_depth_in_gate.png",
-           "Departure from 0.5 in either direction is a depth effect.")
+    finish(fig, out / "fig1_depth_in_gate.png", "Shorter is better. Zero is perfect.")
 
 
 def figure_representation(source: Path, out: Path) -> None:
@@ -126,67 +122,48 @@ def figure_representation(source: Path, out: Path) -> None:
     arms = ["homogeneous_depth_cv0", "homogeneous_depth_cv_low",
             "homogeneous_depth_cv_mid", "homogeneous_depth_cv_high"]
     pretty = ["none", "low", "medium", "high"]
+    # One thing that worked, in colour; three that did not, in grey. The eye
+    # should land on the line that goes to zero without reading a legend first.
     series = [
-        ("standard (log-CPM)", "sim_log_cpm_arms.csv", BLUE),
-        ("rank, top 256", "sim_rank256_arms.csv", ORANGE),
-        ("rank without gene median", "sim_rank_no_median_arms.csv", AQUA),
-        ("Pearson residuals", "sim_pearson_residuals_arms.csv", MAGENTA),
+        ("gene ranking", "sim_rank256_arms.csv", ORANGE, 2.6),
+        ("standard", "sim_log_cpm_arms.csv", MUTED, 1.8),
+        ("ranking, no gene median", "sim_rank_no_median_arms.csv", "#b9b9b3", 1.6),
+        ("Pearson residuals", "sim_pearson_residuals_arms.csv", "#b9b9b3", 1.6),
     ]
-    fig, (left, right) = plt.subplots(1, 2, figsize=(13.5, 5.4),
-                                      gridspec_kw={"width_ratios": [1.55, 1]})
-    drawn = 0
-    for label, name, colour in series:
+    fig, axis = plt.subplots(figsize=(10.4, 5.4))
+    drawn, f1_note = 0, ""
+    for label, name, colour, width in series:
         table = read(source, name)
         if table is None or "auc_total_counts" not in table:
             continue
         table = table.set_index("arm")
         if not set(arms) <= set(table.index):
             continue
-        values = table.loc[arms, "auc_total_counts"].to_numpy(float)
-        left.plot(pretty, values, marker="o", markersize=8, linewidth=2,
-                  color=colour, label=label, zorder=3)
-        left.annotate(label, (len(pretty) - 1, values[-1]), xytext=(8, 0),
-                      textcoords="offset points", color=colour, fontsize=11,
+        # The size of the effect, so every line going down is an improvement.
+        sizes = np.abs(table.loc[arms, "auc_total_counts"].to_numpy(float) - 0.5)
+        axis.plot(pretty, sizes, marker="o", markersize=8, linewidth=width,
+                  color=colour, zorder=3)
+        axis.annotate(label, (len(pretty) - 1, sizes[-1]), xytext=(9, 0),
+                      textcoords="offset points", color=colour, fontsize=12,
                       va="center", fontweight="semibold")
+        if label == "gene ranking" and "perturbed_f1" in table:
+            if "perturbed_depth_cv0" in table.index:
+                f1_note = (f"Detection of a known 20% subpopulation barely moves: "
+                           f"F1 {float(table.loc['perturbed_depth_cv0', 'perturbed_f1']):.2f}")
         drawn += 1
     if not drawn:
         plt.close(fig)
         print("  skip: no simulation summaries")
         return
-    left.axhline(0.5, color=INK2, linewidth=1.4, linestyle="--", zorder=2)
-    left.set_xlabel("how unequal the sequencing depth is")
-    left.set_ylabel("depth effect on the gate\n(AUC; 0.5 = none)")
-    left.set_title("Ranking genes within each cell removes the depth effect")
-    left.set_ylim(0, 1.05)
-    left.set_xlim(-0.25, len(pretty) + 0.9)
-    left.grid(axis="y", zorder=0)
-    left.set_axisbelow(True)
-    left.legend(loc="lower left", ncol=1)
-
-    names, f1s, colours = [], [], []
-    for label, name, colour in series:
-        table = read(source, name)
-        if table is None or "perturbed_f1" not in table:
-            continue
-        table = table.set_index("arm")
-        if "perturbed_depth_cv0" not in table.index:
-            continue
-        names.append(label.replace(" (log-CPM)", "").replace(", top 256", ""))
-        f1s.append(float(table.loc["perturbed_depth_cv0", "perturbed_f1"]))
-        colours.append(colour)
-    if f1s:
-        bars = right.barh(names, f1s, color=colours, height=0.6, zorder=3)
-        for bar, value in zip(bars, f1s):
-            right.text(value + 0.012, bar.get_y() + bar.get_height() / 2,
-                       f"{value:.3f}", va="center", fontsize=12, color=INK)
-        right.set_xlim(0, max(f1s) + 0.13)
-        right.set_xlabel("detection of a known 20% subpopulation (F1)")
-        right.set_title("At almost no cost in sensitivity")
-        right.grid(axis="x", zorder=0)
-        right.set_axisbelow(True)
-        right.invert_yaxis()
+    axis.set_xlabel("how unequal the sequencing depth is")
+    axis.set_ylabel("size of the depth effect\n(0 = none)")
+    axis.set_title("Ranking genes within each cell is what removes it")
+    axis.set_ylim(-0.03, 0.56)
+    axis.set_xlim(-0.25, len(pretty) + 1.3)
+    axis.grid(axis="y", zorder=0)
+    axis.set_axisbelow(True)
     finish(fig, out / "fig2_representation_benchmark.png",
-           "Simulated data where the correct answer is known.")
+           f"Simulated data where the correct answer is known. {f1_note}")
 
 
 def figure_similarity(source: Path, out: Path) -> None:
@@ -375,6 +352,118 @@ def figure_cellcycle(source: Path, out: Path) -> None:
            "Prostate, depth-corrected arm. Gene-set test: E2F targets NES -3.4, FDR < 0.001.")
 
 
+def figure_umap(source: Path, out: Path, dataset: str, name: str,
+                score: str, score_label: str) -> None:
+    """Three panels that read left to right: two tissues, the split, the reason.
+
+    Axis numbers are omitted. UMAP coordinates have no units and no meaning
+    beyond adjacency, so printing them invites a reader to compare values that
+    are not comparable.
+    """
+    cells = read(source, name)
+    if cells is None or "umap_1" not in cells:
+        return
+    cells = cells.dropna(subset=["umap_1", "umap_2"])
+    if cells.empty:
+        print("  skip: no placed cells")
+        return
+    primary = cells[cells["side"].eq("primary")]
+    metastasis = cells[cells["side"].eq("metastasis")]
+
+    fig, axes = plt.subplots(1, 3, figsize=(15.6, 5.4))
+    for axis in axes:
+        axis.set_xticks([])
+        axis.set_yticks([])
+        for spine in axis.spines.values():
+            spine.set_visible(False)
+
+    axes[0].scatter(primary["umap_1"], primary["umap_2"], s=1.1, c="#d7d7d2",
+                    linewidth=0, rasterized=True)
+    axes[0].scatter(metastasis["umap_1"], metastasis["umap_2"], s=1.1, c=BLUE,
+                    linewidth=0, alpha=0.6, rasterized=True)
+    axes[0].set_title("the two tissues")
+    axes[0].text(0.02, 0.97, "primary", color="#8a8a85", fontsize=13,
+                 transform=axes[0].transAxes, va="top", fontweight="semibold")
+    axes[0].text(0.02, 0.91, "metastasis", color=BLUE, fontsize=13,
+                 transform=axes[0].transAxes, va="top", fontweight="semibold")
+
+    kept = primary[primary["retained"].astype(bool)]
+    dropped = primary[~primary["retained"].astype(bool)]
+    axes[1].scatter(dropped["umap_1"], dropped["umap_2"], s=1.1, c="#d7d7d2",
+                    linewidth=0, rasterized=True)
+    axes[1].scatter(kept["umap_1"], kept["umap_2"], s=1.3, c=ORANGE,
+                    linewidth=0, rasterized=True)
+    share = float(primary["retained"].astype(bool).mean())
+    axes[1].set_title("which primary cells the method kept")
+    axes[1].text(0.02, 0.97, f"kept  {share:.0%}", color=ORANGE, fontsize=13,
+                 transform=axes[1].transAxes, va="top", fontweight="semibold")
+    axes[1].text(0.02, 0.91, "not kept", color="#8a8a85", fontsize=13,
+                 transform=axes[1].transAxes, va="top", fontweight="semibold")
+
+    if score in primary:
+        values = primary[score].to_numpy(float)
+        finite = np.isfinite(values)
+        order = np.argsort(values[finite])
+        low, high = np.nanpercentile(values[finite], [2, 98])
+        dots = axes[2].scatter(primary["umap_1"].to_numpy()[finite][order],
+                               primary["umap_2"].to_numpy()[finite][order],
+                               s=1.1, c=values[finite][order], cmap="YlOrRd",
+                               vmin=low, vmax=high, linewidth=0, rasterized=True)
+        bar = fig.colorbar(dots, ax=axes[2], fraction=0.04, pad=0.02)
+        bar.set_label(score_label, fontsize=12)
+        bar.set_ticks([low, high])
+        bar.set_ticklabels(["low", "high"])
+        bar.outline.set_visible(False)
+        axes[2].set_title(score_label)
+    else:
+        axes[2].set_visible(False)
+
+    fig.suptitle(dataset, fontsize=16, fontweight="semibold", y=1.02)
+    finish(fig, out / f"fig_umap_{dataset.split()[0].lower()}.png",
+           "Every dot is one cell, on the embedding published with the dataset.")
+
+
+def figure_hallmark_groups(source: Path, out: Path, dataset: str, name: str,
+                           scores: list[str]) -> None:
+    """Where the kept cells sit relative to the rejected ones and the metastasis."""
+    cells = read(source, name)
+    if cells is None or "group" not in cells:
+        return
+    present = [s for s in scores if s in cells.columns]
+    if not present:
+        print("  skip: no requested scores present")
+        return
+    order = ["primary rejected", "primary retained", "metastasis"]
+    colours = {"primary rejected": "#b9b9b3", "primary retained": ORANGE,
+               "metastasis": BLUE}
+
+    fig, axes = plt.subplots(1, len(present), figsize=(3.5 * len(present), 5.2),
+                             sharey=False)
+    axes = np.atleast_1d(axes)
+    for axis, score in zip(axes, present):
+        data = [cells.loc[cells["group"].eq(g), score].dropna().to_numpy()
+                for g in order]
+        parts = axis.violinplot(data, positions=range(len(order)), widths=0.78,
+                                showextrema=False, showmedians=True)
+        for body, group in zip(parts["bodies"], order):
+            body.set_facecolor(colours[group])
+            body.set_alpha(0.85)
+            body.set_edgecolor(SURFACE)
+            body.set_linewidth(1.2)
+        parts["cmedians"].set_color(INK)
+        parts["cmedians"].set_linewidth(2.2)
+        axis.set_xticks(range(len(order)))
+        axis.set_xticklabels(["not\nkept", "kept", "metastasis"], fontsize=12)
+        axis.set_title(score.replace("_", " "), fontsize=13)
+        axis.grid(axis="y", zorder=0)
+        axis.set_axisbelow(True)
+    axes[0].set_ylabel("pathway score per cell")
+    fig.suptitle(f"{dataset}: do the kept cells look like the metastasis?",
+                 fontsize=16, fontweight="semibold", y=1.03)
+    finish(fig, out / f"fig_hallmark_{dataset.split()[0].lower()}.png",
+           "If they do, the middle violin sits between the other two and leans right.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_dir", type=Path, help="Unpacked report_inputs directory")
@@ -392,6 +481,18 @@ def main() -> None:
         ("patients", lambda: figure_patients(args.input_dir, args.output_dir)),
         ("gsea", lambda: figure_gsea(args.input_dir, args.output_dir, args.faming_gsea)),
         ("cell cycle", lambda: figure_cellcycle(args.input_dir, args.output_dir)),
+        ("umap ovarian", lambda: figure_umap(
+            args.input_dir, args.output_dir, "Ovarian cancer", "umap_ovarian.csv.gz",
+            "cell_division", "cell division score")),
+        ("umap prostate", lambda: figure_umap(
+            args.input_dir, args.output_dir, "Prostate cancer", "umap_prostate.csv.gz",
+            "cell_division", "cell division score")),
+        ("hallmark ovarian", lambda: figure_hallmark_groups(
+            args.input_dir, args.output_dir, "Ovarian cancer", "umap_ovarian.csv.gz",
+            ["cell_division", "interferon", "mesenchymal"])),
+        ("hallmark prostate", lambda: figure_hallmark_groups(
+            args.input_dir, args.output_dir, "Prostate cancer", "umap_prostate.csv.gz",
+            ["cell_division", "androgen_signalling", "mesenchymal", "interferon"])),
     ):
         print(f"{name}:")
         try:

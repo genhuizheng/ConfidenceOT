@@ -58,6 +58,39 @@ DEFAULT_SETS = (
     "HALLMARK_E2F_TARGETS",
 )
 
+# Focused signatures for the per-cell score, deliberately small.
+#
+# A Hallmark set averaged per cell does not discriminate: scored that way,
+# G2M_CHECKPOINT gave medians of 0.50, 0.51 and 0.50 across rejected primary,
+# retained primary and metastatic cells, while the gene-set test on the same
+# data put E2F targets at NES -3.4. Both are right about different things. The
+# differential expression is roughly 1.8-fold on TOP2A and 1.6-fold on MKI67,
+# and spreading that over 190 genes, most of them broadly expressed, dilutes it
+# below the per-cell noise. Enrichment tests rank genes and so survive the
+# dilution; a mean does not.
+#
+# So the per-cell score uses the genes that carry the signal, and the Hallmark
+# sets stay where they work, in the enrichment tests.
+FOCUSED_SETS = {
+    "cell_division": [
+        "MKI67", "TOP2A", "CCNB1", "CCNB2", "CDK1", "UBE2C", "BIRC5", "TPX2",
+        "NUSAP1", "CENPF", "CENPE", "AURKB", "PLK1", "KIF11", "ASPM", "NDC80",
+        "RRM2", "TYMS", "PCNA", "MCM2",
+    ],
+    "androgen_signalling": [
+        "KLK3", "KLK2", "KLK4", "NKX3-1", "TMPRSS2", "FKBP5", "PMEPA1",
+        "STEAP4", "ABCC4", "SLC45A3",
+    ],
+    "mesenchymal": [
+        "VIM", "FN1", "CDH2", "SNAI1", "SNAI2", "ZEB1", "ZEB2", "TWIST1",
+        "SPARC", "TAGLN", "COL1A1", "THBS1",
+    ],
+    "interferon": [
+        "ISG15", "IFIT1", "IFIT3", "MX1", "MX2", "OAS1", "OASL", "STAT1",
+        "IRF7", "CXCL10", "IFI6", "IFI44L",
+    ],
+}
+
 
 def read_gmt(path: Path, wanted: tuple[str, ...]) -> dict[str, list[str]]:
     sets: dict[str, list[str]] = {}
@@ -102,21 +135,47 @@ def symbol_index(data) -> dict[str, int]:
     return index
 
 
-def set_scores(data, sets: dict[str, list[str]]) -> pd.DataFrame:
+def set_scores(data, sets: dict[str, list[str]], bins: int = 25) -> pd.DataFrame:
+    """Score each set against a control set matched on expression level.
+
+    Subtracting a control set drawn from the same expression bins removes the
+    part of a score that only reflects how abundant its genes happen to be, so
+    two sets of different average abundance become comparable and a cell's
+    library size stops setting the baseline. This is the construction scanpy's
+    ``score_genes`` uses, and without it the score is mostly a restatement of
+    total expression.
+    """
     matrix = sparse.csr_matrix(expression_matrix(data), dtype=np.float64)
     totals = np.asarray(matrix.sum(axis=1)).ravel()
     totals[totals == 0] = 1.0
     scaled = (sparse.diags(1e6 / totals) @ matrix).tocsr()
     scaled.data = np.log1p(scaled.data)
     index = symbol_index(data)
+
+    average = np.asarray(scaled.mean(axis=0)).ravel()
+    ranks = pd.Series(average).rank(method="first")
+    binned = pd.qcut(ranks, min(bins, max(2, len(average) // 50)),
+                     labels=False, duplicates="drop").to_numpy()
+    generator = np.random.default_rng(20260916)
+
     scores = {}
     for name, genes in sets.items():
-        columns = [index[gene] for gene in genes if gene in index]
+        columns = np.asarray([index[gene] for gene in genes if gene in index], dtype=int)
         label = name.replace("HALLMARK_", "").lower()
-        scores[label] = (
-            np.asarray(scaled[:, columns].mean(axis=1)).ravel()
-            if columns else np.full(scaled.shape[0], np.nan)
-        )
+        if columns.size == 0:
+            scores[label] = np.full(scaled.shape[0], np.nan)
+            continue
+        # One control gene per set gene, from the same expression bin.
+        control: list[int] = []
+        for bin_id, count in zip(*np.unique(binned[columns], return_counts=True)):
+            pool = np.setdiff1d(np.flatnonzero(binned == bin_id), columns)
+            if pool.size:
+                control.extend(generator.choice(
+                    pool, size=min(int(count) * 10, pool.size), replace=False))
+        signal = np.asarray(scaled[:, columns].mean(axis=1)).ravel()
+        baseline = (np.asarray(scaled[:, np.asarray(control, dtype=int)].mean(axis=1)).ravel()
+                    if control else 0.0)
+        scores[label] = signal - baseline
     return pd.DataFrame(scores)
 
 
@@ -136,8 +195,11 @@ def main() -> None:
 
     wanted = tuple(args.sets) if args.sets else DEFAULT_SETS
     sets = read_gmt(args.hallmark_gmt, wanted)
-    print(f"gene sets: " + ", ".join(f"{k.replace('HALLMARK_','')}({len(v)})"
-                                     for k, v in sets.items()))
+    # Both kinds travel: the Hallmark means for continuity with the enrichment
+    # tests, and the focused signatures because only those discriminate per cell.
+    sets.update(FOCUSED_SETS)
+    print("gene sets: " + ", ".join(f"{k.replace('HALLMARK_','')}({len(v)})"
+                                    for k, v in sets.items()))
 
     stored = None
     if args.umap_h5ad:
