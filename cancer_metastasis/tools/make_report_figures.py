@@ -31,10 +31,59 @@ YELLOW, MAGENTA = "#eda100", "#e87ba4"
 INK, INK2, MUTED = "#0b0b0b", "#52514e", "#8a8a85"
 SURFACE = "#fcfcfb"
 
+# Two androgen sets sit in the same figure and disagree, so each panel has to
+# name the genes it scored rather than both reading "androgen".
+SCORE_LABELS = {
+    "androgen_signalling": "androgen targets\n(KLK3, NKX3-1, ...)",
+    "androgen_response": "androgen response\n(HALLMARK)",
+    "cell_division": "cell division",
+    "epithelial_mesenchymal_transition": "EMT\n(HALLMARK)",
+    "interferon_gamma_response": "interferon gamma\n(HALLMARK)",
+}
+
+
+def readable_limits(axis, values, *, separation=4.0, pad=0.12):
+    """Rescale only when one point is far enough out to flatten the rest.
+
+    One lymph node has lost its androgen targets almost completely, and on a
+    full-range axis that single point flattens the four kept-cell differences
+    the panel exists to show. Dropping it would be dishonest and keeping the
+    axis wide makes the panel unreadable, so the axis is set from the remaining
+    points and the excluded one is drawn at the boundary with its real value.
+
+    With four patients a percentile rule would exclude the extremes by
+    construction, so the test is relative instead: rescale only if the largest
+    deviation from the median exceeds `separation` times the next largest. That
+    fires on a point an order of magnitude out and leaves an ordinary spread
+    alone.
+    """
+    values = np.asarray([v for v in values if np.isfinite(v)], float)
+    if values.size < 4:
+        return None
+    deviation = np.abs(values - np.median(values))
+    order = np.argsort(deviation)[::-1]
+    largest, runner_up = deviation[order[0]], deviation[order[1]]
+    if runner_up <= 0 or largest < separation * runner_up:
+        return None
+    inner = np.delete(values, order[0])
+    low, high = float(inner.min()), float(inner.max())
+    span = high - low or abs(high) or 1.0
+    lower, upper = min(low - pad * span, 0.0), max(high + pad * span, 0.0)
+    axis.set_ylim(lower, upper)
+    return lower, upper
+
+
+# The slide background, so a figure leaves no visible seam against it.
+PAPER = "#ffffff"
+
+# The embedding fills its panel now, so an in-panel label would otherwise land
+# on the cells it is describing.
+LABEL_BOX = dict(facecolor=PAPER, edgecolor="none", alpha=0.82, pad=1.6)
+
 plt.rcParams.update({
-    "figure.facecolor": SURFACE,
-    "axes.facecolor": SURFACE,
-    "savefig.facecolor": SURFACE,
+    "figure.facecolor": PAPER,
+    "axes.facecolor": PAPER,
+    "savefig.facecolor": PAPER,
     "font.size": 13,
     "axes.labelsize": 13,
     "axes.titlesize": 15,
@@ -57,7 +106,15 @@ plt.rcParams.update({
 
 def finish(fig, path: Path, note: str | None = None) -> None:
     if note:
-        fig.text(0.01, 0.01, note, fontsize=10, color=MUTED, ha="left", va="bottom")
+        # The note is placed in figure coordinates, so a two-line axis label
+        # reaches down into it unless the axes are lifted first. Reserving the
+        # room here fixes it once for every figure instead of per caller, and a
+        # caller that already reserved more keeps its own value.
+        reserved = max(fig.subplotpars.bottom, 0.2)
+        if reserved > fig.subplotpars.bottom:
+            fig.subplots_adjust(bottom=reserved)
+        fig.text(0.01, 0.01, note, fontsize=10, color=MUTED, ha="left",
+                 va="bottom")
     fig.savefig(path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"  wrote {path.name}")
@@ -131,7 +188,7 @@ def figure_representation(source: Path, out: Path) -> None:
         ("Pearson residuals", "sim_pearson_residuals_arms.csv", "#b9b9b3", 1.6),
     ]
     fig, axis = plt.subplots(figsize=(10.4, 5.4))
-    drawn, f1_note = 0, ""
+    placed, f1_note = [], ""
     for label, name, colour, width in series:
         table = read(source, name)
         if table is None or "auc_total_counts" not in table:
@@ -143,25 +200,41 @@ def figure_representation(source: Path, out: Path) -> None:
         sizes = np.abs(table.loc[arms, "auc_total_counts"].to_numpy(float) - 0.5)
         axis.plot(pretty, sizes, marker="o", markersize=8, linewidth=width,
                   color=colour, zorder=3)
-        axis.annotate(label, (len(pretty) - 1, sizes[-1]), xytext=(9, 0),
-                      textcoords="offset points", color=colour, fontsize=12,
-                      va="center", fontweight="semibold")
+        placed.append((label, colour, float(sizes[-1])))
         if label == "gene ranking" and "perturbed_f1" in table:
             if "perturbed_depth_cv0" in table.index:
                 f1_note = (f"Detection of a known 20% subpopulation barely moves: "
                            f"F1 {float(table.loc['perturbed_depth_cv0', 'perturbed_f1']):.2f}")
-        drawn += 1
-    if not drawn:
+    if not placed:
         plt.close(fig)
         print("  skip: no simulation summaries")
         return
+
+    # The three arms that fail all converge on the same value, so their end
+    # labels land on top of one another and read as a smudge. Labels are spread
+    # downwards to a minimum gap, and a leader is drawn when a label has been
+    # moved far enough off its own line to be ambiguous.
+    gap = 0.038
+    placed.sort(key=lambda row: row[2], reverse=True)
+    positions: list[float] = []
+    for _, _, end in placed:
+        target = end if not positions else min(end, positions[-1] - gap)
+        positions.append(target)
+    for (label, colour, end), y in zip(placed, positions):
+        axis.annotate(label, (len(pretty) - 1, y), xytext=(11, 0),
+                      textcoords="offset points", color=colour, fontsize=12,
+                      va="center", fontweight="semibold")
+        if abs(y - end) > gap / 2:
+            axis.plot([len(pretty) - 1, len(pretty) - 0.88], [end, y],
+                      color=colour, linewidth=0.9, zorder=2)
     axis.set_xlabel("how unequal the sequencing depth is")
     axis.set_ylabel("size of the depth effect\n(0 = none)")
     axis.set_title("Ranking genes within each cell is what removes it")
     axis.set_ylim(-0.03, 0.56)
-    axis.set_xlim(-0.25, len(pretty) + 1.3)
+    axis.set_xlim(-0.25, len(pretty) + 1.5)
     axis.grid(axis="y", zorder=0)
     axis.set_axisbelow(True)
+    fig.subplots_adjust(bottom=0.22)
     finish(fig, out / "fig2_representation_benchmark.png",
            f"Simulated data where the correct answer is known. {f1_note}")
 
@@ -218,28 +291,34 @@ def figure_control(source: Path, out: Path) -> None:
     matched = pairs["retained_fraction_matched"].to_numpy(float)
     mismatched = pairs["retained_fraction_mismatched"].to_numpy(float)
 
-    fig, axis = plt.subplots(figsize=(7.4, 5.8))
+    fig, axis = plt.subplots(figsize=(9.2, 5.6))
     for a, b in zip(matched, mismatched):
         axis.plot([0, 1], [a, b], color=MUTED, linewidth=0.7, alpha=0.5, zorder=2)
     axis.scatter(np.zeros_like(matched), matched, s=46, color=BLUE,
                  edgecolor=SURFACE, linewidth=0.8, zorder=3)
     axis.scatter(np.ones_like(mismatched), mismatched, s=46, color=ORANGE,
                  edgecolor=SURFACE, linewidth=0.8, zorder=3)
-    for x, values, colour in ((0, matched, BLUE), (1, mismatched, ORANGE)):
+    # Each median is labelled beside its own line rather than along the bottom,
+    # where the two labels crowded the two-line category names underneath.
+    for x, values, colour, side in ((0, matched, BLUE, -1), (1, mismatched, ORANGE, 1)):
         median = float(np.nanmedian(values))
-        axis.plot([x - 0.16, x + 0.16], [median, median], color=INK, linewidth=2.6, zorder=4)
-        axis.text(x, -0.075, f"median {median:.3f}", ha="center", fontsize=12,
-                  color=colour, fontweight="semibold")
+        axis.plot([x - 0.16, x + 0.16], [median, median], color=INK,
+                  linewidth=2.6, zorder=4)
+        axis.annotate(f"median\n{median:.3f}", (x + side * 0.2, median),
+                      ha="right" if side < 0 else "left", va="center",
+                      fontsize=12, color=colour, fontweight="semibold")
     axis.set_xticks([0, 1])
     axis.set_xticklabels(["own\nmetastasis", "another patient's\nmetastasis"])
-    axis.set_xlim(-0.45, 1.45)
-    axis.set_ylim(-0.13, 1.02)
+    axis.set_xlim(-0.62, 1.62)
+    axis.set_ylim(-0.04, 1.02)
     axis.set_ylabel("fraction of primary cells retained")
     axis.set_title("The method does use the metastasis it is given")
     axis.grid(axis="y", zorder=0)
     axis.set_axisbelow(True)
+    fig.subplots_adjust(bottom=0.2)
     finish(fig, out / "fig4_mismatched_control.png",
-           "94 ovarian pairs, each line one primary sample. Paired test p = 8e-17.")
+           "94 ovarian pairs, each line one primary sample. Paired test "
+           "p = 8e-17.")
 
 
 def figure_patients(source: Path, out: Path) -> None:
@@ -315,13 +394,29 @@ def figure_gsea(source: Path, out: Path, faming: Path | None) -> None:
     axis.set_yticks(positions)
     axis.set_yticklabels(labels)
     axis.invert_yaxis()
-    axis.set_xlabel("enrichment in metastasis / in retained cells  (NES)")
-    axis.set_title("Androgen response agrees; proliferation is exactly reversed")
+    axis.set_xlabel("enrichment in metastasis / in retained cells  (NES)"
+                    if theirs else "enrichment in the retained cells  (NES)")
+    # Without the reference workbook there is only one set of bars, and a title
+    # claiming agreement would not be supported by what the figure shows.
+    axis.set_title("Androgen response agrees; proliferation is exactly reversed"
+                   if theirs else
+                   "Proliferation dominates what separates the retained cells")
     axis.grid(axis="x", zorder=0)
     axis.set_axisbelow(True)
-    axis.legend(loc="lower right")
+    # A single series needs no legend box; the title already names it.
+    if theirs:
+        axis.legend(loc="lower right")
+    # Androgen is the only agreement in the panel and also the weakest call on
+    # our side, so the reader is given the FDR rather than left to weigh a bar
+    # length against five others.
+    fdr = {k: float(ours.loc[k, "fdr"]) for k in keys if "fdr" in ours.columns}
+    detail = ",  ".join(f"{label} {fdr[k]:.3f}" for k, label in zip(keys, labels)
+                        if k in fdr)
+    fig.subplots_adjust(bottom=0.24)
     finish(fig, out / "fig6_gsea_agreement.png",
-           "Both bars point the same way when our retained cells resemble the metastasis.")
+           ("Both bars point the same way when our retained cells resemble the "
+            "metastasis.\n" if theirs else "")
+           + f"Our FDR — {detail}.")
 
 
 def figure_cellcycle(source: Path, out: Path) -> None:
@@ -349,7 +444,11 @@ def figure_cellcycle(source: Path, out: Path) -> None:
                plt.Rectangle((0, 0), 1, 1, color=MUTED)]
     axis.legend(handles, ["cell-division gene", "other"], loc="lower right")
     finish(fig, out / "fig7_cell_cycle.png",
-           "Prostate, depth-corrected arm. Gene-set test: E2F targets NES -3.4, FDR < 0.001.")
+           # Signed the same way as the enrichment figure -- positive means
+           # enriched in the retained cells -- so the two slides cannot appear
+           # to disagree about the direction.
+           "Prostate, depth-corrected arm. Gene-set test: E2F targets "
+           "NES +3.4 in the retained cells, FDR < 0.001.")
 
 
 def figure_umap(source: Path, out: Path, dataset: str, name: str,
@@ -370,22 +469,41 @@ def figure_umap(source: Path, out: Path, dataset: str, name: str,
     primary = cells[cells["side"].eq("primary")]
     metastasis = cells[cells["side"].eq("metastasis")]
 
-    fig, axes = plt.subplots(1, 3, figsize=(15.6, 5.4))
+    # A handful of cells sit far outside the body of the embedding, and letting
+    # them set the limits leaves the cloud filling barely half of each panel on
+    # a slide. The limits come from a trimmed range instead, and equal aspect
+    # keeps the embedding undistorted; `bbox_inches="tight"` then crops whatever
+    # letterboxing that leaves.
+    span_x = np.percentile(cells["umap_1"].to_numpy(float), [0.5, 99.5])
+    span_y = np.percentile(cells["umap_2"].to_numpy(float), [0.5, 99.5])
+    pad_x, pad_y = 0.03 * np.ptp(span_x), 0.03 * np.ptp(span_y)
+    aspect = float(np.ptp(span_x) / np.ptp(span_y))
+
+    fig, axes = plt.subplots(1, 3, figsize=(3 * 5.0 * aspect + 1.2, 5.2))
     for axis in axes:
         axis.set_xticks([])
         axis.set_yticks([])
+        axis.set_xlim(span_x[0] - pad_x, span_x[1] + pad_x)
+        axis.set_ylim(span_y[0] - pad_y, span_y[1] + pad_y)
+        axis.set_aspect("equal", adjustable="box")
         for spine in axis.spines.values():
             spine.set_visible(False)
 
-    axes[0].scatter(primary["umap_1"], primary["umap_2"], s=1.1, c="#d7d7d2",
-                    linewidth=0, rasterized=True)
-    axes[0].scatter(metastasis["umap_1"], metastasis["umap_2"], s=1.1, c=BLUE,
-                    linewidth=0, alpha=0.6, rasterized=True)
+    # Drawn in random order. Plotting one group after the other lets the larger
+    # one bury the smaller, and whether the two tissues overlap is the whole
+    # point of the panel: 103k metastatic cells painted over 84k primary ones
+    # made the primary look absent.
+    mixed = cells.sample(frac=1.0, random_state=3)
+    axes[0].scatter(mixed["umap_1"], mixed["umap_2"], s=1.1, linewidth=0,
+                    c=np.where(mixed["side"].eq("metastasis"), BLUE, "#c9c9c3"),
+                    rasterized=True)
     axes[0].set_title("the two tissues")
     axes[0].text(0.02, 0.97, "primary", color="#8a8a85", fontsize=13,
-                 transform=axes[0].transAxes, va="top", fontweight="semibold")
+                 transform=axes[0].transAxes, va="top", fontweight="semibold",
+                 bbox=LABEL_BOX)
     axes[0].text(0.02, 0.91, "metastasis", color=BLUE, fontsize=13,
-                 transform=axes[0].transAxes, va="top", fontweight="semibold")
+                 transform=axes[0].transAxes, va="top", fontweight="semibold",
+                 bbox=LABEL_BOX)
 
     kept = primary[primary["retained"].astype(bool)]
     dropped = primary[~primary["retained"].astype(bool)]
@@ -396,9 +514,11 @@ def figure_umap(source: Path, out: Path, dataset: str, name: str,
     share = float(primary["retained"].astype(bool).mean())
     axes[1].set_title("which primary cells the method kept")
     axes[1].text(0.02, 0.97, f"kept  {share:.0%}", color=ORANGE, fontsize=13,
-                 transform=axes[1].transAxes, va="top", fontweight="semibold")
+                 transform=axes[1].transAxes, va="top", fontweight="semibold",
+                 bbox=LABEL_BOX)
     axes[1].text(0.02, 0.91, "not kept", color="#8a8a85", fontsize=13,
-                 transform=axes[1].transAxes, va="top", fontweight="semibold")
+                 transform=axes[1].transAxes, va="top", fontweight="semibold",
+                 bbox=LABEL_BOX)
 
     if score in primary:
         values = primary[score].to_numpy(float)
@@ -425,43 +545,100 @@ def figure_umap(source: Path, out: Path, dataset: str, name: str,
 
 def figure_hallmark_groups(source: Path, out: Path, dataset: str, name: str,
                            scores: list[str]) -> None:
-    """Where the kept cells sit relative to the rejected ones and the metastasis."""
+    """Per-patient differences, which is the unit the statistics were run in.
+
+    Pooling cells across patients hides the effect. Scored per cell and pooled,
+    cell division reads 0.50, 0.51 and 0.50 across rejected primary, retained
+    primary and metastatic cells, while the paired differential expression on the
+    same data puts TOP2A at 1.8-fold between the primary groups. Patients differ
+    far more in their overall division rate than the two groups differ inside any
+    one patient, so the pooled distribution is dominated by between-patient
+    spread. Taking the difference within each patient first removes it, and
+    matches the paired design the gene-level tests used.
+    """
     cells = read(source, name)
-    if cells is None or "group" not in cells:
+    if cells is None or "group" not in cells or "patient_id" not in cells:
         return
     present = [s for s in scores if s in cells.columns]
     if not present:
         print("  skip: no requested scores present")
         return
-    order = ["primary rejected", "primary retained", "metastasis"]
-    colours = {"primary rejected": "#b9b9b3", "primary retained": ORANGE,
-               "metastasis": BLUE}
 
-    fig, axes = plt.subplots(1, len(present), figsize=(3.5 * len(present), 5.2),
-                             sharey=False)
+    rows = []
+    for patient, group in cells.groupby("patient_id"):
+        kept = group[group["group"].eq("primary retained")]
+        dropped = group[group["group"].eq("primary rejected")]
+        distal = group[group["group"].eq("metastasis")]
+        if len(kept) < 20 or len(dropped) < 20:
+            continue
+        for score in present:
+            base = float(dropped[score].mean())
+            rows.append({"patient": patient, "score": score,
+                         "kept": float(kept[score].mean()) - base,
+                         "metastasis": (float(distal[score].mean()) - base
+                                        if len(distal) >= 20 else np.nan)})
+    paired = pd.DataFrame(rows)
+    if paired.empty:
+        print("  skip: no patient has both groups")
+        return
+    patients = paired["patient"].nunique()
+
+    fig, axes = plt.subplots(1, len(present), figsize=(3.5 * len(present), 5.4))
     axes = np.atleast_1d(axes)
+    rng = np.random.default_rng(7)
     for axis, score in zip(axes, present):
-        data = [cells.loc[cells["group"].eq(g), score].dropna().to_numpy()
-                for g in order]
-        parts = axis.violinplot(data, positions=range(len(order)), widths=0.78,
-                                showextrema=False, showmedians=True)
-        for body, group in zip(parts["bodies"], order):
-            body.set_facecolor(colours[group])
-            body.set_alpha(0.85)
-            body.set_edgecolor(SURFACE)
-            body.set_linewidth(1.2)
-        parts["cmedians"].set_color(INK)
-        parts["cmedians"].set_linewidth(2.2)
-        axis.set_xticks(range(len(order)))
-        axis.set_xticklabels(["not\nkept", "kept", "metastasis"], fontsize=12)
-        axis.set_title(score.replace("_", " "), fontsize=13)
+        subset = paired[paired["score"].eq(score)]
+        columns = [("kept", 0, ORANGE), ("metastasis", 1, BLUE)]
+        pooled = np.concatenate([subset[c].dropna().to_numpy(float)
+                                 for c, _, _ in columns if subset[c].notna().any()])
+        bounds = readable_limits(axis, pooled)
+        for column, position, colour in columns:
+            values = subset[column].dropna().to_numpy(float)
+            if not values.size:
+                continue
+            jitter = rng.uniform(-0.1, 0.1, values.size)
+            drawn, outside = values, np.zeros(values.size, bool)
+            if bounds is not None:
+                drawn = np.clip(values, *bounds)
+                outside = drawn != values
+            axis.scatter(jitter[~outside] + position, drawn[~outside], s=70,
+                         color=colour, edgecolor=SURFACE, linewidth=1.0, zorder=3)
+            axis.scatter(jitter[outside] + position, drawn[outside], s=70,
+                         facecolor=SURFACE, edgecolor=colour, linewidth=1.8,
+                         zorder=3)
+            # The label sits inside the axis, away from the boundary it was
+            # clipped to, so it cannot land on the title or the tick labels.
+            for x, y, true in zip(jitter[outside] + position, drawn[outside],
+                                  values[outside]):
+                axis.annotate(f"{true:+.2f}", (x, y),
+                              xytext=(0, 13 if true < np.median(values) else -15),
+                              textcoords="offset points", ha="center", fontsize=10,
+                              color=colour)
+            # The median is of the real values, so a clipped point still counts.
+            median = float(np.median(values))
+            if bounds is None or bounds[0] <= median <= bounds[1]:
+                axis.plot([position - 0.26, position + 0.26], [median, median],
+                          color=INK, linewidth=2.4, zorder=4)
+        axis.axhline(0, color=INK2, linewidth=1.2, linestyle="--", zorder=2)
+        axis.set_xticks([0, 1])
+        # Both columns name their baseline, so the contrast under test is on
+        # the axis and cannot be read as kept-versus-metastasis.
+        axis.set_xticklabels(["kept\nvs rejected", "metastasis\nvs rejected"],
+                             fontsize=12)
+        axis.set_xlim(-0.55, 1.55)
+        axis.set_title(SCORE_LABELS.get(score, score.replace("_", " ")), fontsize=13)
         axis.grid(axis="y", zorder=0)
         axis.set_axisbelow(True)
-    axes[0].set_ylabel("pathway score per cell")
-    fig.suptitle(f"{dataset}: do the kept cells look like the metastasis?",
-                 fontsize=16, fontweight="semibold", y=1.03)
+    axes[0].set_ylabel("difference from the rejected primary cells\n"
+                       "(within each patient)")
+    fig.suptitle(f"{dataset}: what separates the kept primary cells "
+                 "from the rejected ones",
+                 fontsize=16, fontweight="semibold", y=1.04)
+    fig.subplots_adjust(wspace=0.46, bottom=0.22)
     finish(fig, out / f"fig_hallmark_{dataset.split()[0].lower()}.png",
-           "If they do, the middle violin sits between the other two and leans right.")
+           f"One dot per patient (n = {patients}). Orange is the contrast under "
+           "test; blue is the metastasis on the same baseline, for reference. "
+           "Hollow dots fall outside the axis and carry their real value.")
 
 
 def main() -> None:
@@ -490,9 +667,13 @@ def main() -> None:
         ("hallmark ovarian", lambda: figure_hallmark_groups(
             args.input_dir, args.output_dir, "Ovarian cancer", "umap_ovarian.csv.gz",
             ["cell_division", "interferon", "mesenchymal"])),
+        # The same three scores as the ovarian panel, so the two cancers can be
+        # read side by side. Androgen is deliberately not scored per cell here:
+        # the paired pseudobulk test is the instrument that call rests on, and a
+        # per-cell mean over a focused set is the weaker measurement of the two.
         ("hallmark prostate", lambda: figure_hallmark_groups(
             args.input_dir, args.output_dir, "Prostate cancer", "umap_prostate.csv.gz",
-            ["cell_division", "androgen_signalling", "mesenchymal", "interferon"])),
+            ["cell_division", "interferon", "mesenchymal"])),
     ):
         print(f"{name}:")
         try:
