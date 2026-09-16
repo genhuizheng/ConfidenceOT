@@ -285,7 +285,77 @@ def cell_qc_table(
     })
 
 
-def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int):
+def _nonzero_median_per_gene(matrix: Any) -> np.ndarray:
+    """Median of each gene's nonzero values, as Geneformer defines its scale.
+
+    Zeros are excluded because including them would make the median zero for
+    almost every gene in single-cell data, leaving nothing to divide by.
+    """
+    columns = matrix.tocsc()
+    medians = np.ones(columns.shape[1], dtype=np.float64)
+    for gene in range(columns.shape[1]):
+        start, stop = columns.indptr[gene], columns.indptr[gene + 1]
+        if stop > start:
+            medians[gene] = float(np.median(columns.data[start:stop]))
+    return np.where(medians > 0, medians, 1.0)
+
+
+def rank_value_encode(joint: Any, top_n: int) -> Any:
+    """Encode each cell as its ranking of genes, in Geneformer's formulation.
+
+    Each cell is divided by its own total, each gene by its nonzero median over
+    the joint matrix, and the genes are then ranked within the cell.  The two
+    divisions are what make the ordering informative: ranking raw expression
+    puts the same housekeeping genes on top of every cell, whereas ranking
+    ``expression / gene median`` puts whatever is unusually high in *this* cell
+    on top.
+
+    The median must be taken over both sides together.  Taken per side it would
+    normalise away exactly the cross-side differences the gate exists to
+    detect, and the method would be blind by construction.
+
+    Only the top ``top_n`` genes are kept, and the value falls linearly from
+    1.0 to 1/top_n across them.  A fixed cut is what makes the encoding
+    depth-invariant: cells differ in how many genes they detect, so a variable
+    cut would let detection breadth back in, which is the part of the depth
+    effect that survives subsampling to a common total -- on GSE180661 the gate
+    still tracked original depth at AUC 0.557 among cells all sitting at
+    exactly 3,119 counts. ``top_n`` therefore has to stay below the shallowest
+    cell's detected-gene count.
+    """
+    if top_n < 2:
+        raise ValueError("top_n must be at least 2")
+    totals = np.asarray(joint.sum(axis=1)).ravel()
+    scaled = sparse.diags(1.0 / np.maximum(totals, 1e-12)) @ sparse.csr_matrix(joint)
+    medians = _nonzero_median_per_gene(scaled)
+    scaled = (scaled @ sparse.diags(1.0 / medians)).tocsr()
+
+    rows, columns, values = [], [], []
+    for cell in range(scaled.shape[0]):
+        start, stop = scaled.indptr[cell], scaled.indptr[cell + 1]
+        if stop == start:
+            continue
+        data = scaled.data[start:stop]
+        genes = scaled.indices[start:stop]
+        keep = min(top_n, data.size)
+        # Stable sort so ties break on gene order, making the encoding
+        # reproducible rather than dependent on the sort implementation.
+        order = np.argsort(-data, kind="stable")[:keep]
+        rows.append(np.full(keep, cell, dtype=np.int64))
+        columns.append(genes[order])
+        values.append(1.0 - np.arange(keep, dtype=np.float64) / float(top_n))
+    if not rows:
+        raise ValueError("Every cell is empty; nothing to rank")
+    return sparse.csr_matrix(
+        (np.concatenate(values), (np.concatenate(rows), np.concatenate(columns))),
+        shape=scaled.shape,
+    )
+
+
+def prepare_joint_representation(
+    source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int,
+    representation: str = "log_cpm", rank_top_n: int = 512,
+):
     source_keys, target_keys = gene_keys(source), gene_keys(target)
     source_first: dict[str, int] = {}
     target_first: dict[str, int] = {}
@@ -313,9 +383,28 @@ def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs:
         scaled = sparse.diags(1e4 / np.maximum(totals, 1.0)) @ matrix
         scaled.data = np.log1p(scaled.data)
         return scaled, "raw counts -> library size 1e4 -> log1p"
-    source_x, source_transform = normalize(source_x, source_kind)
-    target_x, target_transform = normalize(target_x, target_kind)
-    joint = sparse.vstack([source_x, target_x], format="csr")
+    if representation not in ("log_cpm", "rank_value"):
+        raise ValueError(f"Unknown representation {representation!r}")
+    if representation == "rank_value":
+        # Stacked before any per-side transformation, so the gene medians and
+        # the ranking see one corpus. A per-side transform here would defeat
+        # the joint median.
+        if source_kind != target_kind:
+            raise ValueError(
+                "rank_value needs both sides on one scale; found "
+                f"{source_kind!r} and {target_kind!r}"
+            )
+        joint = rank_value_encode(
+            sparse.vstack([source_x, target_x], format="csr"), rank_top_n
+        )
+        source_transform = target_transform = (
+            f"joint rank-value encoding, top {rank_top_n} genes per cell, "
+            "expression divided by each gene's nonzero median over both sides"
+        )
+    else:
+        source_x, source_transform = normalize(source_x, source_kind)
+        target_x, target_transform = normalize(target_x, target_kind)
+        joint = sparse.vstack([source_x, target_x], format="csr")
     mean = np.asarray(joint.mean(axis=0)).ravel()
     mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
     selected = np.argsort(-(mean2 - mean * mean), kind="stable")[: min(n_hvg, len(common))]
@@ -331,7 +420,12 @@ def prepare_joint_representation(source: Any, target: Any, *, n_hvg: int, n_pcs:
         "target_expression_kind": target_kind,
         "source_transform": source_transform,
         "target_transform": target_transform,
-        "joint_hvg": "top variance after side-specific declared-expression transformation",
+        "representation": representation,
+        "rank_top_n": rank_top_n if representation == "rank_value" else None,
+        "joint_hvg": (
+            "top variance of the rank encoding" if representation == "rank_value"
+            else "top variance after side-specific declared-expression transformation"
+        ),
         "joint_pca": "centered and gene-scaled PCA",
     }
     return coordinates[: source.n_obs], coordinates[source.n_obs :], [common[index] for index in selected], preprocessing

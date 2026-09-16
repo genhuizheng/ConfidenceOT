@@ -231,7 +231,8 @@ def run_replicate(
     source = as_anndata(source_counts, "s")
     target = as_anndata(target_counts, "t")
     source_pca, target_pca, hvg, _ = prepare_joint_representation(
-        source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed
+        source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
+        representation=args.representation, rank_top_n=args.rank_top_n,
     )
     pairs = min(1_000_000, len(source_pca) * len(target_pca))
     sampled = np.sum(
@@ -371,6 +372,21 @@ def main() -> None:
     parser.add_argument("--median-depth", type=float, default=10000.0)
     parser.add_argument("--dispersion", type=float, default=2.0)
     parser.add_argument("--perturbation-log2", type=float, default=1.0)
+    parser.add_argument(
+        "--representation", choices=("log_cpm", "rank_value"), default="log_cpm",
+        help="Cell representation. 'rank_value' is the Geneformer formulation: "
+             "expression over each gene's nonzero median, ranked within the "
+             "cell, top --rank-top-n kept. It is depth-invariant by "
+             "construction, where subsampling to a common total left the gate "
+             "tracking original depth at AUC 0.557 on GSE180661.",
+    )
+    parser.add_argument(
+        "--rank-top-n", type=int, default=512,
+        help="Genes kept per cell under rank_value. Must stay below the "
+             "shallowest cell's detected-gene count or detection breadth, the "
+             "surviving part of the depth effect, re-enters through the "
+             "list length.",
+    )
     parser.add_argument("--n-hvg", type=int, default=2000)
     parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--source-rejection-budget", type=float, default=0.85)
