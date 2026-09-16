@@ -7,12 +7,23 @@ metastasis retained/rejected.
 **What a cell must satisfy to enter a pseudobulk.**  Three requirements, and
 only the middle one has changed:
 
-1. *Site consensus.*  A primary cell can occur in several pair fits, one per
-   metastatic partner of its sample.  It is counted once, and enters the main
-   analysis only when every one of those fits agrees on its label.  This has
-   nothing to do with calibration and is unchanged: it exists so that one
-   biological cell contributes one vector, and so that a cell the sites
-   disagree about is audited rather than silently assigned.
+1. *One lesion per patient.*  Retention is a property of a (primary cell,
+   metastasis) pair, not of the cell: 64% of this dataset's primary cells carry
+   different labels against different lesions of the same patient, and the
+   per-pair retained fraction ranges from 0.07 to 0.67.  Requiring a cell to be
+   retained against every lesion left 6 cells out of 1,332 for the first
+   patient, and every softer collapsing rule -- majority, any-site -- states a
+   claim the data does not make, because "most of this patient's lesions" is
+   not a biological object and the partner count varies per patient.  So one
+   lesion is named per patient, the one with the most cells, and each primary
+   cell is gated exactly once against it.  ``retained`` then means compatible
+   with that lesion, which is a claim the design supports.  Size is fixed
+   before any gate is fitted, so the choice cannot be steered by the result.
+
+   The site-consensus machinery is kept and still runs; with one lesion it is
+   satisfied trivially on the primary side, and it continues to ensure that a
+   metastatic cell paired with several primaries contributes one vector.
+   ``--metastasis-selection all`` restores the previous behaviour.
 
 2. *Calibration.*  The pair's M4-E calibration must have found a feasible cost
    and produced a clean fit with a valid inference certificate.  This replaces
@@ -88,6 +99,12 @@ def parse_args() -> argparse.Namespace:
         "--robustness-csv", type=Path, default=None,
         help="Origin-group robustness table. When given, one primary sample is "
              "selected per metastasis. Left out, every primary sample enters.",
+    )
+    parser.add_argument(
+        "--metastasis-selection", choices=("largest", "all"), default="largest",
+        help="'largest' names one lesion per patient and gates each primary "
+             "cell once against it. 'all' keeps every lesion and requires a "
+             "cell to carry the same label against all of them.",
     )
     parser.add_argument("--malignant-annotation", default=MALIGNANT)
     parser.add_argument("--include-exact-winner-unstable", action="store_true")
@@ -168,6 +185,74 @@ def analysis_groups(
     # have to know which one produced it.
     groups["source_sample"] = groups["baseline_winner"].astype(str)
     return groups
+
+
+def designate_metastasis(groups: pd.DataFrame, manifest: pd.DataFrame) -> pd.DataFrame:
+    """Keep the largest metastatic sample per patient and drop the rest.
+
+    Cell count is fixed before any gate is fitted, so naming the largest lesion
+    cannot be steered by the result, and the larger lesion is the one whose
+    transport plan rests on more observations.
+    """
+    sizes = (
+        manifest[["patient_id", "target_sample", "target_n"]]
+        .assign(
+            patient_id=lambda frame: frame["patient_id"].astype(str),
+            target_sample=lambda frame: frame["target_sample"].astype(str),
+        )
+        .groupby(["patient_id", "target_sample"], as_index=False)["target_n"].max()
+        .sort_values(
+            ["patient_id", "target_n", "target_sample"],
+            ascending=[True, False, True], kind="stable",
+        )
+    )
+    selected = sizes.drop_duplicates("patient_id", keep="first")
+    chosen = set(zip(selected["patient_id"], selected["target_sample"]))
+    keep = [
+        (str(patient), str(target)) in chosen
+        for patient, target in zip(groups["patient_id"], groups["target_sample"])
+    ]
+    return groups[keep].copy()
+
+
+def target_never_rejects(caps: set) -> bool:
+    """Whether every pair was fitted with a target that cannot reject."""
+    values = [
+        float(cap) for cap in caps
+        if cap is not None and np.isfinite(pd.to_numeric(cap, errors="coerce"))
+    ]
+    return bool(values) and all(value == 0.0 for value in values)
+
+
+def usable_contrasts(
+    definitions: list[tuple[str, str, str]],
+    cell_n: dict[str, int],
+    one_sided: bool,
+) -> tuple[list[tuple[str, str, str]], list[dict]]:
+    """Split contrasts into those with cells on both sides and those without.
+
+    A contrast with an empty side would reach PyDESeq2 as an all-zero column,
+    which it does not reject but cannot say anything about either.
+    """
+    kept: list[tuple[str, str, str]] = []
+    dropped: list[dict] = []
+    for contrast, case, reference in definitions:
+        empty = [state for state in (case, reference) if not cell_n[state]]
+        if not empty:
+            kept.append((contrast, case, reference))
+            continue
+        if one_sided and empty == ["metastasis_rejected"]:
+            # Not a failure. Rejection is one-sided by design here, so the
+            # metastatic side has no rejected state to contrast against.
+            reason = "one_sided_rejection"
+        elif all(state.endswith("_nonmalignant") for state in empty):
+            # The depth-equalised H5ADs carry only the malignant cells the
+            # analysis selected, so there is no same-compartment background.
+            reason = "malignant_only_input"
+        else:
+            reason = "no_cells"
+        dropped.append({"contrast": contrast, "empty_states": empty, "reason": reason})
+    return kept, dropped
 
 
 def one_result_file(root: Path, pair: str, name: str) -> Path:
@@ -338,6 +423,8 @@ def main() -> None:
     groups = analysis_groups(manifest, robustness, args.sensitivity_label)
     if not args.include_exact_winner_unstable:
         groups = groups[groups["recommended_range_exact_robust"]].copy()
+    if args.metastasis_selection == "largest":
+        groups = designate_metastasis(groups, manifest)
     patients = sorted(groups["patient_id"].astype(str).unique())
     if args.print_patient_count:
         print(len(patients))
@@ -367,6 +454,7 @@ def main() -> None:
     pair_rows = []
     excluded_pairs: list[dict[str, str]] = []
     calibration_nulls: set[str] = set()
+    target_caps: set = set()
     for _, group in patient_groups.iterrows():
         source = str(group["source_sample"])
         if robustness is not None:
@@ -387,6 +475,7 @@ def main() -> None:
         # an excluded pair must never be expected.
         run = read_run(args.gate_root, pair)
         calibration_nulls.add(str(run.get("calibration_null", "unknown")))
+        target_caps.add(run.get("target_rejection_budget_cap"))
         refusal = calibration_refusal(run)
         if refusal is not None and not args.allow_invalid_calibration:
             excluded_pairs.append({"pair_id": pair, "reason": refusal})
@@ -505,6 +594,25 @@ def main() -> None:
         ("metastasis_retained_vs_metastasis_nonmalignant", "metastasis_retained", "metastasis_nonmalignant"),
         ("metastasis_rejected_vs_metastasis_nonmalignant", "metastasis_rejected", "metastasis_nonmalignant"),
     ]
+    one_sided = target_never_rejects(target_caps)
+    core, core_dropped = usable_contrasts(core, cell_n, one_sided)
+    background, background_dropped = usable_contrasts(background, cell_n, one_sided)
+    dropped_contrasts = core_dropped + background_dropped
+    if not core and not background:
+        report = {
+            "patient_id": patient,
+            "selected_pair_n": len(pair_rows),
+            "state_cell_n": cell_n,
+            "dropped_contrasts": dropped_contrasts,
+            "reason": "every contrast had an empty side",
+        }
+        (output / "diagnostics.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8"
+        )
+        print(json.dumps(report, indent=2), flush=True)
+        print(f"SKIP patient={patient} no usable contrast", flush=True)
+        return
+
     genes = sorted(set().union(*(set(value) for value in counts.values())))
     records = []
     vectors = []
@@ -543,6 +651,12 @@ def main() -> None:
         "origin_selection": (
             "origin_ranking_winner" if robustness is not None else "every_primary"
         ),
+        "metastasis_selection": args.metastasis_selection,
+        "one_sided_rejection": one_sided,
+        "target_rejection_budget_cap": sorted(
+            str(cap) for cap in target_caps
+        ),
+        "dropped_contrasts": dropped_contrasts,
         "cap_robustness": (
             f"label must agree with {args.sensitivity_root}"
             if args.sensitivity_root is not None
