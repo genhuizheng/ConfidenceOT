@@ -116,9 +116,17 @@ def main() -> None:
     parser.add_argument("h5ad", type=Path)
     parser.add_argument("output_root", type=Path)
     parser.add_argument(
+        "--minimum-lineage-genes", type=int, default=3,
+        help="A cell is flagged when it detects at least this many genes of "
+             "the B or plasma structural set. Counting genes rather than "
+             "thresholding their mean is what separates a doublet, which "
+             "expresses several at once, from an ambient count in one.",
+    )
+    parser.add_argument(
         "--flag-threshold", type=float, default=0.5,
-        help="A cell is flagged when a structural score exceeds this. Choose it "
-             "from the reported quantiles rather than accepting the default.",
+        help="Score above which a cell counts as expressing a set, used for "
+             "the reported immunoglobulin-only fraction. Choose it from the "
+             "reported quantiles rather than accepting the default.",
     )
     parser.add_argument(
         "--group-by", action="append", dest="groups", default=None,
@@ -148,11 +156,24 @@ def main() -> None:
             f"{sorted(index)[:8]}"
         )
 
-    # Flagged on structure only. Immunoglobulin is reported beside the flag so
-    # that an ambient-driven cut can be recognised rather than adopted.
+    # Flagged on how many lineage genes a cell detects, not on the mean of the
+    # set. A mean is the wrong statistic when most of a marker set is zero: if
+    # only two of ten markers are in the matrix, the mean is over those two,
+    # and one ambient count in one of them clears any threshold. That flagged
+    # 72% of a lymph node. A real doublet or contaminating cell expresses
+    # several genes of the lineage at once; noise expresses one.
+    detected_counts = {}
+    for name in ("b_structural", "plasma_structural"):
+        present = found[name]
+        detected_counts[name] = (
+            (scaled[:, [index[gene] for gene in present]] > 0).sum(axis=1).A1
+            if present else np.zeros(scaled.shape[0], dtype=int)
+        )
+    scores["b_genes_detected"] = detected_counts["b_structural"]
+    scores["plasma_genes_detected"] = detected_counts["plasma_structural"]
     flagged = (
-        scores["b_structural"].fillna(0).gt(args.flag_threshold)
-        | scores["plasma_structural"].fillna(0).gt(args.flag_threshold)
+        scores["b_genes_detected"].ge(args.minimum_lineage_genes)
+        | scores["plasma_genes_detected"].ge(args.minimum_lineage_genes)
     )
     scores["lymphoid_flagged"] = flagged.to_numpy()
     scores["immunoglobulin_only"] = (
@@ -202,6 +223,10 @@ def main() -> None:
         "h5ad": str(args.h5ad),
         "cell_n": int(data.n_obs),
         "normalisation": normalisation,
+        "minimum_lineage_genes": args.minimum_lineage_genes,
+        # Printed first because the whole flag depends on how many of each set
+        # the matrix actually contains, and a set reduced to one or two genes
+        # cannot support a count rule.
         "markers_found": {name: len(genes) for name, genes in found.items()},
         "markers_missing": {
             name: sorted(set(MARKER_SETS[name]) - set(genes))
