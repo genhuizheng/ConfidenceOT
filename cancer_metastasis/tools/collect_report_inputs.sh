@@ -118,6 +118,10 @@ for arm in logcpm_free_ds rank256_free_ds rank256_free_raw rank256_cap085_ds ran
   done
 done
 
+echo "== per-cell overlays for the UMAP figures"
+take "$result/umap_overlay_ovarian.csv.gz"  umap_ovarian.csv.gz
+take "$result/umap_overlay_prostate.csv.gz" umap_prostate.csv.gz
+
 echo "== prostate lymphoid contamination"
 for s in Pat2_Tu5 Pat4_LN1; do
   take "$result/contam3_$s/lineage_contamination_report.json" "pca_contamination_$s.json"
