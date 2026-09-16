@@ -132,6 +132,22 @@ fi
 if [[ -n "$target_bounds" ]]; then
   qc_args+=(--target-rejection-bounds $target_bounds)
 fi
+# Representation the transport cost is computed in. rank_value is the
+# Geneformer formulation: it removed most of the depth dependence in
+# simulation, taking auc_total_counts from 0.945 to 0.475 at moderate depth
+# spread for 0.008 of perturbed F1. rank_top_n has to stay below the
+# shallowest cell's detected-gene count or the encoding manufactures its own
+# low-content artefact.
+if [[ -n "${CONFIDENCEOT_REPRESENTATION:-}" ]]; then
+  qc_args+=(--representation "$CONFIDENCEOT_REPRESENTATION")
+fi
+if [[ -n "${CONFIDENCEOT_RANK_TOP_N:-}" ]]; then
+  qc_args+=(--rank-top-n "$CONFIDENCEOT_RANK_TOP_N")
+fi
+if [[ -n "${CONFIDENCEOT_MINIMUM_DETECTION_RATE:-}" ]]; then
+  qc_args+=(--minimum-detection-rate "$CONFIDENCEOT_MINIMUM_DETECTION_RATE")
+fi
+
 if [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
     echo "CONFIDENCEOT_INCLUDE_ANNOTATIONS is required for malignant scope" >&2

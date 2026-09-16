@@ -181,6 +181,29 @@ def main() -> None:
     parser.add_argument("--minimum-total-counts", type=int, default=1000)
     parser.add_argument("--minimum-detected-genes", type=int, default=500)
     parser.add_argument("--maximum-mitochondrial-percent", type=float, default=20.0)
+    parser.add_argument(
+        "--representation",
+        choices=("log_cpm", "rank_value", "rank_no_median", "pearson_residuals"),
+        default="log_cpm",
+        help="Cell representation the transport cost is computed in. "
+             "'rank_value' is the Geneformer formulation and removes most of "
+             "the depth dependence: on simulated homogeneous data it takes "
+             "auc_total_counts from 0.945 to 0.475 at moderate depth spread, "
+             "at a cost of 0.008 in perturbed F1.",
+    )
+    parser.add_argument(
+        "--rank-top-n", type=int, default=512,
+        help="Genes kept per cell under a rank representation. Cells with "
+             "fewer detected genes get a shorter vector and sit nearer the "
+             "origin, which is how the encoding can create its own low-content "
+             "artefact, so this has to stay below the shallowest cell's "
+             "detected-gene count.",
+    )
+    parser.add_argument(
+        "--minimum-detection-rate", type=float, default=0.0,
+        help="Drop genes detected in fewer than this fraction of cells; "
+             "orthogonal to --representation",
+    )
     parser.add_argument("--n-hvg", type=int, default=2000)
     parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--calibration-max-cells", type=int, default=2000)
@@ -347,7 +370,9 @@ def main() -> None:
         keep = np.sort(sample_rng.choice(target.n_obs, args.max_observed_cells_per_side, replace=False))
         target = target[keep].copy()
     source_pca, target_pca, hvg, preprocessing = prepare_joint_representation(
-        source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=args.seed + args.index
+        source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=args.seed + args.index,
+        representation=args.representation, rank_top_n=args.rank_top_n,
+        minimum_detection_rate=args.minimum_detection_rate,
     )
     rng = np.random.default_rng(args.seed + args.index * 104729)
     pairs = min(1_000_000, max(len(source_pca) * len(target_pca), 1))
