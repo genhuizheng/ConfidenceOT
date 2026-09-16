@@ -37,6 +37,12 @@ fi
 if [[ -n "${CONFIDENCEOT_METASTASIS_SIZE_CSV:-}" ]]; then
   extra+=(--metastasis-size-csv "$CONFIDENCEOT_METASTASIS_SIZE_CSV")
 fi
+# The label is dataset-specific, and the default is GSE180661's. Left wrong on
+# another dataset the same-compartment background becomes every cell in the
+# file, which is dropped from the contrasts but still reported as a count.
+if [[ -n "${CONFIDENCEOT_MALIGNANT_ANNOTATION:-}" ]]; then
+  extra+=(--malignant-annotation "$CONFIDENCEOT_MALIGNANT_ANNOTATION")
+fi
 
 # Two submissions were lost earlier to a path variable arriving empty, so the
 # job refuses to start rather than creating directories at the filesystem root.
