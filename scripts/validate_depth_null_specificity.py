@@ -233,6 +233,7 @@ def run_replicate(
     source_pca, target_pca, hvg, _ = prepare_joint_representation(
         source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
         representation=args.representation, rank_top_n=args.rank_top_n,
+        minimum_detection_rate=args.minimum_detection_rate,
     )
     pairs = min(1_000_000, len(source_pca) * len(target_pca))
     sampled = np.sum(
@@ -373,7 +374,14 @@ def main() -> None:
     parser.add_argument("--dispersion", type=float, default=2.0)
     parser.add_argument("--perturbation-log2", type=float, default=1.0)
     parser.add_argument(
-        "--representation", choices=("log_cpm", "rank_value"), default="log_cpm",
+        "--minimum-detection-rate", type=float, default=0.0,
+        help="Drop genes detected in fewer than this fraction of cells. "
+             "Orthogonal to --representation and composes with any of them.",
+    )
+    parser.add_argument(
+        "--representation",
+        choices=("log_cpm", "rank_value", "rank_no_median", "pearson_residuals"),
+        default="log_cpm",
         help="Cell representation. 'rank_value' is the Geneformer formulation: "
              "expression over each gene's nonzero median, ranked within the "
              "cell, top --rank-top-n kept. It is depth-invariant by "

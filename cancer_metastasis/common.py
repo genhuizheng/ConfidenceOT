@@ -300,7 +300,7 @@ def _nonzero_median_per_gene(matrix: Any) -> np.ndarray:
     return np.where(medians > 0, medians, 1.0)
 
 
-def rank_value_encode(joint: Any, top_n: int) -> Any:
+def rank_value_encode(joint: Any, top_n: int, use_gene_median: bool = True) -> Any:
     """Encode each cell as its ranking of genes, in Geneformer's formulation.
 
     Each cell is divided by its own total, each gene by its nonzero median over
@@ -327,8 +327,14 @@ def rank_value_encode(joint: Any, top_n: int) -> Any:
         raise ValueError("top_n must be at least 2")
     totals = np.asarray(joint.sum(axis=1)).ravel()
     scaled = sparse.diags(1.0 / np.maximum(totals, 1e-12)) @ sparse.csr_matrix(joint)
-    medians = _nonzero_median_per_gene(scaled)
-    scaled = (scaled @ sparse.diags(1.0 / medians)).tocsr()
+    if use_gene_median:
+        medians = _nonzero_median_per_gene(scaled)
+        scaled = (scaled @ sparse.diags(1.0 / medians)).tocsr()
+    else:
+        # The ablation: ranking library-normalised expression directly. Kept so
+        # the claim that this is dominated by housekeeping genes, and therefore
+        # nearly identical across cells, is measured rather than asserted.
+        scaled = scaled.tocsr()
 
     rows, columns, values = [], [], []
     for cell in range(scaled.shape[0]):
@@ -352,9 +358,64 @@ def rank_value_encode(joint: Any, top_n: int) -> Any:
     )
 
 
+REPRESENTATIONS = ("log_cpm", "rank_value", "rank_no_median", "pearson_residuals")
+
+
+def pearson_residual_gene_variance(
+    joint: Any, theta: float, chunk: int = 512
+) -> np.ndarray:
+    """Per-gene variance of analytic Pearson residuals.
+
+    The residual of a count against the depth-only expectation
+    ``mu = cell_total * gene_share`` under a negative binomial with dispersion
+    ``theta``.  Its point is that a zero in a deep cell and a zero in a shallow
+    cell receive different residuals, which is the part of the depth effect
+    that library-size division cannot reach and that subsampling to a common
+    total does not remove.
+
+    Computed in gene blocks because the residual matrix is dense -- every entry,
+    including the zeros, has a nonzero residual -- and materialising all of it
+    for tens of thousands of genes is unnecessary when only the most variable
+    are kept.
+    """
+    totals = np.asarray(joint.sum(axis=1), dtype=np.float64).ravel()
+    gene_totals = np.asarray(joint.sum(axis=0), dtype=np.float64).ravel()
+    grand = float(gene_totals.sum())
+    if grand <= 0:
+        raise ValueError("Joint matrix carries no counts")
+    share = gene_totals / grand
+    limit = np.sqrt(joint.shape[0])
+    columns = joint.tocsc()
+    variances = np.zeros(joint.shape[1], dtype=np.float64)
+    for start in range(0, joint.shape[1], chunk):
+        stop = min(start + chunk, joint.shape[1])
+        expected = np.outer(totals, share[start:stop])
+        scale = np.sqrt(expected + expected * expected / theta)
+        block = columns[:, start:stop].toarray()
+        residual = (block - expected) / np.maximum(scale, 1e-12)
+        np.clip(residual, -limit, limit, out=residual)
+        variances[start:stop] = residual.var(axis=0)
+    return variances
+
+
+def pearson_residual_block(joint: Any, genes: np.ndarray, theta: float) -> np.ndarray:
+    """Dense analytic Pearson residuals for the chosen genes."""
+    totals = np.asarray(joint.sum(axis=1), dtype=np.float64).ravel()
+    gene_totals = np.asarray(joint.sum(axis=0), dtype=np.float64).ravel()
+    share = gene_totals / float(gene_totals.sum())
+    limit = np.sqrt(joint.shape[0])
+    block = joint.tocsc()[:, genes].toarray()
+    expected = np.outer(totals, share[genes])
+    scale = np.sqrt(expected + expected * expected / theta)
+    residual = (block - expected) / np.maximum(scale, 1e-12)
+    np.clip(residual, -limit, limit, out=residual)
+    return residual.astype(np.float32)
+
+
 def prepare_joint_representation(
     source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int,
     representation: str = "log_cpm", rank_top_n: int = 512,
+    minimum_detection_rate: float = 0.0, residual_theta: float = 100.0,
 ):
     source_keys, target_keys = gene_keys(source), gene_keys(target)
     source_first: dict[str, int] = {}
@@ -383,32 +444,82 @@ def prepare_joint_representation(
         scaled = sparse.diags(1e4 / np.maximum(totals, 1.0)) @ matrix
         scaled.data = np.log1p(scaled.data)
         return scaled, "raw counts -> library size 1e4 -> log1p"
-    if representation not in ("log_cpm", "rank_value"):
-        raise ValueError(f"Unknown representation {representation!r}")
-    if representation == "rank_value":
+    if representation not in REPRESENTATIONS:
+        raise ValueError(
+            f"Unknown representation {representation!r}; expected one of {REPRESENTATIONS}"
+        )
+
+    # A gene detected in very few cells carries mostly its own zero pattern,
+    # and that pattern is what depth writes into the data. Filtering on
+    # detection is orthogonal to the transform and composes with any of them.
+    detection_note = "no detection-rate filter"
+    if minimum_detection_rate > 0.0:
+        counted = sparse.vstack([source_x, target_x], format="csr")
+        detected = np.asarray((counted > 0).sum(axis=0)).ravel() / counted.shape[0]
+        keep = detected >= minimum_detection_rate
+        if int(keep.sum()) < 2:
+            raise ValueError(
+                f"Detection rate >= {minimum_detection_rate} leaves "
+                f"{int(keep.sum())} genes"
+            )
+        source_x = source_x[:, keep]
+        target_x = target_x[:, keep]
+        common = [gene for gene, flag in zip(common, keep) if flag]
+        detection_note = (
+            f"genes detected in >= {minimum_detection_rate:.3f} of cells; "
+            f"{int(keep.sum())} of {len(keep)} kept"
+        )
+
+    if representation == "pearson_residuals":
+        if source_kind != target_kind:
+            raise ValueError(
+                "pearson_residuals needs both sides on one scale; found "
+                f"{source_kind!r} and {target_kind!r}"
+            )
+        counts = sparse.vstack([source_x, target_x], format="csr")
+        variances = pearson_residual_gene_variance(counts, residual_theta)
+        selected = np.argsort(-variances, kind="stable")[: min(n_hvg, len(common))]
+        dense = pearson_residual_block(counts, selected, residual_theta)
+        source_transform = target_transform = (
+            f"joint analytic Pearson residuals, theta={residual_theta:g}, "
+            "genes ranked by residual variance"
+        )
+    elif representation in ("rank_value", "rank_no_median"):
         # Stacked before any per-side transformation, so the gene medians and
         # the ranking see one corpus. A per-side transform here would defeat
         # the joint median.
         if source_kind != target_kind:
             raise ValueError(
-                "rank_value needs both sides on one scale; found "
+                f"{representation} needs both sides on one scale; found "
                 f"{source_kind!r} and {target_kind!r}"
             )
+        use_median = representation == "rank_value"
         joint = rank_value_encode(
-            sparse.vstack([source_x, target_x], format="csr"), rank_top_n
+            sparse.vstack([source_x, target_x], format="csr"),
+            rank_top_n, use_gene_median=use_median,
         )
+        mean = np.asarray(joint.mean(axis=0)).ravel()
+        mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
+        selected = np.argsort(-(mean2 - mean * mean), kind="stable")[
+            : min(n_hvg, len(common))
+        ]
+        dense = joint[:, selected].toarray().astype(np.float32)
         source_transform = target_transform = (
-            f"joint rank-value encoding, top {rank_top_n} genes per cell, "
-            "expression divided by each gene's nonzero median over both sides"
+            f"joint rank encoding, top {rank_top_n} genes per cell, "
+            + ("expression divided by each gene's nonzero median over both sides"
+               if use_median else
+               "expression ranked directly, without the gene-median division")
         )
     else:
         source_x, source_transform = normalize(source_x, source_kind)
         target_x, target_transform = normalize(target_x, target_kind)
         joint = sparse.vstack([source_x, target_x], format="csr")
-    mean = np.asarray(joint.mean(axis=0)).ravel()
-    mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
-    selected = np.argsort(-(mean2 - mean * mean), kind="stable")[: min(n_hvg, len(common))]
-    dense = joint[:, selected].toarray().astype(np.float32)
+        mean = np.asarray(joint.mean(axis=0)).ravel()
+        mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
+        selected = np.argsort(-(mean2 - mean * mean), kind="stable")[
+            : min(n_hvg, len(common))
+        ]
+        dense = joint[:, selected].toarray().astype(np.float32)
     dense -= dense.mean(axis=0)
     std = dense.std(axis=0)
     dense /= np.where(std > 1e-8, std, 1.0)
@@ -421,7 +532,9 @@ def prepare_joint_representation(
         "source_transform": source_transform,
         "target_transform": target_transform,
         "representation": representation,
-        "rank_top_n": rank_top_n if representation == "rank_value" else None,
+        "rank_top_n": rank_top_n if "rank" in representation else None,
+        "residual_theta": residual_theta if representation == "pearson_residuals" else None,
+        "detection_filter": detection_note,
         "joint_hvg": (
             "top variance of the rank encoding" if representation == "rank_value"
             else "top variance after side-specific declared-expression transformation"
