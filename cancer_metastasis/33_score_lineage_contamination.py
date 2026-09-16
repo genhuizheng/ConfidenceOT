@@ -49,11 +49,15 @@ MARKER_SETS = {
         "MS4A1", "CD79A", "CD79B", "CD19", "BANK1", "TNFRSF13C", "CD22",
         "FCRL1", "PAX5", "BLK",
     ],
-    # Plasma-cell machinery other than the immunoglobulins themselves.
-    "plasma_structural": [
-        "MZB1", "XBP1", "DERL3", "TNFRSF17", "SDC1", "PRDM1", "FKBP11",
-        "SEC11C", "SSR4",
-    ],
+    # Plasma-cell genes that are restricted to the lineage. An earlier version
+    # of this set included XBP1, SEC11C, SSR4, FKBP11 and SDC1, which flagged
+    # 98.5% of a prostate primary tumour. Those are general endoplasmic
+    # reticulum and secretory machinery, and SDC1 is a classic epithelial
+    # syndecan, so in a secretory gland they are high in the tissue itself. The
+    # tell was that the flagged cells scored *higher* on epithelial identity
+    # and on androgen response than the unflagged ones, which is the opposite
+    # of what a lymphoid contaminant looks like.
+    "plasma_structural": ["MZB1", "TNFRSF17", "DERL3", "PRDM1", "POU2AF1"],
     # Reported, never used to flag: the dominant ambient species in lymphoid
     # tissue.
     "immunoglobulin": [
@@ -169,6 +173,31 @@ def main() -> None:
     )
 
     quantiles = scores[list(MARKER_SETS)].quantile([0.5, 0.9, 0.95, 0.99]).round(4)
+
+    # A lymphoid contaminant is less epithelial and, here, less androgen
+    # responsive than the tumour cells around it. If the flagged cells score
+    # higher on those, the marker set is tracking the tissue rather than the
+    # contaminant, and the flag is worse than no filter. This check exists
+    # because that is exactly what happened with an earlier plasma set.
+    warnings: list[str] = []
+    if bool(flagged.any()) and bool((~flagged).any()):
+        for lineage in ("epithelial", "androgen_response"):
+            if lineage not in scores:
+                continue
+            inside = float(scores.loc[flagged, lineage].median())
+            outside = float(scores.loc[~flagged, lineage].median())
+            if inside > outside:
+                warnings.append(
+                    f"flagged cells have a higher median {lineage} score "
+                    f"({inside:.3f} vs {outside:.3f}); the marker sets are "
+                    "tracking the tissue, not a contaminant"
+                )
+    if flagged.mean() > 0.5:
+        warnings.append(
+            f"{flagged.mean():.1%} of cells flagged; a contaminant is a "
+            "minority by definition, so the threshold or the marker sets are wrong"
+        )
+
     report = {
         "h5ad": str(args.h5ad),
         "cell_n": int(data.n_obs),
@@ -185,6 +214,7 @@ def main() -> None:
         "immunoglobulin_only_n": int(scores["immunoglobulin_only"].sum()),
         "immunoglobulin_only_fraction": float(scores["immunoglobulin_only"].mean()),
         "score_quantiles": json.loads(quantiles.to_json()),
+        "warnings": warnings,
         "obs_columns_carried": carry,
         "reading": (
             "flagged_fraction small with a high immunoglobulin_only_fraction is "
