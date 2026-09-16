@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import h5py
@@ -42,7 +43,11 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from common import expression_matrix, load_exact_side
+# Python puts this file's own directory on the path, which for a tool in a
+# subdirectory is tools/ rather than the package beside it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from common import expression_matrix, load_exact_side  # noqa: E402
 
 
 DEFAULT_SETS = (
