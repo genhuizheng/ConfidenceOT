@@ -1,13 +1,46 @@
 """Prepare patient-level four-state malignant pseudobulks for GSE180661.
 
 ConfidenceOT gates both sides of every selected primary--metastasis pair.  This
-workflow therefore retains four malignant states: primary retained/rejected
-and metastasis retained/rejected.  A primary cell can occur in several pair
-fits; it is counted once and enters the main analysis only when its cap-robust
-gate agrees across every selected metastatic partner in which that primary
-sample participates.  Target cells are likewise required to agree between the
-baseline and source-cap sensitivity fits.  Cap- or site-discordant cells are
-saved for audit but excluded from the main pseudobulks.
+workflow therefore retains four malignant states: primary retained/rejected and
+metastasis retained/rejected.
+
+**What a cell must satisfy to enter a pseudobulk.**  Three requirements, and
+only the middle one has changed:
+
+1. *Site consensus.*  A primary cell can occur in several pair fits, one per
+   metastatic partner of its sample.  It is counted once, and enters the main
+   analysis only when every one of those fits agrees on its label.  This has
+   nothing to do with calibration and is unchanged: it exists so that one
+   biological cell contributes one vector, and so that a cell the sites
+   disagree about is audited rather than silently assigned.
+
+2. *Calibration.*  The pair's M4-E calibration must have found a feasible cost
+   and produced a clean fit with a valid inference certificate.  This replaces
+   the cap-robustness requirement described below.  ``calibration_m4r_clean``
+   is deliberately **not** required: this workflow reads M4-E only, and the
+   older conflated flag failed on 249 of 252 pan-cancer pairs for an M4-R
+   reason that says nothing about the M4-E gate.
+
+3. *Origin selection.*  When a patient has several primary samples for one
+   metastasis, the origin ranking can select one as the likely source.  That
+   ranking is now optional, because the table it reads was computed under the
+   rotation null with the rejection budget enforced and cannot be reused for a
+   gate calibrated the other way.  Without it, every primary sample enters on
+   its own terms.
+
+**Why cap-robustness is gone.**  The requirement used to be that a cell keep
+its label between the 0.85 and 0.90 source-cap fits.  That was a reasonable
+hedge while the cap decided the answer -- and it did: under the rotation null
+any cap produced a rejection rate equal to that cap.  The budget is no longer
+enforced, and the gate is now exactly its own calibrated rule
+(``forced_in_share_of_retained`` is 0.000 and ``sign_rule_concordance`` 1.000
+at every quartile on GSE180661), so there is no cap for a label to be robust
+to.  The two configurations that exist now, the unconstrained gate and the one
+held to a rejection interval, are not two caps of the same kind: requiring
+agreement between them would exclude precisely the cells where the interval
+bit, which filters on the prior instead of hedging against it.  They are
+therefore run as two separate analyses -- pass each gate root in turn and
+compare the results -- rather than intersected into one.
 """
 
 from __future__ import annotations
@@ -27,20 +60,47 @@ from common import expression_matrix, gene_keys, load_exact_side
 
 MALIGNANT = "Ovarian.cancer.cell"
 
+# The fields a usable M4-E calibration must all carry. M4-R cleanliness is
+# excluded on purpose: nothing here reads the reversible gate.
+M4E_CALIBRATION_FIELDS = (
+    "calibration_feasible_cost_found",
+    "calibration_m4e_clean",
+    "calibration_m4e_inference_valid",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest_csv", type=Path)
-    parser.add_argument("baseline_root", type=Path)
-    parser.add_argument("sensitivity_root", type=Path)
-    parser.add_argument("robustness_csv", type=Path)
+    parser.add_argument("gate_root", type=Path,
+                        help="Completed pair output root supplying the gate")
     parser.add_argument("output_root", type=Path)
     parser.add_argument("--index", type=int, help="Patient index")
     parser.add_argument("--print-patient-count", action="store_true")
+    parser.add_argument(
+        "--sensitivity-root", type=Path, default=None,
+        help="Second pair output root. When given, a cell must keep its label "
+             "across both roots, which is the pre-2026-09 cap-robust rule. "
+             "Left out, the gate root decides alone.",
+    )
     parser.add_argument("--sensitivity-label", default="source090")
+    parser.add_argument(
+        "--robustness-csv", type=Path, default=None,
+        help="Origin-group robustness table. When given, one primary sample is "
+             "selected per metastasis. Left out, every primary sample enters.",
+    )
     parser.add_argument("--malignant-annotation", default=MALIGNANT)
     parser.add_argument("--include-exact-winner-unstable", action="store_true")
-    return parser.parse_args()
+    parser.add_argument(
+        "--allow-invalid-calibration", action="store_true",
+        help="Keep pairs whose M4-E calibration did not converge",
+    )
+    args = parser.parse_args()
+    if args.sensitivity_root is not None and args.robustness_csv is None:
+        # analysis_groups reads the winner columns out of the robustness table,
+        # and the cap-robust rule was only ever defined alongside them.
+        raise ValueError("--sensitivity-root requires --robustness-csv")
+    return args
 
 
 def pair_id(patient: str, source: str, target: str) -> str:
@@ -48,9 +108,29 @@ def pair_id(patient: str, source: str, target: str) -> str:
 
 
 def analysis_groups(
-    manifest: pd.DataFrame, robustness: pd.DataFrame, sensitivity_label: str
+    manifest: pd.DataFrame,
+    robustness: pd.DataFrame | None,
+    sensitivity_label: str,
 ) -> pd.DataFrame:
     keys = ["dataset_id", "patient_id", "target_sample"]
+    if robustness is None:
+        # Every primary sample enters on its own terms. Selecting one origin
+        # per metastasis needs the origin ranking, and that table was computed
+        # under the rotation null with the budget enforced, so it cannot be
+        # reused for a gate calibrated the other way.
+        columns = [*keys, "source_sample"]
+        groups = (
+            manifest[columns].astype(str).drop_duplicates()
+            .sort_values(columns, kind="stable").reset_index(drop=True)
+        )
+        groups["candidate_primary_n"] = (
+            groups.groupby(keys, sort=False)["source_sample"].transform("size")
+        )
+        groups["origin_group_type"] = "every_primary"
+        # The exact-winner filter has nothing to select between here, so it is
+        # satisfied rather than bypassed.
+        groups["recommended_range_exact_robust"] = True
+        return groups
     sensitivity_column = (
         f"{re.sub(r'[^A-Za-z0-9]+', '_', sensitivity_label).lower()}_winner"
     )
@@ -83,7 +163,11 @@ def analysis_groups(
                 "origin_group_type": "multi_primary_origin_ranking",
             })
         rows.append(record)
-    return pd.DataFrame(rows).sort_values(keys, kind="stable").reset_index(drop=True)
+    groups = pd.DataFrame(rows).sort_values(keys, kind="stable").reset_index(drop=True)
+    # One name for the selected primary in either mode, so the caller does not
+    # have to know which one produced it.
+    groups["source_sample"] = groups["baseline_winner"].astype(str)
+    return groups
 
 
 def one_result_file(root: Path, pair: str, name: str) -> Path:
@@ -111,9 +195,35 @@ def read_gate(root: Path, pair: str, side: str, prefix: str) -> pd.DataFrame:
     return table
 
 
-def read_hvg(root: Path, pair: str) -> set[str]:
+def read_run(root: Path, pair: str) -> dict:
     with one_result_file(root, pair, "run.json").open(encoding="utf-8") as handle:
-        return {str(value) for value in json.load(handle).get("hvg", [])}
+        return json.load(handle)
+
+
+def read_hvg(root: Path, pair: str) -> set[str]:
+    return {str(value) for value in read_run(root, pair).get("hvg", [])}
+
+
+def calibration_refusal(run: dict) -> str | None:
+    """Name the reason this pair's M4-E gate is not calibrated, or None.
+
+    A pair fitted with ``--fixed-rejection-cost`` has no calibration to
+    validate; its flags are all false for that reason rather than because
+    anything failed, so it is accepted and the mode is reported instead.
+    """
+    if str(run.get("calibration_null", "none")) == "none":
+        return None
+    failed = [name for name in M4E_CALIBRATION_FIELDS if not bool(run.get(name))]
+    return ",".join(failed) if failed else None
+
+
+def single_gate_status(gate: pd.DataFrame) -> pd.DataFrame:
+    """Label cells from one gate root, with no second root to agree with."""
+    table = gate.copy()
+    table["pair_robust_status"] = np.where(
+        table["baseline_rejected"].to_numpy(bool), "rejected", "retained"
+    )
+    return table
 
 
 def cap_robust_gate(baseline: pd.DataFrame, sensitivity: pd.DataFrame) -> pd.DataFrame:
@@ -222,7 +332,9 @@ def add_vector(destination: defaultdict[str, int], genes: np.ndarray, values: np
 def main() -> None:
     args = parse_args()
     manifest = pd.read_csv(args.manifest_csv)
-    robustness = pd.read_csv(args.robustness_csv)
+    robustness = (
+        pd.read_csv(args.robustness_csv) if args.robustness_csv is not None else None
+    )
     groups = analysis_groups(manifest, robustness, args.sensitivity_label)
     if not args.include_exact_winner_unstable:
         groups = groups[groups["recommended_range_exact_robust"]].copy()
@@ -253,17 +365,33 @@ def main() -> None:
     target_pair_counts: dict[str, int] = defaultdict(int)
     ot_features: set[str] = set()
     pair_rows = []
+    excluded_pairs: list[dict[str, str]] = []
+    calibration_nulls: set[str] = set()
     for _, group in patient_groups.iterrows():
-        source = str(group["baseline_winner"])
-        sensitivity_source = str(group[sensitivity_column])
-        if source != sensitivity_source:
-            raise RuntimeError("Exact-unstable winner entered the main four-state analysis")
+        source = str(group["source_sample"])
+        if robustness is not None:
+            sensitivity_source = str(group[sensitivity_column])
+            if source != sensitivity_source:
+                raise RuntimeError(
+                    "Exact-unstable winner entered the main four-state analysis"
+                )
         target = str(group["target_sample"])
         pair = pair_id(patient, source, target)
         match = manifest[manifest["pair_id"].astype(str).eq(pair)]
         if len(match) != 1:
             raise RuntimeError(f"Manifest did not uniquely resolve {pair}")
         row = match.iloc[0]
+
+        # Checked before any counter moves: consensus_classification compares
+        # the pairs a cell was seen in against the pairs it was expected in, so
+        # an excluded pair must never be expected.
+        run = read_run(args.gate_root, pair)
+        calibration_nulls.add(str(run.get("calibration_null", "unknown")))
+        refusal = calibration_refusal(run)
+        if refusal is not None and not args.allow_invalid_calibration:
+            excluded_pairs.append({"pair_id": pair, "reason": refusal})
+            continue
+
         source_paths.setdefault(source, json.loads(str(row["source_h5ads_json"])))
         target_paths.setdefault(target, json.loads(str(row["target_h5ads_json"])))
         source_pair_counts[source] += 1
@@ -271,18 +399,49 @@ def main() -> None:
         for side, sample, records in (
             ("source", source, source_records), ("target", target, target_records)
         ):
-            gate = cap_robust_gate(
-                read_gate(args.baseline_root, pair, side, "baseline"),
-                read_gate(args.sensitivity_root, pair, side, args.sensitivity_label),
+            primary = read_gate(args.gate_root, pair, side, "baseline")
+            gate = (
+                cap_robust_gate(
+                    primary,
+                    read_gate(
+                        args.sensitivity_root, pair, side, args.sensitivity_label
+                    ),
+                )
+                if args.sensitivity_root is not None
+                else single_gate_status(primary)
             )
             gate.insert(0, "pair_id", pair)
             gate.insert(1, "sample", sample)
             gate.insert(2, "entity_id", sample + "::" + gate["observation_id"].astype(str))
             records.append(gate)
-        ot_features |= read_hvg(args.baseline_root, pair)
-        ot_features |= read_hvg(args.sensitivity_root, pair)
+        ot_features |= read_hvg(args.gate_root, pair)
+        if args.sensitivity_root is not None:
+            ot_features |= read_hvg(args.sensitivity_root, pair)
         pair_rows.append({"pair_id": pair, "source_sample": source,
                           "target_sample": target})
+
+    if len(calibration_nulls) > 1:
+        # Mixing a rotation-null root with a within-side one would average two
+        # different thresholds into one pseudobulk without saying so.
+        raise RuntimeError(
+            f"{patient}: pairs disagree on the calibration null: "
+            f"{sorted(calibration_nulls)}"
+        )
+    if not pair_rows:
+        report = {
+            "patient_id": patient,
+            "selected_pair_n": 0,
+            "candidate_pair_n": int(len(patient_groups)),
+            "excluded_pair_n": len(excluded_pairs),
+            "excluded_pairs": excluded_pairs,
+            "reason": "no pair carried a usable M4-E calibration",
+        }
+        (output / "diagnostics.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8"
+        )
+        print(json.dumps(report, indent=2), flush=True)
+        print(f"SKIP patient={patient} no usable pair", flush=True)
+        return
 
     source_long = pd.concat(source_records, ignore_index=True)
     target_long = pd.concat(target_records, ignore_index=True)
@@ -378,10 +537,27 @@ def main() -> None:
     report = {
         "patient_id": patient,
         "selected_pair_n": len(pair_rows),
+        "candidate_pair_n": int(len(patient_groups)),
+        "gate_root": str(args.gate_root),
+        "calibration_null": sorted(calibration_nulls),
+        "origin_selection": (
+            "origin_ranking_winner" if robustness is not None else "every_primary"
+        ),
+        "cap_robustness": (
+            f"label must agree with {args.sensitivity_root}"
+            if args.sensitivity_root is not None
+            else "not required; the budget is reported rather than enforced"
+        ),
+        "calibration_requirement": (
+            "allowed to fail" if args.allow_invalid_calibration
+            else " and ".join(M4E_CALIBRATION_FIELDS)
+        ),
+        "excluded_pair_n": len(excluded_pairs),
+        "excluded_pairs": excluded_pairs,
         "exact_winner_robust_only": not args.include_exact_winner_unstable,
         "state_cell_n": cell_n,
         "source_consensus_definition": (
-            "counted once; same cap-robust gate across every selected metastatic partner"
+            "counted once; same gate across every selected metastatic partner"
         ),
         "excluded_source_status_counts": source_cells["consensus_status"].value_counts().to_dict(),
         "excluded_target_status_counts": target_cells["consensus_status"].value_counts().to_dict(),
