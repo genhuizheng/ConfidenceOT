@@ -403,16 +403,18 @@ def figure_gsea(source: Path, out: Path, faming: Path | None) -> None:
                    "Proliferation dominates what separates the retained cells")
     axis.grid(axis="x", zorder=0)
     axis.set_axisbelow(True)
-    # A single series needs no legend box; the title already names it.
+    # A single series needs no legend box; the title already names it. With
+    # both series the bars run left and right on every row, so there is no
+    # free corner -- the legend goes under the axis instead of over a bar.
     if theirs:
-        axis.legend(loc="lower right")
+        axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2)
     # Androgen is the only agreement in the panel and also the weakest call on
     # our side, so the reader is given the FDR rather than left to weigh a bar
     # length against five others.
     fdr = {k: float(ours.loc[k, "fdr"]) for k in keys if "fdr" in ours.columns}
     detail = ",  ".join(f"{label} {fdr[k]:.3f}" for k, label in zip(keys, labels)
                         if k in fdr)
-    fig.subplots_adjust(bottom=0.24)
+    fig.subplots_adjust(bottom=0.32 if theirs else 0.24)
     finish(fig, out / "fig6_gsea_agreement.png",
            ("Both bars point the same way when our retained cells resemble the "
             "metastasis.\n" if theirs else "")

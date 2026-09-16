@@ -491,18 +491,24 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
     if reference:
         items = [
             ("对比对象",
-             "Faming 的 primary vs metastasis 组织比较"
-             "（蓝）对我们的 retained cells"
-             "（橙）。同向则说明 retained "
-             "像 metastasis。"),
-            ("Proliferation 方向是反的",
-             "E2F +3.4，G2M +2.8，mitotic spindle +1.7，"
-             "FDR ≤ 0.002 — 而且是我们这"
-             "边最强的信号。"),
-            ("Androgen response 是唯一一致的",
-             "我们 −1.4（FDR 0.046），与师"
-             "兄 tissue 比较同向。EMT 和 "
-             "interferon 都不显著。"),
+             "师兄的 primary vs metastasis 组织比"
+             "较（蓝）对我们的 retained "
+             "cells（橙）。同向就说明 "
+             "retained 像 metastasis。"),
+            ("Proliferation 完全反向",
+             "转移灶本身是低增殖的"
+             "：G2M −2.5、E2F −2.4、mitotic spindle "
+             "−2.0，p.adj ≤ 3 × 10⁻⁷。而"
+             "我们留下的恰好是高增"
+             "殖：+2.8 / +3.4 / +1.7，FDR ≤ 0.002。"),
+            ("唯一显著一致的是 androgen",
+             "双方都是负（−1.74 / −1.44"
+             "，我们 FDR 0.046）。EMT 同向但"
+             "我们这边不显著（FDR 0.15"
+             "）。"),
+            "在最强的那条轴上，方"
+            "法挑出的恰好是 metastasis 的"
+            "反面。",
         ]
         title = "富集分析：对比独立的 " \
                 "metastasis signature"
