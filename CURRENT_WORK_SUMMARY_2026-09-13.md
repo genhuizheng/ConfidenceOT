@@ -29,6 +29,8 @@ The labels must not be renamed `metastasis-potential` and `non-metastasis-potent
 
 As of 2026-09-14 the defensible reading is narrower still. For every gate fitted before that date, `retained` means "a primary cell lying near the core of the metastatic distribution in a sequencing-depth-confounded PCA geometry, under a rejection cost whose null could not distinguish a homogeneous cloud from a real correspondence". Section 5.7 gives the evidence and the changes made in response. Results produced before those changes should not be read as compatibility statements at all.
 
+As of 2026-09-16 the third and fourth bullets above are withdrawn as written, on the evidence in section 5.8. `retained_fraction` is not an estimate of the incompatible fraction under any calibration: it measures primary--metastasis transcriptional similarity at partial rho 0.79 against an independent pseudobulk measure, spans 0.000 to 0.879 across GSE180661 patients, and falls to 0.0087 on GSE271675, where the two sides genuinely diverge. `retained` is also not a property of a cell but of a (cell, metastasis) pair: naming a different lesion moved one patient from 0.420 to 0.032 over the same cells. Within one patient the retained cells are still the ones nearer that metastasis, which is what the rule computes; that is the whole of what the label currently supports.
+
 ## 3. Main dataset: GSE180661 HGSOC
 
 ### 3.1 Dataset inventory
@@ -432,6 +434,219 @@ three datasets must disappear. Section 5.1's standard applies: the
 configuration is fixed on simulation results, and the differential expression
 is run once afterwards.
 
+### 5.8 What the retained fraction measures, established on two cancers
+
+Everything in this section was run on 2026-09-15 and 2026-09-16 after the
+changes in 5.7. Each acceptance criterion was written into a script docstring
+or into `cancer_metastasis/DEG_PRESPECIFICATION_2026-09-15.md` and committed
+before the numbers existed.
+
+#### 5.8.1 The cross-patient control the project lacked
+
+`cancer_metastasis/28_build_mismatched_manifest.py` pairs each primary with a
+different patient's metastasis by drawing from the pooled lesions of every
+other patient, choosing the donor closest in cell count so that patient
+identity is the only thing that varies. `29_compare_matched_mismatched.py`
+reads the two runs cell by cell.
+
+| Quantity | Matched | Mismatched |
+|---|---:|---:|
+| `retained_fraction`, median of 94 pairs | 0.351 | 0.000 |
+| `rejection_cost` | 0.589 | 0.390 |
+| Median `decision_cost`, rejected | 1.172 | 1.017 |
+
+The paired shift is a signed-rank p of 8.1e-17, and `spearman_decision_cost`
+between the two runs over the same primary cells is 0.378, so two thirds of the
+cost ordering is lost when the partner changes. The gate does use the
+metastatic side.
+
+`gate_jaccard` is 0.000 in both arms and its test returns p = 0.585. That is
+degenerate rather than informative: the mismatched arm retains nothing, so
+there is no set to overlap. The prespecified reading anticipated the opposite
+failure, a Jaccard near 1.0, and the retained-fraction shift is the statistic
+that carries the result.
+
+Only 26 of 94 mismatched pairs retain any cell at all, and those cells are
+near-empty droplets: `auc_predownsample_total_counts` 0.065, 795 detected genes
+against 1,357 in the rejected set, 0.92% mitochondrial reads against 12.6%.
+The direction is the reverse of the matched arm, where retained cells are the
+deeper ones.
+
+#### 5.8.2 The retained fraction is a similarity readout
+
+The mechanism predicts this. The threshold is calibrated by splitting one side
+against itself and dividing by the median cross-side distance, and the observed
+cost is divided by the same quantity, so
+
+    c ~ within-side heterogeneity / cross-side separation
+
+and `cost < c` reduces, after the scale cancels, to
+
+    d(primary cell, metastasis) < typical within-primary distance
+
+The denominator is a similarity, so the retained fraction should track how
+alike the two sides are. `30_validate_similarity_readout.py` tests that against
+pseudobulk correlation, which involves no PCA, no transport and no gene
+selection by the solver.
+
+| Arm | raw rho | partial rho, cell count held | p |
+|---|---:|---:|---:|
+| Union, 188 pairs | 0.671 | **0.795** | 4.9e-42 |
+| Union, fixed HV basis | 0.757 | **0.826** | 6.7e-48 |
+| Matched only, 94 pairs | 0.445 | **0.767** | 2.9e-19 |
+| Mismatched only | -0.225 | -0.026 | 0.80 |
+
+The prespecified disqualifier fired on its literal wording: pseudobulk
+correlation rises with cell count at rho 0.701, larger than the result itself.
+The wording was wrong. Cell count predicts the retained fraction at -0.058
+(p = 0.43), so the path through it contributes about -0.10, negative where the
+observed relationship is positive. Controlling it raises the matched estimate
+from 0.445 to 0.767 rather than lowering it: the confound was suppressing the
+relationship. The criterion was replaced with the partial correlation, which is
+the correct test, rather than argued away.
+
+Lesion type does not explain it. The 17 ascitic pairs have a median retained
+fraction of 0.021 against 0.403 for solid lesions, which is itself coherent
+with detached, anchorage-independent ascitic cells. Holding ascites as a
+covariate moves the estimate from 0.792 to 0.757, and the 77 solid-lesion pairs
+alone give 0.785 (p = 4.6e-17). The gradient is continuous, not a proxy for
+ascites.
+
+The relationship holds **within the matched arm alone**, so it is not two
+clusters joined by a line.
+
+#### 5.8.3 The prostate dataset inverts the answer
+
+GSE271675 is a 10x Multiome series with matched primary prostate tumours and
+lymph-node metastases, re-annotated and integrated by Faming Zhao. His own
+paired pseudobulk DESeq2 and Hallmark GSEA report reduced androgen response and
+increased EMT and interferon in the nodes, and increased proliferation in the
+primaries -- that is, the two sides genuinely diverge. GSE180661's two sides do
+not: their pseudobulk correlation is 0.941 and
+`metastasis_all_vs_primary_all` yields **zero** genes at FDR < 0.05 with
+|log2FC| >= 1.
+
+`34_prepare_prostate_pairs.py` writes one slim H5AD per specimen, drops the
+2,923 immune, stromal and `Unknown` cells, names the largest node per patient
+so each primary cell is gated once, and emits 24 pairs. Patient3 has 11,406
+primary cells and no node cells, so four patients contribute. Depth was
+equalised to 1,556 counts, the 10th percentile of a pooled median of 4,905.
+
+| | GSE180661 | GSE271675 |
+|---|---:|---:|
+| Two sides alike? | pseudobulk rho 0.941, 0 DEGs | AR, EMT, IFN all differ |
+| `retained_fraction`, median | 0.351 | **0.0087** |
+| `forced_in_share_of_retained` | 0.000 | 0.000 |
+| `sign_rule_concordance` | 1.000 | 1.000 |
+
+**On the dataset where there is metastatic divergence to study, the gate
+retains under one per cent of primary cells.** The solver is faithful in both:
+nothing is forced, and the gate is exactly its calibrated rule.
+
+The residual retained set is the low-content tail, the same signature as the
+ovarian mismatched arm:
+
+| Statistic | Retained | Rejected |
+|---|---:|---:|
+| Median pre-downsampling depth | 1,464 | 4,767 |
+| Median detected genes | 872 | 981 |
+| Median mitochondrial % | 0.644 | 0.193 |
+| `auc_predownsample_total_counts` | 0.189 | - |
+| `auc_n_genes_by_counts` | 0.146 | - |
+| `auc_pct_counts_mitochondrial` | 0.818 | - |
+| `median_downsample_untouched` | 1.000 | 0.000 |
+
+`depth_residual_gate_jaccard` is 0.091 against a chance 0.004, so removing the
+depth component replaces almost the whole retained set. The median retained
+cell was never subsampled, meaning it already sat below 1,556 counts.
+
+The differential expression is not interpretable. The 20-cell minimum leaves
+three patients, six pseudobulk samples and two residual degrees of freedom
+under `~patient_id + comparison_status`; two genes reach FDR < 0.05. That is
+what a near-empty retained set produces, not a finding.
+
+#### 5.8.4 Statement of the defect, and a fix to evaluate
+
+The criterion asks whether a primary cell sits closer to the metastasis than
+two halves of the primary sit to each other. Its denominator is the primary's
+own internal heterogeneity, which has no relation to metastatic competence, and
+its threshold is normalised by the cross-side separation. The retained fraction
+is therefore jointly determined by within-side heterogeneity and by
+between-side separation, and is close to inversely proportional to the latter.
+A homogeneous primary rejects nearly everything however near its metastasis
+lies; a pair of divergent tissues rejects nearly everything because the
+denominator dominates. The interesting biological case is the one the rule
+cannot answer.
+
+Two things are consequently **not** supported. The retained fraction is not an
+estimate of how many primary cells are metastasis-competent: it spans 0.000 to
+0.879 across GSE180661 patients and falls to 0.0087 on GSE271675 without any
+claim about those tumours' biology changing. And `retained` is not a property of
+a cell: naming a different lesion for SPECTRUM-OV-003 moved its retained
+fraction from 0.420 to 0.032 over the same 1,332 cells, and 64% of one
+patient's primary cells carry different labels against different lesions of
+that same patient. Retention is a property of a (cell, metastasis) pair.
+
+What **is** supported is narrower and real. Within one patient, the retained
+cells are the ones nearer that metastasis, which is what the rule computes and
+is a defensible reading. Across pairs, the retained fraction measures
+primary--metastasis transcriptional similarity, at partial rho 0.79 against a
+measure the algorithm never sees.
+
+The fix to evaluate, not yet implemented, is to build the null on the source
+cells' own distances to the same target rather than on the source's internal
+spread: ask where a cell's distance to the metastasis falls among all source
+cells' distances to that metastasis. The cross-side separation then appears in
+both the observed statistic and the null and cancels, so the gate stops
+drifting with overall tissue similarity. The cost is that the rejected fraction
+becomes a pure ranking and must be set by something else -- which is honest,
+since the present fraction was never the incompatible-cell prevalence it was
+read as. Two datasets now bracket the test: a working rule should move
+GSE180661 down from 0.351 and GSE271675 up from 0.0087, each towards its own
+structure.
+
+A deflationary reading has to be answered separately. If pseudobulk correlation
+recovers 0.79 of the retained fraction, the transport's added value needs its
+own demonstration: what does the gate predict that
+`spearmanr(sum(A), sum(B))` does not?
+
+#### 5.8.5 Cell identity, and two methodological corrections
+
+GSE180661's major cell types come from CellAssign over nine categories --
+B.cell, Dendritic.cell, Endothelial.cell, Fibroblast, Myeloid.cell,
+Ovarian.cancer.cell, Plasma.cell, T.cell, Mast.cell -- and **none of them is
+normal epithelium**. The `Ovarian.cancer.cell` markers are epithelial rather
+than malignant: WFDC2, CD24, CLDN3, KRT7/8/17/18/19, EPCAM, WT1, CLDN4, MSLN,
+FOLR1, MUC1. GEO records the primary sites as "adnexa (ovary and fallopian
+tube)", and the authors' own sub-clustering of these cells contains
+`Ciliated.cell.1` and `Ciliated.cell.2`. Ciliated tube epithelium therefore
+carries the malignant label, and the `cell_subtype` obs column -- which this
+project had not read -- holds the finer assignment.
+
+It does not explain the gate. Within patients, only two subtypes shift
+significantly: `Cancer.cell.6`, the hypoxic cluster, at +0.0222 (16/24 patients,
+p = 0.019), and `Ciliated.cell.1` at +0.0067 (18/24, p = 0.0087), the most
+consistent direction in the table but 0.67 of a percentage point. Ciliated cells
+are about 3% of the rejected set. The GSE180661 differential expression is
+therefore not a cell-type composition artefact: `Cancer.cell.1` differs by 14.7
+percentage points but none of its markers -- DAPL1, SCGB2A1, CRABP1 -- appears
+among the 40 genes.
+
+Two corrections worth keeping:
+
+**Pooled cell composition misleads.** Three conclusions drawn from pooled
+cross-tabulations on 2026-09-15 did not survive the within-patient paired test:
+that ciliated cells were not enriched among rejected cells, that unassigned
+cells were enriched 3.0-fold, and that `Cancer.cell.3` was enriched among
+retained cells. Only the last is a real Simpson effect -- within patients it is
++0.0139, 15/24, matching the differential expression rather than the pooled
+count. The pair or the patient is the unit; pooled cell counts are not.
+
+**`"NA"` in `cell_subtype` is a category, not a missing value.** It is the
+authors' label for cells their clustering left unassigned. `pd.read_csv` maps
+it to NaN by default, which silently zeroed a test of exactly that category.
+Any read of that column needs `keep_default_na=False`.
+
 ## 6. Replication datasets
 
 Independent author-labelled malignant-cell workflows were created for:
@@ -553,7 +768,7 @@ bash scripts/tacc/submit_splatter_scaling.sh
 
 ## 9. Current interpretation
 
-1. ConfidenceOT produces a pair-specific partition and a continuous per-cell score, but under the pre-2026-09-14 calibration the rejection *rate* carried no information: simulated data with no incompatible cells and simulated data with a genuine 20% incompatible subpopulation both rejected 84.7%, the rejection budget. With the within-side null and the budget no longer enforced, the rate estimates the incompatible fraction instead.
+1. ConfidenceOT produces a pair-specific partition and a continuous per-cell score, but the rejection *rate* has never estimated the incompatible fraction, under either calibration. Before 2026-09-14 it carried no information at all: simulated data with no incompatible cells and simulated data with a genuine 20% incompatible subpopulation both rejected 84.7%, the rejection budget. The within-side null and the unenforced budget fixed that on simulated data, where the homogeneous arm falls to 0.090 and the perturbed arm recovers every incompatible cell. On real data the repaired rate turns out to measure something else: primary--metastasis transcriptional similarity, at partial rho 0.79 against an independent pseudobulk measure, 0.351 on GSE180661 whose two sides correlate at 0.941 and 0.0087 on GSE271675 whose two sides genuinely diverge. Section 5.8.4 states the defect and the change to evaluate. The simulation did not catch this because both of its sides are drawn from one generative process, so cross-side separation never departs far from within-side spread.
 2. The all-cell transition matrix is not yet established as a structural validation. The transport plan pairs cells by sequencing depth at rho = 0.64, and cell types differ systematically in library size, so a diagonal-looking matrix could arise without any biological correspondence. This needs its own check before Figure 2A can carry the validation argument.
 3. Malignant-only gates identify expression differences, but the current direction is not equivalent to metastatic potential.
 4. The inflammatory and invasive signals in source-rejected cells are real observations about the fitted partition, and the labels were never reversed. The partition itself, however, separates cells by sequencing depth, and the groups differ in depth by 1.3x to 3.1x. A pseudobulk built from shallower cells is relatively enriched for high-abundance transcripts, which is the most likely reading of the keratinisation and SPRR signal that appears on the rejected side of all three datasets.
@@ -562,7 +777,7 @@ bash scripts/tacc/submit_splatter_scaling.sh
 7. M4-R frequently exhausts its outer loop, which is expected: its gate has no monotone-objective guarantee. That is not evidence against the rejection cost, which is fitted with M4-E, and the earlier reading of `calibration_valid` conflated the two. M4-R remains a cross-check rather than the basis of the primary claim.
 8. Dataset annotation and epithelial-state contamination are major possible confounders.
 9. The GSE180661 UCell result is explainable by a sequencing-depth difference and is not evidence for two metastatic-potential states. Retained and rejected primary cells there differ in median depth by 1.32x. UCell ranks within a cell, which is depth-robust but not depth-invariant: shallow cells detect fewer genes, so signature genes reach `maxRank` less often. A tiny effect that is nonetheless overwhelmingly significant is the signature of a systematic artefact, not of a small biological difference.
-10. The next defensible result must first show specificity, then robustness. Specificity means the method rejects nothing when nothing is incompatible and stops tracking sequencing depth; robustness across initialization, cost and cap settings, patients, exact pairs and independent datasets is only meaningful once the partition measures compatibility at all. The cross-patient mismatched control in 5.7.5 is the gate on any biological claim.
+10. The cross-patient mismatched control has now been run and passed: matched pairs retain 0.351 and mismatched pairs 0.000, signed-rank p = 8.1e-17, and only a third of the cost ordering survives the swap. The partition does use the metastatic side and is patient-specific. That was the gate on any biological claim, and it is cleared. What replaces it as the blocking question is 5.8.4: the retained fraction is close to inversely proportional to how far apart the two sides are, so the method returns almost nothing exactly when there is divergence to study. No biological claim should rest on a rate with that property. Distinguishing patient A from patient B in HGSOC is easy on clonal grounds, so passing the mismatched control is necessary and not sufficient; the control that would bite is same-patient primary against primary, for which 16 of 29 GSE180661 patients have two primary samples.
 
 ## 10. Immediate next steps
 
