@@ -89,6 +89,151 @@ def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return np.maximum(value, 0.0)
 
 
+def equalise_reads(
+    rng: np.random.Generator, counts: np.ndarray, target: int,
+) -> np.ndarray:
+    """Subsample every cell's reads to one shared total.
+
+    The same operation as ``cancer_metastasis/27_downsample_counts.py`` and as
+    ``scanpy.pp.downsample_counts``: exact multivariate hypergeometric sampling
+    of reads without replacement. Cells already at or below the target are left
+    untouched, exactly as the production script leaves them, so the residual
+    depth gradient the simulation sees is the same one the real runs see.
+
+    This step was missing from the simulation entirely, which is why its
+    gene-ranking arm measured ranking *alone*. On real prostate data ranking
+    alone leaves the gate at AUC 0.060 while ranking plus this step reaches
+    0.493, so the arm the figure showed was never the production pipeline.
+    """
+    equalised = np.array(counts, dtype=np.int64, copy=True)
+    totals = equalised.sum(axis=1)
+    for index in np.flatnonzero(totals > target):
+        equalised[index] = rng.multivariate_hypergeometric(
+            equalised[index], int(target)
+        )
+    return equalised
+
+
+SCTRANSFORM_R = r"""
+suppressMessages({library(Matrix); library(Seurat)})
+args <- commandArgs(trailingOnly = TRUE)
+counts <- readMM(args[1])                       # genes x cells
+rownames(counts) <- paste0("g", seq_len(nrow(counts)))
+colnames(counts) <- paste0("c", seq_len(ncol(counts)))
+object <- CreateSeuratObject(counts = as(counts, "CsparseMatrix"))
+# return.only.var.genes = FALSE so the caller, not Seurat, picks the genes;
+# the comparison is of the transform, not of two different gene selections.
+object <- SCTransform(object, vst.flavor = "v2", verbose = FALSE,
+                      return.only.var.genes = FALSE,
+                      variable.features.n = nrow(counts))
+residuals <- GetAssayData(object, assay = "SCT", layer = "scale.data")
+write.table(as.matrix(residuals), file = args[2], sep = "\t",
+            row.names = FALSE, col.names = FALSE)
+"""
+
+
+def external_normalised(
+    counts: np.ndarray, method: str, *, seed: int,
+) -> np.ndarray:
+    """Cells x genes residuals from an external package.
+
+    Kept in this script rather than in ``cancer_metastasis/common.py`` because
+    the cancer pipeline must not acquire an R dependency; these exist to be
+    compared against, not to be run in production.
+    """
+    if method == "scanpy_pearson":
+        try:
+            import anndata as ad
+            import scanpy.experimental as se
+        except Exception as error:  # noqa: BLE001 - message matters more
+            raise RuntimeError(
+                "scanpy_pearson needs a working scanpy; import failed with "
+                f"{type(error).__name__}: {error}"
+            ) from error
+        adata = ad.AnnData(X=counts.astype(np.float32))
+        se.pp.normalize_pearson_residuals(adata)
+        return np.asarray(adata.X, dtype=np.float32)
+
+    if method == "sctransform":
+        import shutil
+        import subprocess
+        import tempfile
+        from scipy import io as scipy_io
+        from scipy import sparse as scipy_sparse
+
+        rscript = shutil.which("Rscript")
+        if rscript is None:
+            raise RuntimeError(
+                "sctransform needs Rscript on PATH with Seurat and Matrix "
+                "installed; none found"
+            )
+        with tempfile.TemporaryDirectory() as workspace:
+            work = Path(workspace)
+            matrix_path, out_path = work / "counts.mtx", work / "residuals.tsv"
+            script_path = work / "sctransform.R"
+            # Seurat wants genes x cells.
+            scipy_io.mmwrite(str(matrix_path),
+                             scipy_sparse.csr_matrix(counts.T.astype(np.int32)))
+            script_path.write_text(SCTRANSFORM_R, encoding="utf-8")
+            finished = subprocess.run(
+                [rscript, "--vanilla", str(script_path),
+                 str(matrix_path), str(out_path)],
+                capture_output=True, text=True, check=False,
+            )
+            if finished.returncode != 0 or not out_path.exists():
+                raise RuntimeError(
+                    "SCTransform failed:\n"
+                    + (finished.stderr or finished.stdout)[-2000:]
+                )
+            residuals = np.loadtxt(out_path, dtype=np.float32)
+        return residuals.T  # back to cells x genes
+
+    raise ValueError(f"Unknown external representation {method!r}")
+
+
+def external_joint_pca(
+    source_counts: np.ndarray, target_counts: np.ndarray, method: str, *,
+    n_hvg: int, n_pcs: int, seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mirror `prepare_joint_representation`'s tail on external residuals.
+
+    Same steps in the same order as the production path -- stack both sides,
+    take the top-variance genes, centre, scale per gene, joint PCA -- so the
+    only thing that differs between an external arm and ours is the transform.
+    """
+    from sklearn.decomposition import PCA
+
+    joint = np.vstack([source_counts, target_counts])
+    dense = external_normalised(joint, method, seed=seed)
+    if dense.shape != joint.shape:
+        raise RuntimeError(
+            f"{method} returned {dense.shape}, expected {joint.shape}"
+        )
+    variances = dense.var(axis=0)
+    selected = np.argsort(-variances, kind="stable")[: min(n_hvg, dense.shape[1])]
+    dense = np.array(dense[:, selected], dtype=np.float32)
+    dense -= dense.mean(axis=0)
+    std = dense.std(axis=0)
+    dense /= np.where(std > 1e-8, std, 1.0)
+    components = min(n_pcs, dense.shape[0] - 1, dense.shape[1])
+    coordinates = PCA(n_components=components,
+                      random_state=seed).fit_transform(dense)
+    return coordinates[: len(source_counts)], coordinates[len(source_counts):]
+
+
+def unit_rows(matrix: np.ndarray) -> np.ndarray:
+    """L2-normalise each row, leaving any all-zero row alone.
+
+    Cosine distance on these rows is the squared Euclidean distance on them:
+    for unit vectors ``||a-b||^2 = 2 - 2 cos(a, b)``. Normalising here therefore
+    turns the existing cost, scaling and calibration machinery into the cosine
+    version without touching any of it, and makes explicit that "use cosine"
+    means "discard each cell's magnitude" and nothing else.
+    """
+    norm = np.linalg.norm(matrix, axis=1, keepdims=True)
+    return matrix / np.where(norm > 0, norm, 1.0)
+
+
 def rank_auc(values: np.ndarray, positive: np.ndarray) -> float:
     """Mann--Whitney AUC with ``positive`` as the positive class."""
     numeric = np.asarray(values, dtype=np.float64)
@@ -228,13 +373,34 @@ def run_replicate(
         rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
         perturbed_fraction=0.0, **shared,
     )
-    source = as_anndata(source_counts, "s")
-    target = as_anndata(target_counts, "t")
-    source_pca, target_pca, hvg, _ = prepare_joint_representation(
-        source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
-        representation=args.representation, rank_top_n=args.rank_top_n,
-        minimum_detection_rate=args.minimum_detection_rate,
-    )
+    # Read equalisation, before anything else sees the counts. The depth the
+    # diagnostics test against stays the pre-equalisation depth, because that
+    # is the covariate the gate must not track -- the same reason
+    # 27_downsample_counts.py emits predownsample_depth.csv.gz.
+    if args.equalise_depth:
+        pooled = np.concatenate([source_counts.sum(axis=1),
+                                 target_counts.sum(axis=1)])
+        target_depth = int(np.quantile(pooled, args.equalise_quantile))
+        source_counts = equalise_reads(rng, source_counts, target_depth)
+        target_counts = equalise_reads(rng, target_counts, target_depth)
+
+    if args.external_representation:
+        source_pca, target_pca = external_joint_pca(
+            source_counts, target_counts, args.external_representation,
+            n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
+        )
+        hvg = []
+    else:
+        source = as_anndata(source_counts, "s")
+        target = as_anndata(target_counts, "t")
+        source_pca, target_pca, hvg, _ = prepare_joint_representation(
+            source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
+            representation=args.representation, rank_top_n=args.rank_top_n,
+            minimum_detection_rate=args.minimum_detection_rate,
+        )
+    if args.cost == "cosine":
+        source_pca, target_pca = unit_rows(source_pca), unit_rows(target_pca)
+
     pairs = min(1_000_000, len(source_pca) * len(target_pca))
     sampled = np.sum(
         (
@@ -394,6 +560,32 @@ def main() -> None:
              "shallowest cell's detected-gene count or detection breadth, the "
              "surviving part of the depth effect, re-enters through the "
              "list length.",
+    )
+    parser.add_argument(
+        "--external-representation",
+        choices=("scanpy_pearson", "sctransform"), default=None,
+        help="Normalise with an external package instead of --representation, "
+             "as a reference point the reviewer can check: scanpy's "
+             "experimental.pp.normalize_pearson_residuals, or Seurat's "
+             "SCTransform v2 through Rscript. Composes with --equalise-depth "
+             "and --cost. Needs a working scanpy, or Rscript with Seurat.",
+    )
+    parser.add_argument(
+        "--equalise-depth", action="store_true",
+        help="Subsample every cell's reads to one shared total before "
+             "anything else, as 27_downsample_counts.py does. Composes with "
+             "--representation; the production cancer path is this plus "
+             "rank_value, a combination the simulation could not express.",
+    )
+    parser.add_argument(
+        "--equalise-quantile", type=float, default=0.10,
+        help="Pooled-depth quantile the shared target is taken from",
+    )
+    parser.add_argument(
+        "--cost", choices=("squared_euclidean", "cosine"),
+        default="squared_euclidean",
+        help="Cost geometry. 'cosine' L2-normalises each cell's PCA "
+             "coordinates first, which discards magnitude and nothing else.",
     )
     parser.add_argument("--n-hvg", type=int, default=2000)
     parser.add_argument("--n-pcs", type=int, default=30)
