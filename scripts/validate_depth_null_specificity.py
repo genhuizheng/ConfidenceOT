@@ -126,7 +126,15 @@ object <- CreateSeuratObject(counts = as(counts, "CsparseMatrix"))
 object <- SCTransform(object, vst.flavor = "v2", verbose = FALSE,
                       return.only.var.genes = FALSE,
                       variable.features.n = nrow(counts))
-residuals <- GetAssayData(object, assay = "SCT", layer = "scale.data")
+# Seurat 5 takes `layer`, Seurat 4 takes `slot`, and which one is installed on
+# a cluster is not knowable from here. Try both rather than pin a version.
+residuals <- tryCatch(
+  GetAssayData(object, assay = "SCT", layer = "scale.data"),
+  error = function(e) GetAssayData(object, assay = "SCT", slot = "scale.data")
+)
+if (nrow(residuals) == 0 || ncol(residuals) == 0) {
+  stop("SCTransform returned an empty scale.data")
+}
 write.table(as.matrix(residuals), file = args[2], sep = "\t",
             row.names = FALSE, col.names = FALSE)
 """
@@ -205,10 +213,18 @@ def external_joint_pca(
 
     joint = np.vstack([source_counts, target_counts])
     dense = external_normalised(joint, method, seed=seed)
-    if dense.shape != joint.shape:
+    # Only the cell count has to match. SCTransform drops genes detected in too
+    # few cells, so its residual matrix is narrower than the input, and the
+    # next step selects genes by variance anyway.
+    if dense.shape[0] != joint.shape[0]:
         raise RuntimeError(
-            f"{method} returned {dense.shape}, expected {joint.shape}"
+            f"{method} returned {dense.shape[0]} cells, expected "
+            f"{joint.shape[0]}"
         )
+    if dense.shape[1] < 2:
+        raise RuntimeError(f"{method} left {dense.shape[1]} genes")
+    if dense.shape[1] != joint.shape[1]:
+        print(f"    {method} kept {dense.shape[1]} of {joint.shape[1]} genes")
     variances = dense.var(axis=0)
     selected = np.argsort(-variances, kind="stable")[: min(n_hvg, dense.shape[1])]
     dense = np.array(dense[:, selected], dtype=np.float32)
