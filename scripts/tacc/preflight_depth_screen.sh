@@ -2,8 +2,8 @@
 # Check everything the depth screen needs before a single job is submitted.
 #
 # Four of the eleven configurations depend on packages that are not ours:
-# scanpy for the analytic Pearson residual, and Rscript with Seurat and Matrix
-# for SCTransform. Finding out from a failed array task wastes a submission, so
+# scanpy for the analytic Pearson residual, and R with sctransform for
+# SCTransform. Finding out from a failed array task wastes a submission, so
 # this runs on the login node in seconds and says exactly which indices are
 # safe to submit.
 #
@@ -75,29 +75,10 @@ except Exception as error:
 PY
 then external_scanpy=1; fi
 
-echo "== R with Seurat and Matrix, for configurations 9 and 10"
-# CONFIDENCEOT_RSCRIPT lets R live in a container rather than on PATH, which is
-# how it is set up here: a rocker r-ver image under /scratch/.../containers.
-if [[ -n "${CONFIDENCEOT_RSCRIPT:-}" ]]; then
-  r_command=$CONFIDENCEOT_RSCRIPT
-  echo "   using CONFIDENCEOT_RSCRIPT: $r_command"
-elif command -v Rscript > /dev/null 2>&1; then
-  r_command=Rscript
-  echo "   using Rscript from PATH"
-else
-  r_command=""
-  echo "   SKIP no R. Either module load one, or set CONFIDENCEOT_RSCRIPT, e.g."
-  echo "        export CONFIDENCEOT_RSCRIPT='apptainer exec -B /scratch \\"
-  echo "          /scratch/10119/ghzheng/containers/r-ver-4.4.sif Rscript'"
-fi
-if [[ -n "$r_command" ]]; then
-  if $r_command --vanilla -e 'suppressMessages({library(Matrix); library(Seurat)}); cat("   ok   Seurat", as.character(packageVersion("Seurat")), "\n")' 2>/dev/null; then
-    external_r=1
-  else
-    echo "   SKIP R runs but Seurat or Matrix will not load; install into a"
-    echo "        library the container can see, then re-run this preflight"
-  fi
-fi
+echo "== R with sctransform, for configurations 9 and 10"
+# shellcheck source=/dev/null
+source "$repo/scripts/tacc/r_environment.sh"
+[[ "${CONFIDENCEOT_R_STATUS:-}" == "ready" ]] && external_r=1
 
 echo
 echo "=================================================="
@@ -108,8 +89,8 @@ else
 fi
 [[ $external_scanpy -eq 1 ]] && echo "configurations 7-8 (scanpy):     READY" \
                              || echo "configurations 7-8 (scanpy):     NOT AVAILABLE"
-[[ $external_r -eq 1 ]]      && echo "configurations 9-10 (SCTransform): READY" \
-                             || echo "configurations 9-10 (SCTransform): NOT AVAILABLE"
+[[ $external_r -eq 1 ]]      && echo "configurations 9-10 (sctransform): READY" \
+                             || echo "configurations 9-10 (sctransform): NOT AVAILABLE"
 echo
 if [[ $ours_ok -eq 1 ]]; then
   last=6
@@ -117,6 +98,6 @@ if [[ $ours_ok -eq 1 ]]; then
   [[ $external_scanpy -eq 1 && $external_r -eq 1 ]] && last=10
   echo "submit:  sbatch --array=0-$last scripts/tacc/screen_depth_configurations.slurm"
   if [[ $external_scanpy -eq 1 && $external_r -ne 1 ]]; then
-    echo "  (9-10 need R; add them later with --array=9-10 once Seurat loads)"
+    echo "  (9-10 need R with sctransform; add them with --array=9-10 later)"
   fi
 fi

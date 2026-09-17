@@ -115,25 +115,28 @@ def equalise_reads(
 
 
 SCTRANSFORM_R = r"""
-suppressMessages({library(Matrix); library(Seurat)})
+# sctransform::vst, not Seurat::SCTransform. The algorithm lives in the
+# standalone package and Seurat's function is a wrapper around this call, but
+# its dependencies are only Matrix, Rcpp, RcppArmadillo, matrixStats, dplyr and
+# ggplot2 -- none of which need zlib, libcurl or libssl. Installing Seurat into
+# the rocker r-ver container fails on exactly those system headers and takes 19
+# packages down with it, every one of them from the interactive and plotting
+# chain this comparison never touches.
+suppressMessages({library(Matrix); library(sctransform)})
 args <- commandArgs(trailingOnly = TRUE)
 counts <- readMM(args[1])                       # genes x cells
 rownames(counts) <- paste0("g", seq_len(nrow(counts)))
 colnames(counts) <- paste0("c", seq_len(ncol(counts)))
-object <- CreateSeuratObject(counts = as(counts, "CsparseMatrix"))
-# return.only.var.genes = FALSE so the caller, not Seurat, picks the genes;
-# the comparison is of the transform, not of two different gene selections.
-object <- SCTransform(object, vst.flavor = "v2", verbose = FALSE,
-                      return.only.var.genes = FALSE,
-                      variable.features.n = nrow(counts))
-# Seurat 5 takes `layer`, Seurat 4 takes `slot`, and which one is installed on
-# a cluster is not knowable from here. Try both rather than pin a version.
-residuals <- tryCatch(
-  GetAssayData(object, assay = "SCT", layer = "scale.data"),
-  error = function(e) GetAssayData(object, assay = "SCT", slot = "scale.data")
-)
-if (nrow(residuals) == 0 || ncol(residuals) == 0) {
-  stop("SCTransform returned an empty scale.data")
+counts <- as(counts, "CsparseMatrix")
+
+# min_cells = 1 so the caller decides which genes survive; the comparison is of
+# the transform, not of two different gene selections. v2 is the flavour Seurat
+# itself defaults to.
+fit <- vst(counts, vst.flavor = "v2", residual_type = "pearson",
+           min_cells = 1, return_cell_attr = FALSE, verbosity = 0)
+residuals <- fit$y
+if (is.null(residuals) || nrow(residuals) == 0 || ncol(residuals) == 0) {
+  stop("sctransform::vst returned no residuals")
 }
 write.table(as.matrix(residuals), file = args[2], sep = "\t",
             row.names = FALSE, col.names = FALSE)

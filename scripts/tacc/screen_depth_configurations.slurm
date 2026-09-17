@@ -50,20 +50,13 @@ export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 mkdir -p "$root/logs"
 
-# Configurations 9 and 10 call R. Seurat is not on PATH here; it lives in a
-# container, so the whole invocation is passed through rather than assumed. The
-# handoff files go under $root so the bind in CONFIDENCEOT_RSCRIPT covers them
-# -- a container sees only what it is given, and the default temp directory is
-# the usual reason this fails.
-container=${CONFIDENCEOT_R_SIF:-/scratch/10119/ghzheng/containers/r-ver-4.4.sif}
-r_libs=${CONFIDENCEOT_R_LIBS:-/scratch/10119/ghzheng/r_libs}
-if [[ -z "${CONFIDENCEOT_RSCRIPT:-}" && -f "$container" ]]; then
-  # apptainer is a module here, and it is refused on the login nodes, so the
-  # load has to happen inside the job. Without it the container tasks fail with
-  # "apptainer: command not found" on the compute node too.
-  module load tacc-apptainer 2>/dev/null || true
-  export CONFIDENCEOT_RSCRIPT="apptainer exec -B /scratch --env R_LIBS_USER=$r_libs $container Rscript"
-fi
+# Configurations 9 and 10 call R. The helper finds it, preferring the conda
+# r-omics environment under $WORK over the container, and points R_LIBS_USER at
+# the packages already installed there. The handoff files go under $root, which
+# matters only in the container case: a container sees only what it is bound,
+# and Python's default temp directory usually is not.
+# shellcheck source=/dev/null
+source "$repo/scripts/tacc/r_environment.sh"
 export CONFIDENCEOT_R_WORKDIR=${CONFIDENCEOT_R_WORKDIR:-$root/r_workspace}
 
 # label | flags. Index order is the array index order.
@@ -76,9 +69,9 @@ configurations=(
   "rank256_ds_cos|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine"
   "pearson_ds|--representation pearson_residuals --equalise-depth"
   # External references, so the transform comparison does not rest only on our
-  # own implementations. scanpy's is the analytic Pearson residual; Seurat's
-  # SCTransform v2 is the field standard and needs Rscript with Seurat and
-  # Matrix. Both compose with equalisation, so each appears twice.
+  # own implementations. scanpy's is the analytic Pearson residual; sctransform
+  # is the package Seurat's SCTransform v2 wraps, and is the field standard.
+  # Both compose with equalisation, so each appears twice.
   "scanpy_pearson|--external-representation scanpy_pearson"
   "scanpy_pearson_ds|--external-representation scanpy_pearson --equalise-depth"
   "sct|--external-representation sctransform"
