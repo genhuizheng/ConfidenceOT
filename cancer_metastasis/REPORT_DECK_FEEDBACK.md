@@ -94,6 +94,32 @@ What this figure now shows on its own, for the featured patient: orange
 concentrates in the lower-left tail, aqua sits in the upper body, and the
 cell-division panel beside it puts its highest scores on exactly that tail.
 
+## Round 6 — the colorectal figure, 2026-09-16
+
+| # | Comment | Status | What changed |
+|---|---|---|---|
+| 6.1 | 也加上这个图,这个结肠癌的,有数据吗 | done, the data was local | `confidenceot_analysis/replication_umap/GSE225857/umap_coordinates_and_labels.csv.gz` holds every cell's coordinates, side and gate label, so the figure is redrawn in the deck's own colours rather than pasted in its original palette. New page 6. Head and neck is in the same directory if it is ever wanted, but 810 cells with 90 retained is thin. |
+
+That export also carries the authors' eleven tumour subtypes, two of which are
+proliferative, so it can test the cell-division finding against an independent
+annotation in a third cancer. The second panel does that.
+
+| Subtype group | n | retained |
+|---|---:|---:|
+| Tu05_PCNA and Tu07_MKI67 | 1,598 | **36.1%** |
+| The other nine | 7,987 | 25.1% |
+
+Odds ratio 1.68, p = 1.4e-18, and 3 of the 5 patients point the same way. Two
+reasons it is on the slide as weak corroboration rather than as a result:
+
+- The proliferative subtypes are not the top-ranked ones. Tu02_DEFA5 enriches
+  2.8-fold and Tu11_PLA2G2A 2.2-fold, both above them, and Tu03_SRRM2 is
+  depleted 2.6-fold. Proliferation ranks fifth and sixth.
+- This is the old gate, cap enforced and depth uncorrected, and MKI67-positive
+  cells carry more RNA and sequence deeper. On that arm depth and proliferation
+  cannot be separated from each other, which is exactly what the depth-corrected
+  ovarian and prostate arms were needed for.
+
 ### A factual error round 1 caught
 
 I had written "三个数据集里方向都是反的" on the overview and in the page-4

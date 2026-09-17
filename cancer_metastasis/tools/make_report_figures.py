@@ -790,6 +790,96 @@ def figure_gate_vs_metastasis(source: Path, out: Path, dataset: str, name: str,
     finish(fig, out / f"fig_gatemap_{stem}.png", note)
 
 
+def figure_replication_gate(path: Path, out: Path, dataset: str, stem: str,
+                            highlight: str | None = None,
+                            highlight_label: str = "") -> None:
+    """The same one-panel view, from the older replication UMAP exports.
+
+    Those files predate the overlay format and carry different column names and
+    no signature scores, but they do carry the authors' own subtype labels. The
+    second panel uses them where a proliferation subtype exists, which is the
+    closest thing to a division score this export offers.
+
+    The gate in these files is the old one -- cap enforced, depth uncorrected --
+    so the caller labels it as such.
+    """
+    if not path.exists():
+        print(f"  skip: {path.name} absent")
+        return
+    cells = pd.read_csv(path, keep_default_na=False, na_values=[""])
+    needed = {"UMAP1", "UMAP2", "side", "primary_gate"}
+    if not needed <= set(cells.columns):
+        print("  skip: replication columns absent")
+        return
+    cells = cells.dropna(subset=["UMAP1", "UMAP2"])
+    primary = cells[cells["side"].eq("primary")]
+    metastasis = cells[cells["side"].eq("metastasis")]
+    kept = primary[primary["primary_gate"].eq("retained")]
+    dropped = primary[primary["primary_gate"].eq("rejected")]
+
+    span_x = np.percentile(cells["UMAP1"].to_numpy(float), [0.5, 99.5])
+    span_y = np.percentile(cells["UMAP2"].to_numpy(float), [0.5, 99.5])
+    pad_x, pad_y = 0.04 * np.ptp(span_x), 0.04 * np.ptp(span_y)
+    aspect = float(np.ptp(span_x) / np.ptp(span_y))
+    panels = 2 if highlight and "author_subtype" in cells else 1
+    panel = max(4.6, 5.4 * aspect)
+
+    fig, axes = plt.subplots(1, panels, figsize=(panels * panel + 0.4, 5.6))
+    axes = np.atleast_1d(axes)
+    for axis in axes:
+        axis.set_xticks([])
+        axis.set_yticks([])
+        axis.set_xlim(span_x[0] - pad_x, span_x[1] + pad_x)
+        axis.set_ylim(span_y[0] - pad_y, span_y[1] + pad_y)
+        axis.set_aspect("equal", adjustable="box")
+        for spine in axis.spines.values():
+            spine.set_visible(False)
+
+    axes[0].scatter(metastasis["UMAP1"], metastasis["UMAP2"], s=2.0,
+                    c="#d9d9d4", linewidth=0, rasterized=True, zorder=2)
+    mixed = pd.concat([kept, dropped]).sample(frac=1.0, random_state=5)
+    axes[0].scatter(mixed["UMAP1"], mixed["UMAP2"], s=2.3,
+                    c=np.where(mixed["primary_gate"].eq("retained"), ORANGE,
+                               AQUA),
+                    linewidth=0, rasterized=True, zorder=3)
+    axes[0].set_title("留下的细胞落在转"
+                      "移灶的哪一侧", fontsize=14)
+    for index, (text, colour, count) in enumerate((
+            ("primary rejected", AQUA, len(dropped)),
+            ("primary retained", ORANGE, len(kept)),
+            ("metastasis", "#a8a8a2", len(metastasis)))):
+        axes[0].text(0.98, 0.02 + index * 0.058, f"{text}  n = {count:,}",
+                     color=colour, fontsize=12.5, transform=axes[0].transAxes,
+                     va="bottom", ha="right", fontweight="semibold",
+                     bbox=LABEL_BOX)
+
+    if panels == 2:
+        flagged = primary["author_subtype"].astype(str).str.contains(highlight)
+        axes[1].scatter(primary.loc[~flagged, "UMAP1"],
+                        primary.loc[~flagged, "UMAP2"], s=2.0, c="#d9d9d4",
+                        linewidth=0, rasterized=True, zorder=2)
+        axes[1].scatter(primary.loc[flagged, "UMAP1"],
+                        primary.loc[flagged, "UMAP2"], s=2.3, c="#c2453a",
+                        linewidth=0, rasterized=True, zorder=3)
+        axes[1].set_title(highlight_label, fontsize=14)
+        share_in = float(primary.loc[flagged, "primary_gate"]
+                         .eq("retained").mean())
+        share_out = float(primary.loc[~flagged, "primary_gate"]
+                          .eq("retained").mean())
+        axes[1].text(0.98, 0.02, f"kept {share_in:.0%}  vs  {share_out:.0%}",
+                     color="#c2453a", fontsize=12.5,
+                     transform=axes[1].transAxes, va="bottom", ha="right",
+                     fontweight="semibold", bbox=LABEL_BOX)
+
+    plt.rcParams["font.sans-serif"] = CJK
+    fig.suptitle(dataset, fontsize=16, fontweight="semibold", y=1.01)
+    finish(fig, out / f"fig_gatemap_{stem}.png",
+           f"{len(primary):,} primary and {len(metastasis):,} metastatic "
+           "malignant cells. 这是老版本的 gate"
+           "（cap 生效、未修正深度"
+           "）。")
+
+
 def figure_gate_panel(source: Path, out: Path, name: str, stem: str,
                       title: str, note: str) -> None:
     """Just the kept/not-kept panel, for use as a small inset.
@@ -1058,6 +1148,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_dir", type=Path, help="Unpacked report_inputs directory")
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--replication-dir", type=Path, default=None,
+                        help="the older replication_umap exports, which hold "
+                             "the colorectal and head-and-neck coordinates")
     parser.add_argument("--example-patient", default="SPECTRUM-OV-083",
                         help="the one patient drawn on its own")
     parser.add_argument("--faming-gsea", type=Path, default=None,
@@ -1087,6 +1180,13 @@ def main() -> None:
             args.input_dir, args.output_dir, "Prostate cancer",
             "umap_prostate.csv.gz", "cell_division", "cell division score",
             "prostate")),
+        ("gate vs metastasis, colorectal", lambda: figure_replication_gate(
+            (args.replication_dir or Path("."))
+            / "GSE225857" / "umap_coordinates_and_labels.csv.gz",
+            args.output_dir, "Colorectal cancer — GSE225857",
+            "colorectal", highlight="MKI67|PCNA",
+            highlight_label="作者注释的增"
+                            "殖亚型（MKI67 / PCNA）")),
         ("pooled gate panel", lambda: figure_gate_panel(
             args.input_dir, args.output_dir, "umap_ovarian.csv.gz",
             "ovarian_all", "all 29 patients",

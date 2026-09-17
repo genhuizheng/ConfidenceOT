@@ -286,11 +286,12 @@ class Deck:
             Inches(top + offset),
             width=Inches(drawn_width), height=Inches(drawn_height))
 
-    def split(self, label, items, image: Path, *, text_width=4.5):
+    def split(self, label, items, image: Path, *, text_width=4.5, size=14.5,
+              gap=9):
         """Explanation on the left, figure on the right."""
         slide = self.page()
         top = self.label(slide, label, CONTENT_TOP)
-        self.block(slide, MARGIN, top, text_width, items)
+        self.block(slide, MARGIN, top, text_width, items, size=size, gap=gap)
         figure_left = MARGIN + text_width + 0.3
         self.figure(slide, image, figure_left, top - 0.05,
                     WIDE - MARGIN - figure_left, CONTENT_BOTTOM - top + 0.05,
@@ -506,6 +507,36 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                    "病人内部方差的 5.0%"
                    "。", 12, False, MUTED)], first=True,
           line_spacing=1.16)
+
+    # 5 -- the colorectal gate, from the older exports
+    deck.split(
+        "结肠（GSE225857）：老版本"
+        "的 gate 长什么样",
+        [("数据",
+          "5 个病人，primary 9,585（retained 2,585 / "
+          "rejected 7,000），metastasis 13,987。"),
+         ("左图",
+          "和前面同一种画法。"
+          "橙（retained）偏外围，青"
+          "绿（rejected）占中间那块"
+          "。"),
+         ("右图：用作者的注释"
+          "验证增殖",
+          "Tu05_PCNA 和 Tu07_MKI67 的 retained 比例 36%"
+          "，其余亚型 25%。OR 1.68，"
+          "p = 1.4 × 10⁻¹⁸，5 个病"
+          "人中 3 个同向。"),
+         ("只能当弱旁证",
+          "增殖亚型不是排名最"
+          "前的（Tu02_DEFA5 2.8×、Tu11_PLA2G2A "
+          "2.2×）；而且这是老"
+          "版本 gate，MKI67+ 细胞 RNA 多"
+          "、测得深，深度和增"
+          "殖分不开。卵巢和前"
+          "列腺那两个才是修正"
+          "过深度的干净证据。")],
+        figures / "fig_gatemap_colorectal.png", text_width=4.35, size=13,
+        gap=8)
 
     # 5 -- how large the depth effect was in the old version
     slide = deck.page()
