@@ -42,6 +42,7 @@ scripts/*
 !scripts/finalize_splatter_scaling_benchmark.py
 !scripts/validate_depth_null_specificity.py
 !scripts/screen_depth_configurations.sh
+!scripts/collect_depth_screen.py
 !scripts/tacc/
 scripts/tacc/*
 !scripts/tacc/generate_splatter_scaling.slurm
@@ -50,6 +51,7 @@ scripts/tacc/*
 !scripts/tacc/submit_splatter_scaling.sh
 !scripts/tacc/install_splatter_dependencies.slurm
 !scripts/tacc/screen_depth_configurations.slurm
+!scripts/tacc/preflight_depth_screen.sh
 *.inspect.ndjson
 *.zip
 

@@ -1,0 +1,100 @@
+"""Collect the depth screen into one table, and say which configurations pass.
+
+Reads every ``<root>/<label>/depth_null_arm_summary.csv`` the array wrote and
+prints the two columns a configuration has to clear together: the depth effect
+on the homogeneous arms, and the positive control. Either alone is satisfiable
+by a method that does nothing -- a gate that rejects no cell has no depth
+dependence and no power.
+
+Usage:
+  python scripts/collect_depth_screen.py /scratch/.../depth_screen
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
+                                  errors="replace", line_buffering=True)
+
+HOMOGENEOUS = ("homogeneous_depth_cv0", "homogeneous_depth_cv_low",
+               "homogeneous_depth_cv_mid", "homogeneous_depth_cv_high")
+CONTROL = "perturbed_depth_cv0"
+SHORT = {"homogeneous_depth_cv0": "cv0", "homogeneous_depth_cv_low": "low",
+         "homogeneous_depth_cv_mid": "mid", "homogeneous_depth_cv_high": "high"}
+# Submission order, so the table reads in the order the array ran.
+ORDER = ["logcpm", "logcpm_ds", "logcpm_cos", "rank256", "rank256_ds",
+         "rank256_ds_cos", "pearson_ds", "scanpy_pearson",
+         "scanpy_pearson_ds", "sct", "sct_ds"]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("root", type=Path)
+    parser.add_argument("--tolerance", type=float, default=0.05,
+                        help="depth effect below this counts as cleared")
+    parser.add_argument("--minimum-f1", type=float, default=0.60,
+                        help="positive-control F1 above this counts as intact")
+    args = parser.parse_args()
+
+    frames = []
+    for path in sorted(args.root.glob("*/depth_null_arm_summary.csv")):
+        frame = pd.read_csv(path)
+        frame.insert(0, "configuration", path.parent.name)
+        frames.append(frame)
+    if not frames:
+        raise SystemExit(f"no depth_null_arm_summary.csv under {args.root}")
+
+    arms = pd.concat(frames, ignore_index=True)
+    arms.to_csv(args.root / "screen_all_arms.csv", index=False)
+    if "auc_total_counts" not in arms:
+        raise SystemExit("summaries carry no auc_total_counts column")
+    arms["depth_effect"] = (arms["auc_total_counts"] - 0.5).abs()
+
+    present = [c for c in ORDER if c in set(arms.configuration)]
+    present += sorted(set(arms.configuration) - set(present))
+    missing = [c for c in ORDER if c not in set(arms.configuration)]
+
+    effect = (arms[arms.arm.isin(HOMOGENEOUS)]
+              .pivot_table(index="configuration", columns="arm",
+                           values="depth_effect", aggfunc="median")
+              .reindex(present)
+              .rename(columns=SHORT))
+    effect = effect[[c for c in ("cv0", "low", "mid", "high")
+                     if c in effect.columns]]
+
+    control = arms[arms.arm.eq(CONTROL)].set_index("configuration")
+    for column in ("perturbed_f1", "perturbed_recall", "source_rejection_rate"):
+        effect[column] = control[column].reindex(effect.index) \
+            if column in control else pd.NA
+
+    worst = effect[[c for c in ("cv0", "low", "mid", "high")
+                    if c in effect.columns]].max(axis=1)
+    effect["worst_depth_effect"] = worst
+    effect["passes"] = [
+        "yes" if (w == w and w <= args.tolerance
+                  and f == f and f >= args.minimum_f1) else "no"
+        for w, f in zip(worst, effect.get("perturbed_f1", worst * float("nan")))
+    ]
+
+    pd.set_option("display.width", 220)
+    print("depth effect |AUC - 0.5| by depth spread, lower is better; "
+          "then the positive control\n")
+    print(effect.round(3).to_string())
+    print(f"\npasses = depth effect <= {args.tolerance} on every homogeneous "
+          f"arm AND control F1 >= {args.minimum_f1}")
+    if missing:
+        print("\nnot present yet: " + ", ".join(missing))
+    effect.to_csv(args.root / "screen_depth_effect.csv")
+    print(f"\nwrote {args.root / 'screen_all_arms.csv'}")
+    print(f"wrote {args.root / 'screen_depth_effect.csv'}")
+
+
+if __name__ == "__main__":
+    main()
