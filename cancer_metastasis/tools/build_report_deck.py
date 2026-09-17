@@ -415,31 +415,34 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                    "0.0063 配上 1.9 × 10⁻⁸，是后者的样子。", 12.5, False,
                    BODY)], line_spacing=1.18)
 
-    # 3 -- the question and the data, on one patient
-    slide = deck.page()
-    top = deck.label(slide, "问题定义与数据："
-                            "先看一个病人", CONTENT_TOP)
-    deck.block(slide, MARGIN, top, WIDE - 2 * MARGIN, [
-        ("数据",
-         "GSE180661 HGSOC，29 patients，187,383 malignant cells"
-         "（depth-equalised），94 个 primary–metastasis "
-         "pairs。下图是 SPECTRUM-OV-083：4,726 个 "
-         "primary、4,307 个 metastasis，留下 54%"
-         "（挑它是因为两组都看得"
-         "清）。"),
-        ("三张图怎么读",
-         "左：这个病人的 primary（灰"
-         "）与 metastasis（蓝）混在一起"
-         "。中：方法在这个病人"
-         "内部留下了哪些 primary 细胞 "
-         "—— 按位置分布，不是"
-         "整块。右：同一批细胞的 "
-         "cell division score，高分区域与留"
-         "下的区域重合。"),
-    ], size=14, gap=8)
-    deck.figure(slide, figures / "fig_umap_ovarian_patient.png",
-                MARGIN, 3.02, WIDE - 2 * MARGIN, CONTENT_BOTTOM - 3.02,
-                anchor="top")
+    # 3 -- the question and the data, on one patient. Text in its own column
+    # so it cannot collide with the figure, which is what happened each time
+    # the block sat above it and its rendered height had to be guessed.
+    deck.split(
+        "问题定义与数据：先"
+        "看一个病人",
+        [("数据",
+          "GSE180661 HGSOC，29 patients，187,383 malignant cells"
+          "（depth-equalised），94 个 primary–"
+          "metastasis pairs。"),
+         ("图是一个病人",
+          "SPECTRUM-OV-083，挑它是因为两"
+          "组都看得清，不是因"
+          "为结果好看。"),
+         ("左图怎么读",
+          "灰色是这个病人的 "
+          "metastasis，橙 / 绿是它的 primary "
+          "被留下 / 被拒绝。橙"
+          "色集中在左下那条尾"
+          "巴，绿色偏上方那一"
+          "团 —— 在病人内部是"
+          "按细胞状态切的，不"
+          "是整块。"),
+         ("右图怎么读",
+          "同一批 primary 细胞的 cell division "
+          "score。高分区正好就是"
+          "橙色那条尾巴。")],
+        figures / "fig_gatemap_ovarian_patient.png", text_width=3.75)
 
     # 4 -- the earlier result and the checks on it, tables only
     slide = deck.page()
@@ -532,14 +535,24 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
     top = deck.label(slide, "depth 是什么，以及它为什么会变成一个 gate 决定",
                      CONTENT_TOP)
     deck.figure(slide, figures / "fig_depth_cartoon.png", MARGIN, top,
-                WIDE - 2 * MARGIN, CONTENT_BOTTOM - top - 0.5, anchor="top")
-    frame = text_box(slide, MARGIN, CONTENT_BOTTOM - 0.44,
-                     WIDE - 2 * MARGIN, 0.44)
-    write(frame, [("→  ", 14.5, True, ORANGE),
-                  ("A 和 B 的生物学完全相同，只是测序深度不同。gate 把 A 判为 "
-                   "retained、B 判为 rejected —— 依据是深度，不是生物学。"
-                   "这就是“极小 effect 加极显著 p”的来源。",
-                   14.5, True, ORANGE)], first=True)
+                WIDE - 2 * MARGIN, CONTENT_BOTTOM - top - 1.05, anchor="top")
+    # The distinction that makes this page land: depth is not the batch effect
+    # people reach for batch correction to fix.
+    frame = text_box(slide, MARGIN, CONTENT_BOTTOM - 1.0,
+                     WIDE - 2 * MARGIN, 1.0)
+    write(frame, [("这不是批次效应，两者要分开", 14.5, True, ORANGE)],
+          first=True, space_after=4)
+    write(frame, [("批次效应发生在样本与样本、library 与 library 之间；"
+                   "depth 是细胞级的，同一个 library 内部每个细胞测到的 reads "
+                   "本来就差很多。所以 Harmony 这类批次校正修不到它 —— 它们"
+                   "对齐的是样本之间的偏移，而这里的偏移在样本内部。这也是"
+                   "为什么它需要单独用 downsample 处理。", 13.5, False,
+                   BODY)], space_after=4, line_spacing=1.2)
+    write(frame, [("→  ", 14, True, ORANGE),
+                  ("批次那一侧我们也单独查过：位点 / library 只解释病人内部"
+                   "方差的 5.0%（见前页）。所以两个问题是分开成立的 —— "
+                   "批次不是问题，depth 是。", 14, True, ORANGE)],
+          line_spacing=1.2)
 
     # 7 -- what each preprocessing does, before the results that used them
     slide = deck.page()
@@ -715,7 +728,7 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                    "18%。", 13, False, BODY)], line_spacing=1.2)
     # The prostate embedding goes here rather than on a page of its own: it is
     # the same three panels as the ovarian one, so the two read together.
-    deck.figure(slide, figures / "fig_umap_prostate.png", MARGIN, 4.3,
+    deck.figure(slide, figures / "fig_gatemap_prostate.png", MARGIN, 4.3,
                 WIDE - 2 * MARGIN, CONTENT_BOTTOM - 4.3, anchor="top")
 
     # 11 -- enrichment

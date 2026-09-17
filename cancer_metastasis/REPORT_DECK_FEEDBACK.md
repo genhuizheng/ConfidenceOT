@@ -83,6 +83,17 @@ The rule on its own retains 2.4%, and `sign_rule_concordance` falls from 1.000
 elsewhere to 0.874. The proliferation signal is still strong, but the group it
 describes is mostly cap fill, and both of those pages now say so.
 
+## Round 5 — one panel instead of two, 2026-09-16
+
+| # | Comment | Status | What changed |
+|---|---|---|---|
+| 5.1 | 这个图更加明显一些,取代那张,这个是一眼看出来啥情况 (the old GSE225857 three-series panel) | done | The virtue of that figure is that all three groups are in **one** panel: the metastasis as a grey backdrop with both primary groups drawn over it, so where the retained cells sit *relative to the metastasis* can be read directly. The old three-panel version put the two primary groups in one panel and the metastasis in another, so that comparison was not on the page at all. Rebuilt as `fig_gatemap_*`: one panel with metastasis grey, retained orange, rejected aqua and counts in the legend, plus the cell-division panel kept beside it because it carries the proliferation argument. Retained keeps the orange it has throughout the deck; rejected takes the next slot in the validated order rather than the grey now doing duty as the backdrop. Applied to the ovarian patient page and the prostate page. |
+| 5.2 | depth 那页要说明这个不是批次效应 | done | Added as its own block. Batch effects live between samples and libraries; depth is per cell and varies inside a single library, which is why batch correction of the Harmony kind cannot reach it — those methods align offsets between samples and this offset is within one. That is also why it needed downsampling specifically. The page points back to the 5.0% figure so the two questions read as separately settled: batch is not the problem, depth is. |
+
+What this figure now shows on its own, for the featured patient: orange
+concentrates in the lower-left tail, aqua sits in the upper body, and the
+cell-division panel beside it puts its highest scores on exactly that tail.
+
 ### A factual error round 1 caught
 
 I had written "三个数据集里方向都是反的" on the overview and in the page-4

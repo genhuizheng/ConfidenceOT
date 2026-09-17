@@ -688,6 +688,108 @@ def figure_depth_cartoon(out: Path) -> None:
            "对 10,433，1.32×）。")
 
 
+def figure_gate_vs_metastasis(source: Path, out: Path, dataset: str, name: str,
+                              score: str, score_label: str, stem: str,
+                              patient: str | None = None) -> None:
+    """Both primary groups over the metastasis, in one panel.
+
+    The earlier three-panel version put retained and rejected in a panel of
+    their own, with the metastasis in a different panel, so where the retained
+    cells sit *relative to the metastasis* could not be read off it. Here the
+    metastasis is the grey backdrop and both primary groups are drawn over it,
+    which is the comparison the figure exists to make.
+
+    Colours: retained keeps the orange it has everywhere else in the deck, and
+    rejected takes the next slot in the validated order rather than the grey
+    now used for the backdrop.
+    """
+    cells = read(source, name)
+    if cells is None or "umap_1" not in cells:
+        return
+    cells = cells.dropna(subset=["umap_1", "umap_2"])
+    if patient is not None:
+        if "patient_id" not in cells:
+            print("  skip: no patient column")
+            return
+        cells = cells[cells["patient_id"].eq(patient)]
+    if cells.empty:
+        print("  skip: no placed cells")
+        return
+
+    primary = cells[cells["side"].eq("primary")]
+    metastasis = cells[cells["side"].eq("metastasis")]
+    kept = primary[primary["retained"].astype(bool)]
+    dropped = primary[~primary["retained"].astype(bool)]
+    if primary.empty:
+        print("  skip: no primary cells")
+        return
+
+    trim = [2.0, 98.0] if patient is not None else [0.5, 99.5]
+    span_x = np.percentile(cells["umap_1"].to_numpy(float), trim)
+    span_y = np.percentile(cells["umap_2"].to_numpy(float), trim)
+    pad_x, pad_y = 0.04 * np.ptp(span_x), 0.04 * np.ptp(span_y)
+    aspect = float(np.ptp(span_x) / np.ptp(span_y))
+    panel = max(4.6, 5.4 * aspect)
+
+    fig, axes = plt.subplots(1, 2, figsize=(2 * panel + 1.1, 5.6))
+    for axis in axes:
+        axis.set_xticks([])
+        axis.set_yticks([])
+        axis.set_xlim(span_x[0] - pad_x, span_x[1] + pad_x)
+        axis.set_ylim(span_y[0] - pad_y, span_y[1] + pad_y)
+        axis.set_aspect("equal", adjustable="box")
+        for spine in axis.spines.values():
+            spine.set_visible(False)
+
+    size = 2.6 if patient is not None else 1.3
+    axes[0].scatter(metastasis["umap_1"], metastasis["umap_2"], s=size,
+                    c="#d9d9d4", linewidth=0, rasterized=True, zorder=2)
+    # Random order within the two primary groups, so neither buries the other.
+    mixed = pd.concat([kept, dropped]).sample(frac=1.0, random_state=5)
+    axes[0].scatter(mixed["umap_1"], mixed["umap_2"], s=size * 1.15,
+                    c=np.where(mixed["retained"].astype(bool), ORANGE, AQUA),
+                    linewidth=0, rasterized=True, zorder=3)
+    axes[0].set_title("留下的细胞落在转"
+                      "移灶的哪一侧", fontsize=14)
+    # Bottom right, stacking upward: the cloud fills the panel, so a legend in
+    # the top-left corner sat on the cells it was describing.
+    for index, (text, colour, count) in enumerate((
+            ("primary rejected", AQUA, len(dropped)),
+            ("primary retained", ORANGE, len(kept)),
+            ("metastasis", "#a8a8a2", len(metastasis)))):
+        axes[0].text(0.98, 0.02 + index * 0.058,
+                     f"{text}  n = {count:,}", color=colour, fontsize=12.5,
+                     transform=axes[0].transAxes, va="bottom", ha="right",
+                     fontweight="semibold", bbox=LABEL_BOX)
+
+    if score in primary:
+        values = primary[score].to_numpy(float)
+        finite = np.isfinite(values)
+        order = np.argsort(values[finite])
+        low, high = np.nanpercentile(values[finite], [2, 98])
+        dots = axes[1].scatter(primary["umap_1"].to_numpy()[finite][order],
+                               primary["umap_2"].to_numpy()[finite][order],
+                               s=size, c=values[finite][order], cmap="YlOrRd",
+                               vmin=low, vmax=high, linewidth=0,
+                               rasterized=True)
+        bar = fig.colorbar(dots, ax=axes[1], fraction=0.045, pad=0.02)
+        bar.set_label(score_label, fontsize=12)
+        bar.set_ticks([low, high])
+        bar.set_ticklabels(["low", "high"])
+        bar.outline.set_visible(False)
+        axes[1].set_title(score_label, fontsize=14)
+    else:
+        axes[1].set_visible(False)
+
+    heading = dataset if patient is None else f"{dataset} — {patient}"
+    plt.rcParams["font.sans-serif"] = CJK
+    fig.suptitle(heading, fontsize=16, fontweight="semibold", y=1.01)
+    note = (f"{len(primary):,} primary and {len(metastasis):,} metastatic "
+            "malignant cells" + ("" if patient is None else ", one patient")
+            + ", on the embedding published with the dataset.")
+    finish(fig, out / f"fig_gatemap_{stem}.png", note)
+
+
 def figure_gate_panel(source: Path, out: Path, name: str, stem: str,
                       title: str, note: str) -> None:
     """Just the kept/not-kept panel, for use as a small inset.
@@ -976,6 +1078,15 @@ def main() -> None:
         ("umap ovarian", lambda: figure_umap(
             args.input_dir, args.output_dir, "Ovarian cancer", "umap_ovarian.csv.gz",
             "cell_division", "cell division score")),
+        ("gate vs metastasis, one ovarian patient",
+         lambda: figure_gate_vs_metastasis(
+             args.input_dir, args.output_dir, "Ovarian cancer",
+             "umap_ovarian.csv.gz", "cell_division", "cell division score",
+             "ovarian_patient", patient=args.example_patient)),
+        ("gate vs metastasis, prostate", lambda: figure_gate_vs_metastasis(
+            args.input_dir, args.output_dir, "Prostate cancer",
+            "umap_prostate.csv.gz", "cell_division", "cell division score",
+            "prostate")),
         ("pooled gate panel", lambda: figure_gate_panel(
             args.input_dir, args.output_dir, "umap_ovarian.csv.gz",
             "ovarian_all", "all 29 patients",
