@@ -64,6 +64,9 @@ scripts/tacc/*
 # The deck is generated, so review feedback has to live where the generator
 # does or the next rebuild silently drops it.
 !/cancer_metastasis/REPORT_DECK_FEEDBACK.md
+# The screen's design, written before its results, for the same reason the
+# prespecification is tracked.
+!/cancer_metastasis/DEPTH_SCREEN_SETUP.md
 
 # OS/editor files
 .DS_Store
