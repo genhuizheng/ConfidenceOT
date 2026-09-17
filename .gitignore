@@ -43,6 +43,7 @@ scripts/*
 !scripts/validate_depth_null_specificity.py
 !scripts/screen_depth_configurations.sh
 !scripts/collect_depth_screen.py
+!scripts/make_journal_figure.py
 !scripts/tacc/
 scripts/tacc/*
 !scripts/tacc/generate_splatter_scaling.slurm
