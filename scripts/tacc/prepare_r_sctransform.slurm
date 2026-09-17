@@ -11,36 +11,38 @@
 #SBATCH --mail-user=genhuizheng@utexas.edu
 #SBATCH --mail-type=END,FAIL
 
-# Install and verify sctransform in the R container, in one submission.
+# Install sctransform into whichever R the environment helper finds, and verify
+# it the way the bridge will use it, in one submission.
 #
-# Replaces the Seurat attempt, which failed for a reason worth recording: the
-# rocker r-ver image has compilers but not the development headers, so 19 of
-# Seurat's dependencies would not build -- httpuv on zlib.h, openssl and curl
-# on their own headers, and pkg-config missing entirely. Every one of those is
-# from Seurat's interactive and plotting chain, none of which this comparison
-# touches. The image is read only, so they cannot be added.
+# It does not name an R itself. r_environment.sh searches, and on this account
+# it lands on one of the conda R environments under $SCRATCH/conda_envs rather
+# than on the container -- which is the better outcome: the container has
+# compilers but not the development headers and is read only, which is why the
+# Seurat attempt lost 19 packages to zlib.h, libcurl and a missing pkg-config.
 #
-# SCTransform's algorithm is not in Seurat. It is in the standalone
-# `sctransform` package -- Seurat::SCTransform is a wrapper around
-# sctransform::vst -- whose dependencies are Matrix, Rcpp, RcppArmadillo,
-# matrixStats, dplyr and ggplot2, none of which need those headers. So the
-# external comparison is against the package that implements the method, which
-# is the more defensible reference anyway.
+# SCTransform's algorithm is not in Seurat anyway. It is in the standalone
+# `sctransform` package, which Seurat::SCTransform wraps, and whose dependency
+# chain needs none of those headers. Comparing against the package that
+# implements the method is also the more defensible reference.
 #
-# Apptainer is refused on the TACC login nodes, so asking and installing are
-# done together rather than spending two trips through the queue.
+# Installs go to R_LIBS_USER, a directory of ours, so a shared conda
+# environment that other work depends on is never written into.
 #
 # No `set -u`: the explicit checks below catch the defined-but-empty variable
 # that -u permits.
 #
 # Usage:
 #   sbatch scripts/tacc/prepare_r_sctransform.slurm
+#
+# To pin the R rather than let the helper search:
+#   sbatch --export=ALL,CONFIDENCEOT_RSCRIPT=/path/to/Rscript \
+#       scripts/tacc/prepare_r_sctransform.slurm
 set -eo pipefail
 
-container=${CONFIDENCEOT_R_SIF:-/scratch/10119/ghzheng/containers/r-ver-4.4.sif}
-libs=${CONFIDENCEOT_R_LIBS:-/scratch/10119/ghzheng/r_libs}
+repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
+root=${CONFIDENCEOT_DEPTH_SCREEN_ROOT:-/scratch/10119/ghzheng/OT_project/depth_screen}
 
-for pair in "container:$container" "libs:$libs"; do
+for pair in "repo:$repo" "root:$root"; do
   name=${pair%%:*}
   value=${pair#*:}
   if [[ -z "$value" || "$value" != /* ]]; then
@@ -48,30 +50,52 @@ for pair in "container:$container" "libs:$libs"; do
     exit 2
   fi
 done
-if [[ ! -f "$container" ]]; then
-  echo "no container at $container" >&2
+if [[ ! -f "$repo/scripts/tacc/r_environment.sh" ]]; then
+  echo "no r_environment.sh under $repo; did the pull land?" >&2
   exit 2
 fi
 
-module load tacc-apptainer
-mkdir -p "$libs"
+mkdir -p "$root/logs"
+
+echo "== finding R"
+# shellcheck source=/dev/null
+source "$repo/scripts/tacc/r_environment.sh"
+if [[ "${CONFIDENCEOT_R_STATUS:-}" == "no-r" ]]; then
+  echo "no R to install into" >&2
+  exit 2
+fi
+if [[ "${CONFIDENCEOT_R_STATUS:-}" == "ready" ]]; then
+  echo
+  echo "sctransform already loads; nothing to install."
+  echo "submit the R configurations with:"
+  echo "  export CONFIDENCEOT_RSCRIPT='$CONFIDENCEOT_RSCRIPT'"
+  echo "  sbatch --array=9-10 scripts/tacc/screen_depth_configurations.slurm"
+  exit 0
+fi
+if [[ -z "${R_LIBS_USER:-}" ]]; then
+  echo "R_LIBS_USER is unset, so there is nowhere of ours to install into" >&2
+  exit 2
+fi
+mkdir -p "$R_LIBS_USER"
+
 work=$(mktemp -d "${SCRATCH:-/tmp}/r_sct_XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 run_r() {
-  apptainer exec -B /scratch --env R_LIBS_USER="$libs" "$container" \
-    Rscript --vanilla "$1"
+  $CONFIDENCEOT_RSCRIPT --vanilla "$1"
 }
 
-# The R is written to files rather than passed with -e. Quoting R through bash
-# is how the earlier version acquired a literal tab and three broken string
-# literals.
+# The R goes into files rather than through `-e`. Quoting R through bash is how
+# the earlier version of this job acquired a literal tab where a \t escape
+# belonged, and three string literals broken across newlines.
 cat > "$work/inspect.R" <<'INSPECT'
 .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
 cat(R.version.string, "\n")
+cat("platform:", R.version$platform, "\n")
 cat("libPaths:\n")
 print(.libPaths())
-for (package in c("Matrix", "sctransform", "Rcpp", "RcppArmadillo")) {
+for (package in c("Matrix", "sctransform", "Rcpp", "RcppArmadillo",
+                  "matrixStats", "Seurat")) {
   version <- tryCatch(as.character(packageVersion(package)),
                       error = function(e) "MISSING")
   cat(sprintf("  %-14s %s\n", package, version))
@@ -95,8 +119,8 @@ if (all(have)) {
 INSTALL
 
 # The exact call the bridge makes, on a tiny matrix, so an API change or a
-# half-built dependency surfaces here in a short job rather than inside a
-# screen task an hour in.
+# half-built dependency surfaces here in a short job rather than an hour into a
+# screen task.
 cat > "$work/verify.R" <<'VERIFY'
 .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
 suppressMessages({
@@ -118,11 +142,12 @@ cat("vst returned", nrow(fit$y), "genes x", ncol(fit$y), "cells\n")
 cat("READY\n")
 VERIFY
 
-echo "== what the container has now"
+echo
+echo "== what this R has now"
 run_r "$work/inspect.R"
 
 echo
-echo "== installing whatever is missing into $libs"
+echo "== installing whatever is missing into $R_LIBS_USER"
 run_r "$work/install.R"
 
 echo
@@ -131,9 +156,8 @@ run_r "$work/verify.R"
 
 echo
 echo "=================================================="
-echo "sctransform is usable. Submit the container configurations with:"
+echo "sctransform is usable. Submit the R configurations with:"
 echo
-echo "  export CONFIDENCEOT_R_LIBS=$libs"
+echo "  export CONFIDENCEOT_RSCRIPT='$CONFIDENCEOT_RSCRIPT'"
+echo "  export R_LIBS_USER='$R_LIBS_USER'"
 echo "  sbatch --array=9-10 scripts/tacc/screen_depth_configurations.slurm"
-echo
-echo "(the screen job loads tacc-apptainer and builds the invocation itself)"

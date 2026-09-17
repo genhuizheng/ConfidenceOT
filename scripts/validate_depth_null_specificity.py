@@ -122,6 +122,13 @@ SCTRANSFORM_R = r"""
 # the rocker r-ver container fails on exactly those system headers and takes 19
 # packages down with it, every one of them from the interactive and plotting
 # chain this comparison never touches.
+# --vanilla skips the Renviron files, so R_LIBS_USER is honoured only because
+# it is in the process environment. Prepending it here makes that explicit and
+# survives a caller that passes different R flags.
+local_library <- Sys.getenv("R_LIBS_USER")
+if (nzchar(local_library)) {
+  .libPaths(c(local_library, .libPaths()))
+}
 suppressMessages({library(Matrix); library(sctransform)})
 args <- commandArgs(trailingOnly = TRUE)
 counts <- readMM(args[1])                       # genes x cells
