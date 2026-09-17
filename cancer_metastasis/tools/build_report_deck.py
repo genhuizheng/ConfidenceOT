@@ -1,8 +1,17 @@
 """Assemble the PI report deck from the generated figures.
 
-Fifteen slides in the order the work happened: the question, the earlier
-three-dataset result and why it did not hold, the two confounders behind it, the
-controls, and what the prostate dataset added.
+Sixteen slides in the order the work happened: the biological question, the
+assumption the method rests on, the earlier three-dataset result and why it did
+not hold, the two confounders behind it, the controls, and what the prostate
+dataset added.
+
+The question comes before any of the method's vocabulary, and the assumption is
+stated as an assumption rather than left implicit -- that transcriptional
+similarity to the metastasis marks the cells that could have seeded it is the
+premise of the whole approach, so the later finding is that the premise is not
+supported, not that a number came out wrong. A short glossary sits beside the
+conclusions, because "effect", "p value", "artefact" and "confounder" all carry
+the argument and none of them is self-explanatory to the audience.
 
 The earlier results are carried as tables rather than summarised in a sentence.
 A reader who is told "the direction came out backwards" has to take it on
@@ -329,36 +338,82 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
     write(frame, [("Genhui Zheng, PhD candidate, The University of Texas at "
                    "Austin", 14, False, MUTED)], first=True)
 
-    # 2 -- what this report says
+    # 2 -- the biological question, before any method vocabulary
     slide = deck.page()
-    top = deck.label(slide, "本次汇报的核心",
-                     CONTENT_TOP)
+    top = deck.label(slide, "我们想回答的生物学问题", CONTENT_TOP)
     deck.block(slide, MARGIN, top, WIDE - 2 * MARGIN, [
-        ("要回答的问题",
-         "给定同一病人的 primary 和 "
-         "metastasis，哪些 primary malignant cells 可能是"
-         "转移的来源？方法给出 "
-         "retain / reject 的二分，对比始终在 "
-         "primary 内部。"),
+        ("转移是从原发瘤的哪些细胞出去的",
+         "同一个原发瘤里的肿瘤细胞并不一样。能离开原发部位、进入循环、在远处"
+         "存活下来并长成转移灶的，只是其中极小一部分。问题是：在原发瘤里能不能"
+         "把这一部分细胞指出来。"),
+        ("指出来之后能做什么",
+         "可以问它们有什么特征 —— 哪些通路、哪些基因在这批细胞里高；能不能作为"
+         "“这个病人会不会转移”的早期判断依据；以及能不能针对这批细胞用药。"),
+        ("为什么需要 primary–metastasis 配对数据",
+         "同一个病人同时有原发瘤和转移灶的单细胞数据，才能把“转移灶长什么样”"
+         "当作已知条件，反过来回到原发瘤里找来源。单看原发瘤是无从判断的。"),
+    ], size=14.5, gap=13)
+
+    after = deck.label(slide, "我们的假设，以及方法怎么把它变成可计算的", 4.5)
+    deck.block(slide, MARGIN, after, WIDE - 2 * MARGIN, [
+        ("假设（整个方法的前提）",
+         "转移灶的细胞是从原发瘤里出去的后代，所以在转录上应该保留与来源细胞的"
+         "相似性。反过来说：原发瘤里那些转录上更像 metastasis 的细胞，可能就是"
+         "有转移潜力的那批。"),
+        ("方法",
+         "Optimal transport 把 primary 的细胞与 metastasis 的细胞做匹配，代价"
+         "就是转录距离。代价低于阈值的 primary 细胞叫 retained，高于阈值的叫 "
+         "rejected。对比始终在 primary 内部 —— retained vs rejected，两组都是"
+         "原发瘤的细胞。"),
+    ], size=14.5, gap=13)
+
+    # 3 -- what this report concludes, with the words defined
+    slide = deck.page()
+    top = deck.label(slide, "本次汇报的核心", CONTENT_TOP)
+    deck.block(slide, MARGIN, top, 7.5, [
         ("上次的结论不成立",
-         "三个数据集里方向都是反的"
-         "；effect 极小而 p 极显著，这是 "
-         "systematic artefact 的特征，不是小的"
-         "生物学差异。"),
+         "三个数据集里没有一个支持这个方向：卵巢的差值方向对但只有 0.0063，已"
+         "确认是测序深度造成的；头颈方向相反（−0.0099）；结肠两组都是 0。"),
         ("找到了两个混杂",
-         "Sequencing depth — 已解决；cell division — "
-         "新发现，且在卵巢和前列腺"
-         "两种癌里一致。"),
-        ("retained fraction 实际在量什么",
-         "不是转移潜能，而是两侧"
-         "组织的相似度（rho = 0.76，188 pairs"
-         "）。"),
-        ("前列腺数据的结果",
-         "在两侧真有差异的数据集"
-         "上，方法只留下 1.6%，而卵"
-         "巢留 29%。两侧越不同，它留"
-         "得越少。"),
+         "Sequencing depth —— 已解决；cell division（细胞分裂）—— 新发现，且在"
+         "卵巢和前列腺两种癌里一致。"),
+        ("假设没有被数据支持",
+         "retained 的比例基本就是两侧组织整体相似度的读数（rho = 0.76，188 "
+         "pairs），所以它不能当“有多少细胞能转移”来读。"),
+        ("前列腺的结果",
+         "在两侧真有差异的数据集上方法只留下 1.6%，而卵巢留 29%。两侧越不同，"
+         "它留得越少 —— 这是反的。后面基因层面的分析用 cap 操作（最多拒绝 85% "
+         "细胞，即至少保留 15%），否则细胞太少没法做统计。"),
     ], size=14, gap=10)
+
+    frame = text_box(slide, 8.4, top + 0.02, 4.45, 0.4)
+    write(frame, [("名词说明", 15, True, ORANGE)], first=True)
+    terms = [
+        ("effect（效应量）",
+         "两组之间某个指标的差值大小。这里是 retained 组与 rejected 组的 "
+         "metastasis-signature 中位分数之差。"),
+        ("p value",
+         "在“两组其实没有差别”的前提下，观察到当前这个差值或更大的概率。越小 = "
+         "越不像偶然。"),
+        ("artefact（技术假象）",
+         "不是生物学造成的差异，而是实验或测序流程造成的。这里是测序深度。"),
+        ("混杂（confounder）",
+         "同时影响分组和结果的第三个变量，会让人把技术差异误读成生物学差异。"),
+    ]
+    frame = text_box(slide, 8.4, top + 0.48, 4.45, 3.3)
+    for index, (term, meaning) in enumerate(terms):
+        write(frame, [(term, 13, True, INK)], first=index == 0, space_after=1,
+              line_spacing=1.18)
+        write(frame, [(meaning, 12.5, False, BODY)], space_after=7,
+              line_spacing=1.18, indent=0.14)
+    frame = text_box(slide, 8.4, top + 3.95, 4.45, 1.6)
+    write(frame, [("为什么“极小 effect 加极显著 p”正好是 artefact 的特征",
+                   13, True, ORANGE)], first=True, space_after=5,
+          line_spacing=1.18)
+    write(frame, [("生物学差异通常幅度大，但病人之间有波动。技术假象幅度小，"
+                   "却在每个病人里方向完全一致，所以配对检验的 p 会非常小。"
+                   "0.0063 配上 1.9 × 10⁻⁸，是后者的样子。", 12.5, False,
+                   BODY)], line_spacing=1.18)
 
     # 3 -- the question and the data
     deck.stacked(
@@ -376,7 +431,7 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
 
     # 4 -- the negative result, as the three datasets actually reported it
     slide = deck.page()
-    top = deck.label(slide, "老版本的结论：三个数据集，方向是反的", CONTENT_TOP)
+    top = deck.label(slide, "老版本的结论：三个数据集，没有一个支持这个方向", CONTENT_TOP)
     after = deck.table(slide, MARGIN, top, 12.3, [
         ["数据集", "病人", "细胞（primary / met）", "retained",
          "rejected", "差值", "Wilcoxon p"],

@@ -59,6 +59,9 @@ scripts/tacc/*
 # A prespecification is only worth what its commit timestamp says, so it is
 # tracked rather than folded into the summary after the fact.
 !/cancer_metastasis/DEG_PRESPECIFICATION_2026-09-15.md
+# The deck is generated, so review feedback has to live where the generator
+# does or the next rebuild silently drops it.
+!/cancer_metastasis/REPORT_DECK_FEEDBACK.md
 
 # OS/editor files
 .DS_Store
