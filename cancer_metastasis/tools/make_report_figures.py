@@ -104,6 +104,14 @@ plt.rcParams.update({
 })
 
 
+# The two schematics are the only figures with Chinese in them. Per-glyph
+# fallback did not fire here, so those figures name a CJK face outright; it
+# carries Latin too. The data figures keep DejaVu, which is what they were laid
+# out against.
+CJK = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+LATIN_FONTS = list(plt.rcParams["font.sans-serif"])
+
+
 def finish(fig, path: Path, note: str | None = None) -> None:
     if note:
         # The note is placed in figure coordinates, so a two-line axis label
@@ -117,6 +125,10 @@ def finish(fig, path: Path, note: str | None = None) -> None:
                  va="bottom")
     fig.savefig(path, dpi=200, bbox_inches="tight")
     plt.close(fig)
+    # A figure that asked for the CJK face gets it back to the Latin default
+    # here, so one schematic cannot change the face of the figures after it
+    # even if it raised on the way.
+    plt.rcParams["font.sans-serif"] = LATIN_FONTS
     print(f"  wrote {path.name}")
 
 
@@ -453,18 +465,301 @@ def figure_cellcycle(source: Path, out: Path) -> None:
            "NES +3.4 in the retained cells, FDR < 0.001.")
 
 
-def figure_umap(source: Path, out: Path, dataset: str, name: str,
-                score: str, score_label: str) -> None:
-    """Three panels that read left to right: two tissues, the split, the reason.
+def figure_methods_cartoon(out: Path) -> None:
+    """What each preprocessing actually does to a deep and a shallow cell.
 
-    Axis numbers are omitted. UMAP coordinates have no units and no meaning
-    beyond adjacency, so printing them invites a reader to compare values that
-    are not comparable.
+    Also a schematic. Two cells with identical biology are drawn over six
+    genes, one sequenced 1.3x deeper than the other. The sixth gene is the
+    point: it is lowly expressed, the deep cell detects it and the shallow cell
+    reads zero. Dividing by the cell total fixes the scale but not that
+    dropout, which is why log-CPM leaves a depth effect behind and why the two
+    methods that survived do something else.
+    """
+    genes = np.arange(6)
+    share = np.array([0.34, 0.24, 0.19, 0.12, 0.08, 0.03])
+    deep = np.array([34.0, 24.0, 19.0, 12.0, 8.0, 3.0])
+    shallow = np.array([26.0, 18.0, 14.0, 9.0, 6.0, 0.0])
+
+    def cpm(counts):
+        return np.log1p(counts / counts.sum() * 100)
+
+    def equalised(counts, target):
+        # Reads subsampled to a common total, so the shallow cell's dropout is
+        # imposed on the deep one too.
+        scaled = counts / counts.sum() * target
+        return np.where(scaled < 0.6, 0.0, scaled)
+
+    def ranked(counts):
+        # Within the cell, by level relative to that gene, keeping the top four.
+        scaled = counts / counts.sum()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            relative = np.where(share > 0, scaled / share, 0.0)
+        order = np.argsort(np.argsort(-relative))
+        return np.where(counts > 0, np.maximum(4 - order, 0), 0.0)
+
+    def residual(counts):
+        expected = counts.sum() * share
+        return (counts - expected) / np.sqrt(np.maximum(expected, 1e-9))
+
+    panels = [
+        ("原始 counts", deep, shallow,
+         "两个细胞生物学相同，\n"
+         "只是测序深度差 1.3×。\n"
+         "第 6 个基因表达低，\n"
+         "浅的细胞读到 0。", None),
+        ("log-CPM", cpm(deep), cpm(shallow),
+         "标准做法：除以细胞\n"
+         "总数再取 log。\n"
+         "前五个基因对齐了，\n"
+         "但第 6 个的 0 还在。", False),
+        ("downsample", equalised(deep, shallow.sum()), shallow,
+         "把深的细胞随机抽到\n"
+         "和浅的一样的总 reads。\n"
+         "深度相同后检出概率也\n"
+         "相同，剩下的只是随机。",
+         True),
+        ("gene rank", ranked(deep), ranked(shallow),
+         "每个细胞内按“相对该\n"
+         "基因自身的异常程度”\n"
+         "排序，只用排名。\n"
+         "数值尺度完全消失。", True),
+        ("Pearson residuals", residual(deep), residual(shallow),
+         "用深度和基因均值算\n"
+         "“应该测到多少”，\n"
+         "再看实测差多少。\n"
+         "掉到 0 的基因仍留大残差。",
+         False),
+    ]
+
+    plt.rcParams["font.sans-serif"] = CJK
+    fig, axes = plt.subplots(1, len(panels), figsize=(3.3 * len(panels), 5.1))
+    width = 0.38
+    for axis, (title, a, b, blurb, works) in zip(axes, panels):
+        axis.bar(genes - width / 2, a, width, color=ORANGE, zorder=3,
+                 label="深")
+        axis.bar(genes + width / 2, b, width, color=MUTED, zorder=3,
+                 label="浅")
+        axis.axhline(0, color=INK2, linewidth=1.0, zorder=2)
+        axis.set_xticks(genes)
+        axis.set_xticklabels([str(g + 1) for g in genes], fontsize=11)
+        axis.set_yticks([])
+        axis.set_xlabel("基因", fontsize=11.5, color=INK2)
+        axis.grid(axis="y", zorder=0)
+        axis.set_axisbelow(True)
+        for spine in ("left", "right", "top"):
+            axis.spines[spine].set_visible(False)
+        # Not a tick or a cross: the CJK face has no glyph for either and both
+        # came out as empty boxes.
+        mark = "" if works is None else ("（有效）" if works
+                                         else "（无效）")
+        colour = INK if works is None else (AQUA if works else "#c2453a")
+        axis.set_title(title + mark, fontsize=13, color=colour)
+        axis.text(0.0, -0.22, blurb, transform=axis.transAxes, ha="left",
+                  va="top", fontsize=11.5, color=INK2, linespacing=1.6)
+    axes[0].legend(loc="upper right", fontsize=11.5)
+
+    fig.suptitle("三种做法到底在做什"
+                 "么：两个生物学相同、"
+                 "深度不同的细胞",
+                 fontsize=16, fontweight="semibold", y=1.02)
+    fig.subplots_adjust(bottom=0.34, wspace=0.16)
+    finish(fig, out / "fig_methods_cartoon.png",
+           "示意图，非数据。有效 = "
+           "在模拟和真实数据上都把 "
+           "depth 效应降下来了。两个"
+           "有效的必须一起用：rank "
+           "自己不能消除 dropout，只做 "
+           "rank 不做 downsample 时 AUC 是 0.06（"
+           "0.5 才是无关）。")
+
+
+def figure_depth_cartoon(out: Path) -> None:
+    """A schematic of how a depth difference turns into a gate decision.
+
+    The one figure here that is not data. The ovarian row -- a difference of
+    0.0063 at p = 1.9e-8 -- is only readable once the mechanism is visible, and
+    prose describing it did not land. Two primary populations with the same
+    biology are pulled apart by sequencing depth alone, and the nearer one is
+    kept. The depths shown are the real group medians in GSE180661.
+    """
+    plt.rcParams["font.sans-serif"] = CJK
+    fig = plt.figure(figsize=(12.4, 5.6))
+    grid = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 0.78], wspace=0.14)
+    axes = [fig.add_subplot(grid[0, 0]), fig.add_subplot(grid[0, 1])]
+    rng = np.random.default_rng(11)
+
+    def blob(axis, centre, colour, n=170, spread=0.42):
+        points = rng.normal(centre, spread, size=(n, 2))
+        axis.scatter(points[:, 0], points[:, 1], s=24, color=colour,
+                     alpha=0.75, linewidth=0, zorder=3)
+
+    def span(axis, start, end, colour, label, lift=0.3):
+        axis.annotate("", xy=end, xytext=start,
+                      arrowprops=dict(arrowstyle="<->", color=colour,
+                                      linewidth=1.6, shrinkA=2, shrinkB=2))
+        axis.text((start[0] + end[0]) / 2, (start[1] + end[1]) / 2 + lift,
+                  label, ha="center", va="bottom", fontsize=12.5,
+                  color=colour, fontweight="semibold")
+
+    for axis in axes:
+        axis.set_xticks([])
+        axis.set_yticks([])
+        axis.set_xlim(-0.4, 10.4)
+        axis.set_ylim(-1.0, 6.0)
+        for spine in axis.spines.values():
+            spine.set_visible(False)
+
+    blob(axes[0], (2.1, 3.4), ORANGE)
+    blob(axes[0], (2.1, 1.4), MUTED)
+    blob(axes[0], (8.2, 2.4), BLUE)
+    axes[0].text(2.1, 4.6, "A  primary", ha="center", fontsize=13,
+                 color=ORANGE, fontweight="semibold")
+    axes[0].text(2.1, 0.0, "B  primary", ha="center", fontsize=13,
+                 color=MUTED, fontweight="semibold")
+    axes[0].text(8.2, 3.7, "C  metastasis", ha="center", fontsize=13,
+                 color=BLUE, fontweight="semibold")
+    span(axes[0], (3.1, 3.3), (7.2, 2.6), INK, "距离相同")
+    span(axes[0], (3.1, 1.5), (7.2, 2.2), INK, "", lift=0)
+    axes[0].set_title("如果只有生物学差异\n"
+                      "A 和 B 是同一种细胞",
+                      fontsize=14)
+
+    blob(axes[1], (5.4, 3.4), ORANGE)
+    blob(axes[1], (1.2, 1.4), MUTED)
+    blob(axes[1], (8.2, 2.4), BLUE)
+    axes[1].text(5.4, 5.5, "A  深度高", ha="center", fontsize=13,
+                 color=ORANGE, fontweight="semibold")
+    axes[1].text(5.4, 4.95, "~13,800 counts", ha="center", fontsize=11.5,
+                 color=ORANGE)
+    axes[1].text(1.2, 0.0, "B  深度低", ha="center", fontsize=13,
+                 color=MUTED, fontweight="semibold")
+    axes[1].text(1.2, -0.55, "~10,400 counts", ha="center", fontsize=11.5,
+                 color=MUTED)
+    axes[1].text(8.2, 3.7, "C  metastasis", ha="center", fontsize=13,
+                 color=BLUE, fontweight="semibold")
+    span(axes[1], (6.3, 3.3), (7.4, 2.7), ORANGE, "近")
+    span(axes[1], (2.1, 1.5), (7.2, 2.2), MUTED, "远", lift=-0.9)
+    axes[1].set_title("加上测序深度的差异\n"
+                      "生物学没变，A 却被"
+                      "推向 C", fontsize=14)
+
+    # What "depth" actually is, since the word carries the whole argument.
+    legend = fig.add_subplot(grid[0, 2])
+    legend.axis("off")
+    # Broken by hand. `wrap=True` measures against the figure, not this column,
+    # so a paragraph ran off the right edge.
+    lines = [
+        ("depth 是什么", True, 13.5, 0.06),
+        ("一个细胞测到的 reads 总数\n"
+         "（total counts），以及由此检出\n"
+         "的基因数（nFeature）。",
+         False, 12.5, 0.20),
+        ("为什么细胞之间不一样",
+         True, 13.5, 0.06),
+        ("细胞被捕获的效率、建库\n"
+         "和测序批次都会影响它。\n"
+         "这是实验流程的差异，"
+         "不是\n细胞本身的生物学。",
+         False, 12.5, 0.26),
+        ("为什么会影响距离", True, 13.5, 0.06),
+        ("测得浅的细胞，很多本来\n"
+         "表达的基因读数为 0。转录\n"
+         "谱缺了一大块，计算距离\n"
+         "时就显得“不像” C — 即"
+         "使\n它的生物学与 A 一模一"
+         "样。", False, 12.5, 0.30),
+    ]
+    y = 0.98
+    for text, bold, size, drop in lines:
+        legend.text(0.0, y, text, transform=legend.transAxes, va="top",
+                    fontsize=size, color=INK if bold else INK2,
+                    fontweight="semibold" if bold else "normal",
+                    linespacing=1.55)
+        y -= drop
+
+    fig.suptitle("技术差异盖过生物学"
+                 "差异：gate 读到的是深度",
+                 fontsize=16, fontweight="semibold", y=1.02)
+    fig.subplots_adjust(bottom=0.12)
+    finish(fig, out / "fig_depth_cartoon.png",
+           "示意图，非数据。深度"
+           "数值是 GSE180661 里 retained 与 rejected "
+           "两组的真实中位数（13,773 "
+           "对 10,433，1.32×）。")
+
+
+def figure_gate_panel(source: Path, out: Path, name: str, stem: str,
+                      title: str, note: str) -> None:
+    """Just the kept/not-kept panel, for use as a small inset.
+
+    The three-panel figure does not survive being shrunk into a corner of a
+    slide. When the only job is to show that whole clusters are kept or
+    dropped, one panel carries it and stays legible at a third of the width.
     """
     cells = read(source, name)
     if cells is None or "umap_1" not in cells:
         return
     cells = cells.dropna(subset=["umap_1", "umap_2"])
+    primary = cells[cells["side"].eq("primary")]
+    if primary.empty:
+        print("  skip: no primary cells")
+        return
+    span_x = np.percentile(cells["umap_1"].to_numpy(float), [0.5, 99.5])
+    span_y = np.percentile(cells["umap_2"].to_numpy(float), [0.5, 99.5])
+    pad_x, pad_y = 0.04 * np.ptp(span_x), 0.04 * np.ptp(span_y)
+    aspect = float(np.ptp(span_x) / np.ptp(span_y))
+
+    fig, axis = plt.subplots(figsize=(5.2 * aspect, 5.2))
+    axis.set_xticks([])
+    axis.set_yticks([])
+    axis.set_xlim(span_x[0] - pad_x, span_x[1] + pad_x)
+    axis.set_ylim(span_y[0] - pad_y, span_y[1] + pad_y)
+    axis.set_aspect("equal", adjustable="box")
+    for spine in axis.spines.values():
+        spine.set_visible(False)
+    kept = primary[primary["retained"].astype(bool)]
+    dropped = primary[~primary["retained"].astype(bool)]
+    axis.scatter(dropped["umap_1"], dropped["umap_2"], s=1.4, c="#d7d7d2",
+                 linewidth=0, rasterized=True)
+    axis.scatter(kept["umap_1"], kept["umap_2"], s=1.6, c=ORANGE,
+                 linewidth=0, rasterized=True)
+    share = float(primary["retained"].astype(bool).mean())
+    axis.set_title(title, fontsize=15)
+    axis.text(0.02, 0.98, f"kept  {share:.0%}", color=ORANGE, fontsize=14,
+              transform=axis.transAxes, va="top", fontweight="semibold",
+              bbox=LABEL_BOX)
+    axis.text(0.02, 0.92, "not kept", color="#8a8a85", fontsize=14,
+              transform=axis.transAxes, va="top", fontweight="semibold",
+              bbox=LABEL_BOX)
+    finish(fig, out / f"fig_gate_{stem}.png", note)
+
+
+def figure_umap(source: Path, out: Path, dataset: str, name: str,
+                score: str, score_label: str, patient: str | None = None,
+                stem: str | None = None) -> None:
+    """Three panels that read left to right: two tissues, the split, the reason.
+
+    Axis numbers are omitted. UMAP coordinates have no units and no meaning
+    beyond adjacency, so printing them invites a reader to compare values that
+    are not comparable.
+
+    With `patient` set, only that patient's cells are drawn. Clusters in this
+    embedding are largely one patient each, so the pooled figure shows whole
+    clusters kept or dropped and a reader cannot tell from it whether anything
+    separates cells inside a patient. One patient answers that directly.
+    """
+    cells = read(source, name)
+    if cells is None or "umap_1" not in cells:
+        return
+    cells = cells.dropna(subset=["umap_1", "umap_2"])
+    if patient is not None:
+        if "patient_id" not in cells:
+            print("  skip: no patient column")
+            return
+        cells = cells[cells["patient_id"].eq(patient)]
+        if cells.empty:
+            print(f"  skip: {patient} not present")
+            return
     if cells.empty:
         print("  skip: no placed cells")
         return
@@ -476,12 +771,21 @@ def figure_umap(source: Path, out: Path, dataset: str, name: str,
     # a slide. The limits come from a trimmed range instead, and equal aspect
     # keeps the embedding undistorted; `bbox_inches="tight"` then crops whatever
     # letterboxing that leaves.
-    span_x = np.percentile(cells["umap_1"].to_numpy(float), [0.5, 99.5])
-    span_y = np.percentile(cells["umap_2"].to_numpy(float), [0.5, 99.5])
-    pad_x, pad_y = 0.03 * np.ptp(span_x), 0.03 * np.ptp(span_y)
+    # One patient occupies a small part of the embedding and usually has a few
+    # cells scattered far from its own cluster, so the subset is trimmed harder
+    # than the pooled view: otherwise a dozen strays set the limits and the
+    # cluster the panel is about shrinks into a corner.
+    trim = [2.0, 98.0] if patient is not None else [0.5, 99.5]
+    span_x = np.percentile(cells["umap_1"].to_numpy(float), trim)
+    span_y = np.percentile(cells["umap_2"].to_numpy(float), trim)
+    pad_x, pad_y = 0.04 * np.ptp(span_x), 0.04 * np.ptp(span_y)
     aspect = float(np.ptp(span_x) / np.ptp(span_y))
 
-    fig, axes = plt.subplots(1, 3, figsize=(3 * 5.0 * aspect + 1.2, 5.2))
+    # A tall, narrow cloud would give panels too narrow for their own titles,
+    # which then overprint each other. Equal aspect is kept, so the floor adds
+    # whitespace beside the cloud rather than distorting it.
+    panel = max(3.7, 5.0 * aspect)
+    fig, axes = plt.subplots(1, 3, figsize=(3 * panel + 1.2, 5.2))
     for axis in axes:
         axis.set_xticks([])
         axis.set_yticks([])
@@ -540,9 +844,14 @@ def figure_umap(source: Path, out: Path, dataset: str, name: str,
     else:
         axes[2].set_visible(False)
 
-    fig.suptitle(dataset, fontsize=16, fontweight="semibold", y=1.02)
-    finish(fig, out / f"fig_umap_{dataset.split()[0].lower()}.png",
-           "Every dot is one cell, on the embedding published with the dataset.")
+    heading = dataset if patient is None else f"{dataset} — {patient}"
+    fig.suptitle(heading, fontsize=16, fontweight="semibold", y=1.02)
+    note = "Every dot is one cell, on the embedding published with the dataset."
+    if patient is not None:
+        note = (f"One patient. {len(primary):,} primary and "
+                f"{len(metastasis):,} metastatic malignant cells, on the same "
+                "published embedding as the pooled figure.")
+    finish(fig, out / f"fig_umap_{stem or dataset.split()[0].lower()}.png", note)
 
 
 def figure_hallmark_groups(source: Path, out: Path, dataset: str, name: str,
@@ -647,6 +956,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_dir", type=Path, help="Unpacked report_inputs directory")
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--example-patient", default="SPECTRUM-OV-083",
+                        help="the one patient drawn on its own")
     parser.add_argument("--faming-gsea", type=Path, default=None,
                         help="Step6b.GSEA_Hallmark.xlsx, for the reference bars")
     args = parser.parse_args()
@@ -660,9 +971,24 @@ def main() -> None:
         ("patients", lambda: figure_patients(args.input_dir, args.output_dir)),
         ("gsea", lambda: figure_gsea(args.input_dir, args.output_dir, args.faming_gsea)),
         ("cell cycle", lambda: figure_cellcycle(args.input_dir, args.output_dir)),
+        ("methods cartoon", lambda: figure_methods_cartoon(args.output_dir)),
+        ("depth cartoon", lambda: figure_depth_cartoon(args.output_dir)),
         ("umap ovarian", lambda: figure_umap(
             args.input_dir, args.output_dir, "Ovarian cancer", "umap_ovarian.csv.gz",
             "cell_division", "cell division score")),
+        ("pooled gate panel", lambda: figure_gate_panel(
+            args.input_dir, args.output_dir, "umap_ovarian.csv.gz",
+            "ovarian_all", "all 29 patients",
+            "Whole clusters are kept or dropped, because a cluster here is "
+            "largely one patient.")),
+        # One patient, chosen for being legible rather than for its result:
+        # 4,726 primary and 4,307 metastatic cells with the split near even at
+        # 54% kept, so both groups are visible. Its cell-division gap, +0.126,
+        # is the same sign as the cohort median of +0.089.
+        ("umap ovarian, one patient", lambda: figure_umap(
+            args.input_dir, args.output_dir, "Ovarian cancer",
+            "umap_ovarian.csv.gz", "cell_division", "cell division score",
+            patient=args.example_patient, stem="ovarian_patient")),
         ("umap prostate", lambda: figure_umap(
             args.input_dir, args.output_dir, "Prostate cancer", "umap_prostate.csv.gz",
             "cell_division", "cell division score")),

@@ -415,19 +415,34 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                    "0.0063 配上 1.9 × 10⁻⁸，是后者的样子。", 12.5, False,
                    BODY)], line_spacing=1.18)
 
-    # 3 -- the question and the data
-    deck.stacked(
-        "问题定义与数据",
-        [("数据",
-          "GSE180661 HGSOC，29 patients，187,383 malignant cells"
-          "（depth-equalised），94 个 primary–metastasis "
-          "pairs，每个病人指定一个 lesion。"),
-         ("图怎么读",
-          "左：两侧组织在 embedding 上几"
-          "乎完全重叠。中：方法留"
-          "下的 29% primary cells。右：这些细"
-          "胞的 cell division score。")],
-        figures / "fig_umap_ovarian.png", text_height=1.35)
+    # 3 -- the question, the data, and one patient shown in full
+    slide = deck.page()
+    top = deck.label(slide, "问题定义与数据：先看一个病人", CONTENT_TOP)
+    deck.block(slide, MARGIN, top, WIDE - 2 * MARGIN, [
+        ("数据",
+         "GSE180661 HGSOC，29 patients，187,383 malignant cells"
+         "（depth-equalised），94 个 primary–metastasis pairs，每个病人指定一个 "
+         "lesion。下面这个病人是 SPECTRUM-OV-083：4,726 个 primary、4,307 个 "
+         "metastasis 细胞，留下 54%（挑它是因为两组都看得清，不是因为结果好看）。"),
+        ("三张图怎么读",
+         "左：这个病人的 primary（灰）和 metastasis（蓝）在 embedding 上混在"
+         "一起。中：方法在这个病人内部留下了哪些 primary 细胞 —— 是按位置分布的，"
+         "不是整块。右：同一批细胞的 cell division score，高分区域与留下的区域"
+         "重合。"),
+    ], size=14, gap=8)
+
+    deck.figure(slide, figures / "fig_umap_ovarian_patient.png",
+                MARGIN, 3.05, 8.55, CONTENT_BOTTOM - 3.05, anchor="top")
+
+    frame = text_box(slide, 9.35, 2.95, 3.45, 0.4)
+    write(frame, [("附图：29 个病人合在一起", 13.5, True, ORANGE)], first=True)
+    deck.figure(slide, figures / "fig_gate_ovarian_all.png",
+                9.35, 3.4, 3.45, 2.5, anchor="top")
+    frame = text_box(slide, 9.35, 5.95, 3.45, 1.1)
+    write(frame, [("整块橙 / 整块灰 = 整个病人被留下或丢掉。retained 方差的 "
+                   "45.6% 来自病人之间（29 人里 8 个 kept < 5%，5 个 > 80%）。"
+                   "所以后面所有统计都先在病人内部做差。", 12, False, BODY)],
+          first=True, line_spacing=1.18)
 
     # 4 -- the negative result, as the three datasets actually reported it
     slide = deck.page()
@@ -495,7 +510,34 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
         "效应，而是决定了谁被留下。",
     ], size=13.5, gap=7)
 
-    # 5 -- cause one
+    # 6 -- the mechanism, as a picture. The prose version of this did not land.
+    slide = deck.page()
+    top = deck.label(slide, "depth 是什么，以及它为什么会变成一个 gate 决定",
+                     CONTENT_TOP)
+    deck.figure(slide, figures / "fig_depth_cartoon.png", MARGIN, top,
+                WIDE - 2 * MARGIN, CONTENT_BOTTOM - top - 0.5, anchor="top")
+    frame = text_box(slide, MARGIN, CONTENT_BOTTOM - 0.44,
+                     WIDE - 2 * MARGIN, 0.44)
+    write(frame, [("→  ", 14.5, True, ORANGE),
+                  ("A 和 B 的生物学完全相同，只是测序深度不同。gate 把 A 判为 "
+                   "retained、B 判为 rejected —— 依据是深度，不是生物学。"
+                   "这就是“极小 effect 加极显著 p”的来源。",
+                   14.5, True, ORANGE)], first=True)
+
+    # 7 -- what each preprocessing does, before the results that used them
+    slide = deck.page()
+    top = deck.label(slide, "我们试过的几种做法分别在做什么", CONTENT_TOP)
+    deck.figure(slide, figures / "fig_methods_cartoon.png", MARGIN, top,
+                WIDE - 2 * MARGIN, CONTENT_BOTTOM - top - 0.5, anchor="top")
+    frame = text_box(slide, MARGIN, CONTENT_BOTTOM - 0.44,
+                     WIDE - 2 * MARGIN, 0.44)
+    write(frame, [("→  ", 14.5, True, ORANGE),
+                  ("downsample 和 gene rank 都有效，但必须一起用；log-CPM 和 "
+                   "Pearson residuals 都修不掉 dropout。下一页是这四种做法在"
+                   "真实数据和模拟数据上的结果。", 14.5, True, ORANGE)],
+          first=True)
+
+    # 8 -- cause one
     deck.split(
         "原因一：gate 在读 sequencing depth",
         [("怎么量的",
