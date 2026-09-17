@@ -120,6 +120,13 @@ reasons it is on the slide as weak corroboration rather than as a result:
   cannot be separated from each other, which is exactly what the depth-corrected
   ovarian and prostate arms were needed for.
 
+## Round 7 — what the numbers are, 2026-09-17
+
+| # | Comment | Status | What changed |
+|---|---|---|---|
+| 7.1 | 这个 retained / reject 是啥 (pointing at 0.0664 / 0.0600) | done | A real labelling fault, and worse than one column: **the word "retained" was doing three jobs on that one page**, two of them in the same 0–1 range. The top table's 0.0664 is a signature *score*, the lower-left table's 0.186 is a *fraction of cells*, and the lower-right table is the variance of the binary *label*. Renamed to `retained 组得分` / `rejected 组得分`, `被留下的细胞比例` with `rejected 比例` / `retained 比例`, and `留下 / 拒绝 这个标签的方差来源`. |
+| 7.2 | p 值大家都懂,关键是啥怎么计算的 | done | Fair — the glossary was explaining a p value to people who know what one is, and leaving out the part they cannot see. Replaced with the procedure: UCell scores each cell on that dataset's own Top-50 metastasis signature (0–1); each patient gives one median per group and their difference; **the unit of inference is the patient, not the cell** — 29 paired differences in ovarian, two-sided paired Wilcoxon. The page also says why the unit matters: with cells as the unit that is 84,465 observations and any trivial difference returns an unusable p, whereas patients ask whether it is consistent between people. The same summary is now the first item under the table. |
+
 ### A factual error round 1 caught
 
 I had written "三个数据集里方向都是反的" on the overview and in the page-4

@@ -387,27 +387,32 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
          "细胞，即至少保留 15%），否则细胞太少没法做统计。"),
     ], size=14, gap=10)
 
+    # Not a glossary of p values -- the audience knows what one is. What they
+    # cannot see from the table is the test and, more importantly, the unit of
+    # inference, which is the patient and not the cell.
     frame = text_box(slide, 8.4, top + 0.02, 4.45, 0.4)
-    write(frame, [("名词说明", 15, True, ORANGE)], first=True)
+    write(frame, [("那个 p 是怎么算出来的", 15, True, ORANGE)], first=True)
     terms = [
-        ("effect（效应量）",
-         "两组之间某个指标的差值大小。这里是 retained 组与 rejected 组的 "
-         "metastasis-signature 中位分数之差。"),
-        ("p value",
-         "在“两组其实没有差别”的前提下，观察到当前这个差值或更大的概率。越小 = "
-         "越不像偶然。"),
-        ("artefact（技术假象）",
-         "不是生物学造成的差异，而是实验或测序流程造成的。这里是测序深度。"),
-        ("混杂（confounder）",
-         "同时影响分组和结果的第三个变量，会让人把技术差异误读成生物学差异。"),
+        ("1. 每个细胞打一个分",
+         "UCell 在 metastasis signature（该数据集自己的 DESeq2 组织比较，取 "
+         "Top-50 基因）上打分，0–1。"),
+        ("2. 每个病人取两个中位数",
+         "该病人 retained 细胞的中位分、rejected 细胞的中位分，相减得到一个"
+         "差值。"),
+        ("3. 检验的单位是病人，不是细胞",
+         "卵巢是 29 个病人 = 29 个配对差值，做双侧 paired Wilcoxon "
+         "signed-rank，问这些差值是否为 0。"),
+        ("为什么单位很重要",
+         "以细胞为单位就是 84,465 个观测，任何微小差异的 p 都会小到没有意义。"
+         "以病人为单位才问得出“这在病人之间是否一致”。"),
     ]
     frame = text_box(slide, 8.4, top + 0.48, 4.45, 3.3)
     for index, (term, meaning) in enumerate(terms):
         write(frame, [(term, 13, True, INK)], first=index == 0, space_after=1,
               line_spacing=1.18)
-        write(frame, [(meaning, 12.5, False, BODY)], space_after=7,
+        write(frame, [(meaning, 12.5, False, BODY)], space_after=6,
               line_spacing=1.18, indent=0.14)
-    frame = text_box(slide, 8.4, top + 3.95, 4.45, 1.6)
+    frame = text_box(slide, 8.4, top + 4.15, 4.45, 1.6)
     write(frame, [("为什么“极小 effect 加极显著 p”正好是 artefact 的特征",
                    13, True, ORANGE)], first=True, space_after=5,
           line_spacing=1.18)
@@ -453,8 +458,9 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                             "这个方向", CONTENT_TOP)
     after = deck.table(slide, MARGIN, top, 12.3, [
         ["数据集", "病人",
-         "细胞（primary / met）", "retained",
-         "rejected", "差值", "Wilcoxon p"],
+         "细胞（primary / met）",
+         "retained 组得分", "rejected 组得分",
+         "差值", "Wilcoxon p"],
         ["GSE180661  卵巢", "29", "84k / 103k", "0.0664", "0.0600",
          "+0.0063", "1.9 × 10⁻⁸"],
         ["GSE181919  头颈", "4", "526 / 284", "0.0235", "0.0251",
@@ -463,22 +469,31 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
          "0.0000", "0.0000", "1.000"],
     ], widths=[2.4, 0.8, 2.2, 1.2, 1.2, 1.1, 1.3], highlight={1})
     deck.block(slide, MARGIN, after + 0.08, 12.3, [
+        ("得分是什么，怎么检"
+         "验的",
+         "UCell 在该数据集自己的 "
+         "metastasis signature（Top-50）上的打分"
+         "，0–1，每个病人取组"
+         "内中位数 —— 不是比"
+         "例。检验单位是病人"
+         "而不是细胞：双侧 paired "
+         "Wilcoxon，卵巢 n = 29。"),
         ("唯一“显著”的那一"
          "个是 artefact",
          "卵巢差值 0.0063 而 p = 1.9 × "
          "10⁻⁸，是深度造成的"
          "（1.32×）。头颈方向"
-         "相反，结肠两组都是 "
-         "0 — 那个 0 是 rejected 细胞中"
+         "相反，结肠两组都是 0 "
+         "— 那个 0 是 rejected 细胞中"
          "位只检出 1,689 个基因所"
          "致，不是生物学阴性"
          "。"),
-    ], size=13.5, gap=6)
+    ], size=13, gap=5)
 
-    after = deck.label(slide, "两个检查", 4.12)
+    after = deck.label(slide, "两个检查", 4.62)
     left = deck.table(slide, MARGIN, after, 5.95, [
-        ["老版本的 retained 比例",
-         "pairs", "rejected", "retained"],
+        ["被留下的细胞比例",
+         "pairs", "rejected 比例", "retained 比例"],
         ["GSE180661  卵巢", "94", "0.814", "0.186"],
         ["GSE181919  头颈", "4", "0.844", "0.156"],
         ["GSE225857  结肠", "5", "0.652", "0.348"],
@@ -492,7 +507,8 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
           line_spacing=1.16)
 
     right = deck.table(slide, 6.85, after, 5.95, [
-        ["retained 方差分三层", "占比"],
+        ["留下 / 拒绝 这个标签的"
+         "方差来源", "占比"],
         ["病人之间", "45.6%"],
         ["同一病人不同 primary 位点",
          "5.0%"],
