@@ -163,19 +163,35 @@ def external_normalised(
         return np.asarray(adata.X, dtype=np.float32)
 
     if method == "sctransform":
+        import os
+        import shlex
         import shutil
         import subprocess
         import tempfile
         from scipy import io as scipy_io
         from scipy import sparse as scipy_sparse
 
-        rscript = shutil.which("Rscript")
-        if rscript is None:
+        # Seurat often lives in a container rather than on PATH, so the whole
+        # invocation is configurable:
+        #   CONFIDENCEOT_RSCRIPT="apptainer exec -B /scratch /path/r.sif Rscript"
+        # CONFIDENCEOT_R_WORKDIR puts the handoff files somewhere the container
+        # can actually see, since a container binds only some of the host.
+        configured = os.environ.get("CONFIDENCEOT_RSCRIPT", "").strip()
+        if configured:
+            command = shlex.split(configured)
+        elif shutil.which("Rscript"):
+            command = ["Rscript"]
+        else:
             raise RuntimeError(
-                "sctransform needs Rscript on PATH with Seurat and Matrix "
-                "installed; none found"
+                "sctransform needs R with Seurat and Matrix. Either put "
+                "Rscript on PATH, or set CONFIDENCEOT_RSCRIPT to the full "
+                "invocation, for example: CONFIDENCEOT_RSCRIPT='apptainer "
+                "exec -B /scratch /path/to/r.sif Rscript'"
             )
-        with tempfile.TemporaryDirectory() as workspace:
+        parent = os.environ.get("CONFIDENCEOT_R_WORKDIR") or None
+        if parent:
+            Path(parent).mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=parent) as workspace:
             work = Path(workspace)
             matrix_path, out_path = work / "counts.mtx", work / "residuals.tsv"
             script_path = work / "sctransform.R"
@@ -184,7 +200,7 @@ def external_normalised(
                              scipy_sparse.csr_matrix(counts.T.astype(np.int32)))
             script_path.write_text(SCTRANSFORM_R, encoding="utf-8")
             finished = subprocess.run(
-                [rscript, "--vanilla", str(script_path),
+                [*command, "--vanilla", str(script_path),
                  str(matrix_path), str(out_path)],
                 capture_output=True, text=True, check=False,
             )

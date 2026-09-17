@@ -75,15 +75,28 @@ except Exception as error:
 PY
 then external_scanpy=1; fi
 
-echo "== Rscript with Seurat and Matrix, for configurations 9 and 10"
-if command -v Rscript > /dev/null 2>&1; then
-  if Rscript --vanilla -e 'suppressMessages({library(Matrix); library(Seurat)}); cat("   ok   Seurat", as.character(packageVersion("Seurat")), "\n")' 2>/dev/null; then
+echo "== R with Seurat and Matrix, for configurations 9 and 10"
+# CONFIDENCEOT_RSCRIPT lets R live in a container rather than on PATH, which is
+# how it is set up here: a rocker r-ver image under /scratch/.../containers.
+if [[ -n "${CONFIDENCEOT_RSCRIPT:-}" ]]; then
+  r_command=$CONFIDENCEOT_RSCRIPT
+  echo "   using CONFIDENCEOT_RSCRIPT: $r_command"
+elif command -v Rscript > /dev/null 2>&1; then
+  r_command=Rscript
+  echo "   using Rscript from PATH"
+else
+  r_command=""
+  echo "   SKIP no R. Either module load one, or set CONFIDENCEOT_RSCRIPT, e.g."
+  echo "        export CONFIDENCEOT_RSCRIPT='apptainer exec -B /scratch \\"
+  echo "          /scratch/10119/ghzheng/containers/r-ver-4.4.sif Rscript'"
+fi
+if [[ -n "$r_command" ]]; then
+  if $r_command --vanilla -e 'suppressMessages({library(Matrix); library(Seurat)}); cat("   ok   Seurat", as.character(packageVersion("Seurat")), "\n")' 2>/dev/null; then
     external_r=1
   else
-    echo "   SKIP Rscript found but Seurat or Matrix will not load"
+    echo "   SKIP R runs but Seurat or Matrix will not load; install into a"
+    echo "        library the container can see, then re-run this preflight"
   fi
-else
-  echo "   SKIP no Rscript on PATH (try: module load Rstats, or the module you used before)"
 fi
 
 echo

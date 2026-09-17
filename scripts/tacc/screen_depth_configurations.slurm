@@ -50,6 +50,17 @@ export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 mkdir -p "$root/logs"
 
+# Configurations 9 and 10 call R. Seurat is not on PATH here; it lives in a
+# container, so the whole invocation is passed through rather than assumed. The
+# handoff files go under $root so the bind in CONFIDENCEOT_RSCRIPT covers them
+# -- a container sees only what it is given, and the default temp directory is
+# the usual reason this fails.
+container=${CONFIDENCEOT_R_SIF:-/scratch/10119/ghzheng/containers/r-ver-4.4.sif}
+if [[ -z "${CONFIDENCEOT_RSCRIPT:-}" && -f "$container" ]]; then
+  export CONFIDENCEOT_RSCRIPT="apptainer exec -B /scratch $container Rscript"
+fi
+export CONFIDENCEOT_R_WORKDIR=${CONFIDENCEOT_R_WORKDIR:-$root/r_workspace}
+
 # label | flags. Index order is the array index order.
 configurations=(
   "logcpm|--representation log_cpm"
