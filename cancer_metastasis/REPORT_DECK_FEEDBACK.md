@@ -28,6 +28,30 @@ The deck is generated, not hand-edited, so every change here is a change to
 | 2.4 | depth 究竟是什么?要说明清楚 | done | A third column on that schematic defines it: the reads a cell yields (total counts) and the genes detected from them (nFeature), why it varies between cells (capture efficiency, library prep, sequencing batch — the pipeline, not the cell), and why it moves distance (a shallow cell reads zero for genes it does express, so its profile is missing a chunk and looks unlike C even when its biology is identical). |
 | 2.5 | 在这一张前面插入一个图,rank 是什么方法,pearson 是什么方法,downsample 是什么方法 | done | `fig_methods_cartoon.png`, its own page before the depth results. Two cells with identical biology over six genes, one sequenced 1.3× deeper, and what each of log-CPM, downsample, gene rank and Pearson residuals leaves behind. The sixth gene carries it: lowly expressed, detected in the deep cell and zero in the shallow one, which is the part dividing by the cell total cannot fix. Marked 有效 / 无效, with the caption stating that the two that work have to be used together — rank alone on raw depth gives AUC 0.06. |
 
+## Round 3 — the batch-effect question, 2026-09-16
+
+| # | Comment | Status | What changed |
+|---|---|---|---|
+| 3.1 | 这些 retain / reject 是来自于同一个数据集吗?因为 primary 可能有多个,可能是批次效应 | done, and it checks out | All cells are from one study, GSE180661. The concern is still the right one to raise, because 16 of 29 patients have primary tissue from two anatomical sites, and two sites means two specimens and two libraries — so site and batch are confounded, and a test on site bounds both at once. It was tested and the split does not follow site. New page 5 carries the answer. |
+
+The three-way decomposition of the retained label, over 84,465 primary cells:
+
+| Source | Share of variance |
+|---|---:|
+| Between patients | 45.6% |
+| **Between primary sites within a patient** | **5.0%** |
+| Cell to cell within one sample | 49.4% |
+
+Per patient, site explains a median of 4.5% of the within-patient split and
+never more than 50% in any of the 16. The largest is SPECTRUM-OV-050 at 30%
+(its two sites split 0.21 against 0.85, and that one is worth remembering).
+SPECTRUM-OV-083, the patient on page 4, is 5.6%, so that figure is not a site
+effect.
+
+`sample_id` in the overlay holds the anatomical site — `left_adnexa`,
+`right_ovary` and so on — not a sequencing batch id, which is why the test is
+phrased as a bound on site and batch together rather than on batch alone.
+
 ### A factual error round 1 caught
 
 I had written "三个数据集里方向都是反的" on the overview and in the page-4

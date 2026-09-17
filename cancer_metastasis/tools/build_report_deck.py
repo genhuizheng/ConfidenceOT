@@ -415,34 +415,79 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                    "0.0063 配上 1.9 × 10⁻⁸，是后者的样子。", 12.5, False,
                    BODY)], line_spacing=1.18)
 
-    # 3 -- the question, the data, and one patient shown in full
+    # 3 -- the question and the data, on one patient
     slide = deck.page()
-    top = deck.label(slide, "问题定义与数据：先看一个病人", CONTENT_TOP)
+    top = deck.label(slide, "问题定义与数据："
+                            "先看一个病人", CONTENT_TOP)
     deck.block(slide, MARGIN, top, WIDE - 2 * MARGIN, [
         ("数据",
          "GSE180661 HGSOC，29 patients，187,383 malignant cells"
-         "（depth-equalised），94 个 primary–metastasis pairs，每个病人指定一个 "
-         "lesion。下面这个病人是 SPECTRUM-OV-083：4,726 个 primary、4,307 个 "
-         "metastasis 细胞，留下 54%（挑它是因为两组都看得清，不是因为结果好看）。"),
+         "（depth-equalised），94 个 primary–metastasis "
+         "pairs。下图是 SPECTRUM-OV-083：4,726 个 "
+         "primary、4,307 个 metastasis，留下 54%"
+         "（挑它是因为两组都看得"
+         "清）。"),
         ("三张图怎么读",
-         "左：这个病人的 primary（灰）和 metastasis（蓝）在 embedding 上混在"
-         "一起。中：方法在这个病人内部留下了哪些 primary 细胞 —— 是按位置分布的，"
-         "不是整块。右：同一批细胞的 cell division score，高分区域与留下的区域"
-         "重合。"),
+         "左：这个病人的 primary（灰"
+         "）与 metastasis（蓝）混在一起"
+         "。中：方法在这个病人"
+         "内部留下了哪些 primary 细胞 "
+         "—— 按位置分布，不是"
+         "整块。右：同一批细胞的 "
+         "cell division score，高分区域与留"
+         "下的区域重合。"),
     ], size=14, gap=8)
-
     deck.figure(slide, figures / "fig_umap_ovarian_patient.png",
-                MARGIN, 3.05, 8.55, CONTENT_BOTTOM - 3.05, anchor="top")
+                MARGIN, 3.02, WIDE - 2 * MARGIN, CONTENT_BOTTOM - 3.02,
+                anchor="top")
 
-    frame = text_box(slide, 9.35, 2.95, 3.45, 0.4)
-    write(frame, [("附图：29 个病人合在一起", 13.5, True, ORANGE)], first=True)
+    # 4 -- is the split a batch effect, and how much of it is just the patient
+    slide = deck.page()
+    top = deck.label(slide, "这个划分是不是"
+                            "批次效应？", CONTENT_TOP)
+    deck.block(slide, MARGIN, top, 7.9, [
+        ("为什么要问",
+         "16 个病人的 primary 取自两个"
+         "解剖位点，即两次独立"
+         "取材、两个 library。如果 "
+         "retain / reject 是批次造成的，"
+         "划分就会跟着位点走。"),
+        ("结果：不是",
+         "位点只解释病人内部方"
+         "差的 5.0%（中位 4.5%，16 人中"
+         "无一超过 50%；最大的 OV-050 "
+         "是 30%，OV-083 是 5.6%）。全部"
+         "细胞同属一个研究 GSE180661。"),
+        ("但确实有一半是“挑病"
+         "人”",
+         "右图：29 个病人合在一起"
+         "时是整块橙 / 整块灰，"
+         "因为这个 embedding 的 cluster 基本"
+         "按病人分。所以后面所"
+         "有统计都先在病人内部"
+         "做差。"),
+    ], size=14, gap=10)
+    after = deck.table(slide, MARGIN, 4.62, 7.9, [
+        ["retained 标签的方差分三层",
+         "占比"],
+        ["病人之间", "45.6%"],
+        ["同一病人不同 primary 位点",
+         "5.0%"],
+        ["同一样本内、细胞与细"
+         "胞之间", "49.4%"],
+    ], widths=[5.6, 2.3], size=13.5, highlight={2})
+    frame = text_box(slide, MARGIN, after + 0.06, 7.9, 0.4)
+    write(frame, [("84,465 个 primary 细胞。批次"
+                   "和位点在这里是绑在"
+                   "一起的，所以 5.0% 是两"
+                   "者合计的上界。", 12, False,
+                   MUTED)], first=True, line_spacing=1.16)
+
+    frame = text_box(slide, 8.65, top - 0.02, 4.2, 0.4)
+    write(frame, [("29 个病人合在一起", 13.5,
+                   True, ORANGE)], first=True)
     deck.figure(slide, figures / "fig_gate_ovarian_all.png",
-                9.35, 3.4, 3.45, 2.5, anchor="top")
-    frame = text_box(slide, 9.35, 5.95, 3.45, 1.1)
-    write(frame, [("整块橙 / 整块灰 = 整个病人被留下或丢掉。retained 方差的 "
-                   "45.6% 来自病人之间（29 人里 8 个 kept < 5%，5 个 > 80%）。"
-                   "所以后面所有统计都先在病人内部做差。", 12, False, BODY)],
-          first=True, line_spacing=1.18)
+                8.65, 1.42, 4.2, 4.3, anchor="top")
 
     # 4 -- the negative result, as the three datasets actually reported it
     slide = deck.page()
