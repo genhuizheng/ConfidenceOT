@@ -56,8 +56,13 @@ mkdir -p "$root/logs"
 # -- a container sees only what it is given, and the default temp directory is
 # the usual reason this fails.
 container=${CONFIDENCEOT_R_SIF:-/scratch/10119/ghzheng/containers/r-ver-4.4.sif}
+r_libs=${CONFIDENCEOT_R_LIBS:-/scratch/10119/ghzheng/r_libs}
 if [[ -z "${CONFIDENCEOT_RSCRIPT:-}" && -f "$container" ]]; then
-  export CONFIDENCEOT_RSCRIPT="apptainer exec -B /scratch $container Rscript"
+  # apptainer is a module here, and it is refused on the login nodes, so the
+  # load has to happen inside the job. Without it the container tasks fail with
+  # "apptainer: command not found" on the compute node too.
+  module load tacc-apptainer 2>/dev/null || true
+  export CONFIDENCEOT_RSCRIPT="apptainer exec -B /scratch --env R_LIBS_USER=$r_libs $container Rscript"
 fi
 export CONFIDENCEOT_R_WORKDIR=${CONFIDENCEOT_R_WORKDIR:-$root/r_workspace}
 

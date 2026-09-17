@@ -52,6 +52,7 @@ scripts/tacc/*
 !scripts/tacc/install_splatter_dependencies.slurm
 !scripts/tacc/screen_depth_configurations.slurm
 !scripts/tacc/preflight_depth_screen.sh
+!scripts/tacc/prepare_r_seurat.slurm
 *.inspect.ndjson
 *.zip
 
