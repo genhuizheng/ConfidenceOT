@@ -46,7 +46,6 @@ if [[ ! -f "$container" ]]; then
 fi
 
 module load tacc-apptainer
-mkdir -p "$libs" "$(dirname "${SLURM_JOB_ID:+x}")" 2>/dev/null || true
 mkdir -p "$libs"
 
 run() {
