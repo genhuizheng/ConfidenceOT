@@ -52,6 +52,37 @@ effect.
 `right_ovary` and so on — not a sequencing batch id, which is why the test is
 phrased as a bound on site and batch together rather than on batch alone.
 
+## Round 4 — compression and two verification questions, 2026-09-16
+
+| # | Comment | Status | What changed |
+|---|---|---|---|
+| 4.1 | slide 5 和 6 合并,slide 5 部分除了表格 text 都抛弃 | done | One page now, tables only. The three-level variance table sits beside the old rejection-rate table under a 两个检查 heading; slide 5's three prose items and the pooled-embedding figure are gone. |
+| 4.2 | Gene rank 说清楚,pearson residual 也说清楚 | done | Both spelled out under the schematic as what is actually computed. Gene rank in three steps: divide each cell by its own total; divide each gene by that gene's nonzero median over both sides stacked; rank within the cell and keep the top 256, discarding the values. Pearson residuals as expected = cell total × the gene's share of the whole, residual = (observed − expected) / the standard deviation of the expected, with the note that depth enters the expectation and should cancel, but a gene observed at zero still leaves a large negative residual. |
+| 4.3 | slide 11 还行 | kept | The simulation benchmark stays on its own page. It is the only place that can say a method is correct rather than that a number improved, because the simulation has a known answer. |
+| 4.4 | slide 12 删除也行 | deleted, but not lost | The standalone mismatched-control page is gone. Its numbers moved onto the similarity page, which already plots the mismatched pairs as its second series: 0.351 → 0.000, p = 8e-17, gate Jaccard 0 at chance. That page was the only evidence the gate uses the metastasis at all, so the argument had to survive even though the page did not. |
+| 4.5 | 15、16 是什么要说清楚,是 prostate cancer,17 是卵巢 | done | Every one of those pages now names its cancer in the heading. Note the ordering was one off: the cell-division gene page draws on the prostate DEG, and the ovarian figure is the page after it. Headings now read 前列腺:富集分析, 前列腺:原因二, and 卵巢与前列腺都一致（图为卵巢）. |
+| 4.6 | 你是做了每个 patient primary vs metastasis 对吧,没有混在一起吧?没有 cap 约束? | answered, and it found something | Per patient, yes: one transport run per primary–metastasis pair, 94 pairs in ovarian and 24 in prostate, both sides always the same patient. Cross-patient pairing exists only as the deliberate control. On the cap, see below — the answer is not uniform across arms and one arm is worse than the deck was saying. |
+
+### The cap is not inert in the prostate arm the gene-level results use
+
+`forced_in_share_of_retained`, the share of retained cells that the coverage
+floor put back rather than the rule selecting:
+
+| Arm | retained | forced in by the cap | the rule alone would retain |
+|---|---:|---:|---:|
+| Ovarian rank256 + ds (free) | 0.292 | **0.0000** | 0.292 |
+| Ovarian log-CPM (free) | 0.352 | **0.0000** | 0.352 |
+| Prostate rank256 + ds (free) | 0.016 | **0.0000** | 0.016 |
+| **Prostate cap 0.85** | 0.150 | **0.8411** | **0.024** |
+
+Every ovarian page is from a free arm with nothing forced in, and ten of the
+twenty-nine patients sit below 0.15, which a 0.85 rejection cap could not have
+allowed. But the prostate capped arm — the one behind the GSEA and the
+cell-division gene list — has **84% of its retained set put there by the cap**.
+The rule on its own retains 2.4%, and `sign_rule_concordance` falls from 1.000
+elsewhere to 0.874. The proliferation signal is still strong, but the group it
+describes is mostly cap fill, and both of those pages now say so.
+
 ### A factual error round 1 caught
 
 I had written "三个数据集里方向都是反的" on the overview and in the page-4

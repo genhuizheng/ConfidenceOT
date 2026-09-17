@@ -441,96 +441,68 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
                 MARGIN, 3.02, WIDE - 2 * MARGIN, CONTENT_BOTTOM - 3.02,
                 anchor="top")
 
-    # 4 -- is the split a batch effect, and how much of it is just the patient
+    # 4 -- the earlier result and the checks on it, tables only
     slide = deck.page()
-    top = deck.label(slide, "这个划分是不是"
-                            "批次效应？", CONTENT_TOP)
-    deck.block(slide, MARGIN, top, 7.9, [
-        ("为什么要问",
-         "16 个病人的 primary 取自两个"
-         "解剖位点，即两次独立"
-         "取材、两个 library。如果 "
-         "retain / reject 是批次造成的，"
-         "划分就会跟着位点走。"),
-        ("结果：不是",
-         "位点只解释病人内部方"
-         "差的 5.0%（中位 4.5%，16 人中"
-         "无一超过 50%；最大的 OV-050 "
-         "是 30%，OV-083 是 5.6%）。全部"
-         "细胞同属一个研究 GSE180661。"),
-        ("但确实有一半是“挑病"
-         "人”",
-         "右图：29 个病人合在一起"
-         "时是整块橙 / 整块灰，"
-         "因为这个 embedding 的 cluster 基本"
-         "按病人分。所以后面所"
-         "有统计都先在病人内部"
-         "做差。"),
-    ], size=14, gap=10)
-    after = deck.table(slide, MARGIN, 4.62, 7.9, [
-        ["retained 标签的方差分三层",
-         "占比"],
-        ["病人之间", "45.6%"],
-        ["同一病人不同 primary 位点",
-         "5.0%"],
-        ["同一样本内、细胞与细"
-         "胞之间", "49.4%"],
-    ], widths=[5.6, 2.3], size=13.5, highlight={2})
-    frame = text_box(slide, MARGIN, after + 0.06, 7.9, 0.4)
-    write(frame, [("84,465 个 primary 细胞。批次"
-                   "和位点在这里是绑在"
-                   "一起的，所以 5.0% 是两"
-                   "者合计的上界。", 12, False,
-                   MUTED)], first=True, line_spacing=1.16)
-
-    frame = text_box(slide, 8.65, top - 0.02, 4.2, 0.4)
-    write(frame, [("29 个病人合在一起", 13.5,
-                   True, ORANGE)], first=True)
-    deck.figure(slide, figures / "fig_gate_ovarian_all.png",
-                8.65, 1.42, 4.2, 4.3, anchor="top")
-
-    # 4 -- the negative result, as the three datasets actually reported it
-    slide = deck.page()
-    top = deck.label(slide, "老版本的结论：三个数据集，没有一个支持这个方向", CONTENT_TOP)
+    top = deck.label(slide, "老版本的结论："
+                            "三个数据集，"
+                            "没有一个支持"
+                            "这个方向", CONTENT_TOP)
     after = deck.table(slide, MARGIN, top, 12.3, [
-        ["数据集", "病人", "细胞（primary / met）", "retained",
+        ["数据集", "病人",
+         "细胞（primary / met）", "retained",
          "rejected", "差值", "Wilcoxon p"],
         ["GSE180661  卵巢", "29", "84k / 103k", "0.0664", "0.0600",
          "+0.0063", "1.9 × 10⁻⁸"],
         ["GSE181919  头颈", "4", "526 / 284", "0.0235", "0.0251",
          "−0.0099", "0.375"],
-        ["GSE225857  结肠", "5", "9,585 / 13,987", "0.0000", "0.0000",
-         "0.0000", "1.000"],
+        ["GSE225857  结肠", "5", "9,585 / 13,987", "0.0000",
+         "0.0000", "0.0000", "1.000"],
     ], widths=[2.4, 0.8, 2.2, 1.2, 1.2, 1.1, 1.3], highlight={1})
-    deck.block(slide, MARGIN, after + 0.1, 12.3, [
-        ("唯一“显著”的那一个是 artefact",
-         "卵巢差值只有 0.0063 而 p = 1.9 × 10⁻⁸。极小 effect 加极显著 p 正是 "
-         "systematic artefact 的特征 — 后来确认是 depth：retained 与 rejected 的"
-         "测序深度差 1.32×，UCell 按细胞内排名打分，深度低的细胞检出基因少，"
-         "signature 基因够不到 maxRank，分数就偏低。"),
-        ("另外两个数据集没有复现",
-         "头颈方向相反（−0.0099，p = 0.375），结肠两组都是 0.0000。结肠那个 0 "
-         "不是生物学阴性：rejected 细胞中位只检出 1,689 个基因，signature 基因"
-         "大多未被检出，分数是被构造成 0 的。"),
-        "三个数据集里 top DEG 都是 keratins 和 SPRR family，与各自的生物学无关 — "
-        "同一个答案反复出现，就是 technical confounder 的样子。",
-    ], size=13.5, gap=7)
+    deck.block(slide, MARGIN, after + 0.08, 12.3, [
+        ("唯一“显著”的那一"
+         "个是 artefact",
+         "卵巢差值 0.0063 而 p = 1.9 × "
+         "10⁻⁸，是深度造成的"
+         "（1.32×）。头颈方向"
+         "相反，结肠两组都是 "
+         "0 — 那个 0 是 rejected 细胞中"
+         "位只检出 1,689 个基因所"
+         "致，不是生物学阴性"
+         "。"),
+    ], size=13.5, gap=6)
 
-    after = deck.label(slide, "老版本的 retained 比例，以及它为什么不能当概率读",
-                       5.16)
-    deck.table(slide, MARGIN, after, 7.4, [
-        ["数据集", "exact pairs", "rejected", "retained"],
+    after = deck.label(slide, "两个检查", 4.12)
+    left = deck.table(slide, MARGIN, after, 5.95, [
+        ["老版本的 retained 比例",
+         "pairs", "rejected", "retained"],
         ["GSE180661  卵巢", "94", "0.814", "0.186"],
         ["GSE181919  头颈", "4", "0.844", "0.156"],
         ["GSE225857  结肠", "5", "0.652", "0.348"],
-    ], widths=[2.6, 1.6, 1.6, 1.6], size=13, row_height=0.32)
-    frame = text_box(slide, 8.3, after - 0.02, 4.5, 1.8)
-    write(frame, [("这些比例由 cap 决定，不是测出来的概率。", 13.5, True, INK)],
-          first=True, space_after=6, line_spacing=1.2)
-    write(frame, [("source cap 设在 0.85，三个数据集的 rejected 都顶到 0.65–0.84 "
-                   "附近 — 任何 cap 都会得到等于该 cap 的 rejection rate。这就是"
-                   "后来必须先重算 c、再把 cap 去掉的原因。", 13, False, BODY)],
-          line_spacing=1.2)
+    ], widths=[2.5, 1.1, 1.2, 1.2], size=12.5, row_height=0.32)
+    frame = text_box(slide, MARGIN, left + 0.04, 5.95, 0.8)
+    write(frame, [("由 cap 决定，不是测"
+                   "出来的概率：source cap "
+                   "设在 0.85，任何 cap 都"
+                   "会得到等于该 cap 的 "
+                   "rejection rate。", 12, False, MUTED)], first=True,
+          line_spacing=1.16)
+
+    right = deck.table(slide, 6.85, after, 5.95, [
+        ["retained 方差分三层", "占比"],
+        ["病人之间", "45.6%"],
+        ["同一病人不同 primary 位点",
+         "5.0%"],
+        ["同一样本内、细胞之"
+         "间", "49.4%"],
+    ], widths=[4.3, 1.6], size=12.5, row_height=0.32, highlight={2})
+    frame = text_box(slide, 6.85, right + 0.04, 5.95, 0.8)
+    write(frame, [("不是批次效应：16 "
+                   "个病人的 primary 取自"
+                   "两个位点（两个 "
+                   "library），位点只解释"
+                   "病人内部方差的 5.0%"
+                   "。", 12, False, MUTED)], first=True,
+          line_spacing=1.16)
 
     # 5 -- how large the depth effect was in the old version
     slide = deck.page()
@@ -573,14 +545,43 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
     slide = deck.page()
     top = deck.label(slide, "我们试过的几种做法分别在做什么", CONTENT_TOP)
     deck.figure(slide, figures / "fig_methods_cartoon.png", MARGIN, top,
-                WIDE - 2 * MARGIN, CONTENT_BOTTOM - top - 0.5, anchor="top")
-    frame = text_box(slide, MARGIN, CONTENT_BOTTOM - 0.44,
-                     WIDE - 2 * MARGIN, 0.44)
-    write(frame, [("→  ", 14.5, True, ORANGE),
-                  ("downsample 和 gene rank 都有效，但必须一起用；log-CPM 和 "
-                   "Pearson residuals 都修不掉 dropout。下一页是这四种做法在"
-                   "真实数据和模拟数据上的结果。", 14.5, True, ORANGE)],
-          first=True)
+                WIDE - 2 * MARGIN, 3.25, anchor="top")
+
+    # The two transforms spelled out step by step. The cartoon shows what they
+    # do to the bars; these say what is actually computed.
+    frame = text_box(slide, MARGIN, top + 3.34, 6.0, 1.9)
+    write(frame, [("gene rank 的三步", 14, True, ORANGE)], first=True,
+          space_after=5)
+    for step, detail in (
+            ("1. 每个细胞除以自己的总 counts",
+             "去掉细胞之间的深度尺度。"),
+            ("2. 每个基因除以该基因的中位数",
+             "在两侧细胞堆在一起后算的非零中位数。这一步把“这个基因本来就高”"
+             "换成“这个细胞里它相对异常多少”。"),
+            ("3. 在每个细胞内部排序，取前 256 个",
+             "只留名次，数值全部丢掉 —— 深度的尺度就无处可依。去掉第 2 步则"
+             "完全无效。")):
+        write(frame, [(step, 12.5, True, INK)], space_after=1,
+              line_spacing=1.18)
+        write(frame, [(detail, 12.5, False, BODY)], space_after=5,
+              line_spacing=1.18, indent=0.16)
+
+    frame = text_box(slide, 7.0, top + 3.34, 5.83, 1.9)
+    write(frame, [("Pearson residuals 在算什么", 14, True, ORANGE)],
+          first=True, space_after=5)
+    write(frame, [("对每个细胞、每个基因，先算“按这个细胞的深度和这个基因的"
+                   "总体水平，应该测到多少”：", 12.5, False, BODY)],
+          space_after=3, line_spacing=1.18)
+    write(frame, [("期望值 = 细胞总 counts × 基因占全体的比例", 12.5, True,
+                   INK)], space_after=3, line_spacing=1.18, indent=0.16)
+    write(frame, [("再看实测比期望多多少，并按期望的波动幅度缩放：", 12.5,
+                   False, BODY)], space_after=3, line_spacing=1.18)
+    write(frame, [("残差 =（实测 − 期望）/ 期望的标准差", 12.5, True, INK)],
+          space_after=5, line_spacing=1.18, indent=0.16)
+    write(frame, [("深度被写进了期望值里，所以理论上应该被抵消。但实测为 0 "
+                   "的基因仍然留下一个大的负残差 —— dropout 修不掉，这就是它"
+                   "在我们数据上失效的原因。", 12.5, False, BODY)],
+          line_spacing=1.18)
 
     # 8 -- cause one
     deck.split(
@@ -622,25 +623,6 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
           "列腺 0.31 → 0.49。")],
         figures / "fig2_representation_benchmark.png")
 
-    # 7 -- the control
-    deck.split(
-        "对照：给错病人的 metastasis",
-        [("做法",
-          "把 A 病人的 primary 配 B 病人的 "
-          "metastasis，其余 pipeline 一行不改。"),
-         ("结果",
-          "retained fraction 从 0.351 降到 0.000，"
-          "p = 8 × 10⁻¹⁷；两次留下"
-          "的细胞集 Jaccard = 0，等于随机"
-          "水平。"),
-         ("说明什么",
-          "gate 确实用到了 metastasis 一侧，"
-          "不是只看 primary 自己。所以"
-          "这个划分是 patient-specific 的。"),
-         "这个对照项目之前从没做"
-         "过。"],
-        figures / "fig4_mismatched_control.png")
-
     # 8 -- what it measures
     deck.split(
         "retained fraction 实际在量什么",
@@ -657,6 +639,17 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
           "cell number 能预测 similarity，却预测"
           "不了 retained fraction（rho = −0.06，"
           "p = 0.43）。"),
+         ("跟着这个图一起看的对"
+          "照",
+          "橙色点是跳病人的 pair（A "
+          "的 primary 配 B 的 metastasis，其余 "
+          "pipeline 不改）。retained fraction 从 0.351 "
+          "降到 0.000，p = 8 × 10⁻¹⁷，"
+          "两次留下的细胞集 Jaccard = 0 "
+          "等于随机。所以 gate 确实"
+          "用到了 metastasis 一侧，划分是 "
+          "patient-specific 的 —— 这个对照"
+          "项目之前从没做过。"),
          "这个数字是“两侧组织有"
          "多像”，不是“有多少细"
          "胞能转移”。"],
@@ -744,12 +737,13 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
              "，我们 FDR 0.046）。EMT 同向但"
              "我们这边不显著（FDR 0.15"
              "）。"),
-            "在最强的那条轴上，方"
-            "法挑出的恰好是 metastasis 的"
-            "反面。",
+            ("这一页的 arm 要注意",
+             "用的是 cap 0.85 arm。那一组 retained 里有 84% 是被 cap 强行塞回"
+             "来的，规则自己只会留 2.4%。增殖信号本身很强，但它描述的这组细胞"
+             "主体是 cap 填的。"),
+            "在最强的那条轴上，方法挑出的恰好是 metastasis 的反面。",
         ]
-        title = "富集分析：对比独立的 " \
-                "metastasis signature"
+        title = "前列腺：富集分析，对比独立的 metastasis signature"
     else:
         items = [
             ("做法",
@@ -766,48 +760,40 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
             "未找到，蓝色对比柱待"
             "补。",
         ]
-        title = "富集分析：到底是什么" \
-                "把 retained 分出来的"
+        title = "前列腺：到底是什么把 retained 分出来的"
     deck.split(title, items, figures / "fig6_gsea_agreement.png")
 
     # 12 -- cause two
     deck.split(
-        "原因二：retained 就是正在分"
-        "裂的细胞",
-        [("598 个显著基因里最强的那"
-          "一批",
-          "DIAPH3、TOP2A、NUSAP1、KIF11、ASPM、CENPF"
-          "、MKI67 — 全是 cell-division programme。"),
+        "前列腺：原因二 —— retained 就是正在分裂的细胞",
+        [("598 个显著基因里最强的那一批",
+          "DIAPH3、TOP2A、NUSAP1、KIF11、ASPM、CENPF、MKI67 —— 全是 "
+          "cell-division programme。前列腺，cap 0.85 arm，4 个病人配对。"),
          ("MT- 基因的说明",
-          "这批是 multiome 细胞核，MT 中"
-          "位数 0.2%，不是垓死细胞。"
-          "MT 偏倒 AUC 从 0.82 降到 0.55，和 "
-          "depth 被同一个修正解决。"),
+          "这批是 multiome 细胞核，MT 中位数 0.2%，不是垂死细胞。MT 偏倚的 "
+          "AUC 从 0.82 降到 0.55，和 depth 被同一个修正解决。"),
+         ("同一个 arm 的注意事项",
+          "这组 retained 有 84% 是 cap 塞回来的（规则自己留 2.4%）。所以这批"
+          "基因刻画的是“cap 填出来的那一组”，不是规则单独选出的 2.4%。"),
          ("这也解释了 androgen 那一条",
-          "AR 驱动分化，与 proliferation 反"
-          "相关；挑出分裂细胞就"
-          "自动得到低 AR。")],
+          "AR 驱动分化，与 proliferation 反相关；挑出分裂细胞就自动得到低 AR。")],
         figures / "fig7_cell_cycle.png")
 
     # 13 -- replication
     deck.split(
-        "两种癌里都一致",
+        "卵巢与前列腺都一致（图为卵巢）",
         [("Contrast",
-          "kept vs rejected primary cells，先在每个病"
-          "人内部做差 — 与 DEG 的 paired "
-          "design 一致。池在一起看会"
-          "被病人间差异淹掉。"),
-         ("卵巢 26 个病人",
-          "kept +0.089，17/26 为正；metastasis 在同"
-          "一基线上只 +0.015。"),
-         ("前列腺 4 个病人",
-          "kept +0.040，4/4 为正；metastasis +0.006。"),
+          "kept vs rejected primary cells，先在每个病人内部做差 —— 与 DEG 的 "
+          "paired design 一致。池在一起看会被病人间差异淹掉。"),
+         ("图：卵巢 26 个病人",
+          "kept +0.089，17/26 为正；metastasis 在同一基线上只 +0.015。"
+          "无 cap 的 arm。"),
+         ("前列腺 4 个病人（图未画）",
+          "kept +0.040，4/4 为正；metastasis +0.006。用的是 cap arm。"),
          ("Interferon 和 mesenchymal",
-          "两种癌里都没有一致位"
-          "移。"),
-         "cell division 是唯一在两种癌里"
-         "都复现的信号，kept 的位移"
-         "比 metastasis 大 6–7 倍。"],
+          "两种癌里都没有一致位移。"),
+         "cell division 是唯一在两种癌里都复现的信号，kept 的位移比 "
+         "metastasis 大 6–7 倍。"],
         figures / "fig_hallmark_ovarian.png")
 
     # 14 -- status
