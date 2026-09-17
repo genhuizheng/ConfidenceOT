@@ -1,8 +1,14 @@
 """Assemble the PI report deck from the generated figures.
 
-Fourteen slides in the order the work happened: the question, the result that
-did not hold, the two confounders behind it, the controls, and what the prostate
-dataset added.
+Fifteen slides in the order the work happened: the question, the earlier
+three-dataset result and why it did not hold, the two confounders behind it, the
+controls, and what the prostate dataset added.
+
+The earlier results are carried as tables rather than summarised in a sentence.
+A reader who is told "the direction came out backwards" has to take it on
+trust; a reader who sees head and neck at -0.0099 with p = 0.375 beside ovarian
+at +0.0063 with p = 1.9e-8 can see both that nothing replicated and that the one
+significant cell is too small to be biology.
 
 The layout follows the lab's own progress-report template, measured off
 ``Progress_report7.pptx`` rather than guessed: white page, the Oden Institute
@@ -110,6 +116,25 @@ def write(frame, runs, *, space_after=0, line_spacing=None, first=False,
     return paragraph
 
 
+def strip_cell_borders(cell) -> None:
+    """Remove the table style's per-cell borders.
+
+    The reference deck's tables are ruled horizontally and nowhere else. A
+    python-pptx table inherits a style that draws a box around every cell, and
+    the only way to clear it is to write explicit no-fill lines onto the cell
+    properties.
+    """
+    properties = cell._tc.get_or_add_tcPr()
+    for edge in ("a:lnL", "a:lnR", "a:lnT", "a:lnB"):
+        tag = qn(edge)
+        for existing in properties.findall(tag):
+            properties.remove(existing)
+        line = properties.makeelement(tag, {"w": "0", "cap": "flat",
+                                            "cmpd": "sng", "algn": "ctr"})
+        line.append(line.makeelement(qn("a:noFill"), {}))
+        properties.append(line)
+
+
 def rectangle(slide, left, top, width, height, colour):
     shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(left),
                                    Inches(top), Inches(width), Inches(height))
@@ -190,6 +215,50 @@ class Deck:
             write(frame, [(detail, size, False, BODY)], space_after=gap,
                   line_spacing=lead, indent=0.2)
         return frame
+
+    def table(self, slide, left, top, width, rows, *, widths=None, size=13,
+              row_height=0.34, highlight=None):
+        """A horizontally ruled table, as the reference deck draws them.
+
+        `rows[0]` is the header. `highlight` is a set of row indices whose
+        numbers carry the accent colour, for the one row a slide is arguing
+        about.
+        """
+        columns = len(rows[0])
+        shape = slide.shapes.add_table(len(rows), columns, Inches(left),
+                                       Inches(top), Inches(width),
+                                       Inches(row_height * len(rows)))
+        table = shape.table
+        table.first_row = False
+        table.horz_banding = False
+        if widths:
+            total = sum(widths)
+            for index, share in enumerate(widths):
+                table.columns[index].width = Inches(width * share / total)
+        for r, row in enumerate(rows):
+            table.rows[r].height = Inches(row_height)
+            for c, value in enumerate(row):
+                cell = table.cell(r, c)
+                cell.fill.background()
+                strip_cell_borders(cell)
+                cell.margin_left = Inches(0.05)
+                cell.margin_right = Inches(0.05)
+                cell.margin_top = cell.margin_bottom = Inches(0.02)
+                cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+                frame = cell.text_frame
+                frame.word_wrap = True
+                header = r == 0
+                colour = INK if header else BODY
+                if highlight and r in highlight and c > 0:
+                    colour = ORANGE
+                write(frame, [(str(value), size, header or bool(
+                    highlight and r in highlight and c > 0), colour)],
+                    first=True,
+                    align=PP_ALIGN.LEFT if c == 0 else PP_ALIGN.RIGHT)
+        # Rules above and below the header, and under the last row.
+        for y in (top, top + row_height, top + row_height * len(rows)):
+            rectangle(slide, left, y, width, 0.012, INK if y == top else MUTED)
+        return top + row_height * len(rows) + 0.16
 
     def figure(self, slide, image: Path, left, top, width, height,
                anchor="middle"):
@@ -305,43 +374,71 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
           "胞的 cell division score。")],
         figures / "fig_umap_ovarian.png", text_height=1.35)
 
-    # 4 -- the negative result
+    # 4 -- the negative result, as the three datasets actually reported it
     slide = deck.page()
-    top = deck.label(slide, "上次的结论：方向"
-                            "是反的", CONTENT_TOP)
-    deck.block(slide, MARGIN, top, 7.2, [
-        ("Effect 极小，p 极显著",
-         "UCell metastasis signature 在 retained 与 rejected 之"
-         "间只差 0.005，而 p = 2 × 10⁻⁸。"),
-        ("三个数据集给出同一个答"
-         "案",
-         "Top DEG 都是 keratins 和 SPRR family，与各"
-         "自的生物学无关 — 这正是 "
-         "technical confounder 的样子。"),
-        ("两组的 sequencing depth 本身就不同",
-         "卵巢 1.3×，头颈 2.0×，结肠 "
-         "3.1×。"),
-        "极小 effect 加极显著 p 是 systematic "
-        "artefact 的特征。",
-    ], size=14, gap=10)
-    for x, number, text, colour in (
-            (8.0, "0.005", "signature 分数差值", ORANGE),
-            (10.55, "2×10⁻⁸", "对应的 p 值",
-             RGBColor(0x2A, 0x78, 0xD6))):
-        frame = text_box(slide, x, 1.85, 2.5, 1.5)
-        write(frame, [(number, 40, True, colour)], first=True, space_after=3)
-        write(frame, [(text, 13, False, BODY)], line_spacing=1.12)
-    frame = text_box(slide, 8.0, 3.7, 4.8, 2.0)
-    write(frame, [("三个数据集", 14, True, INK)],
-          first=True, space_after=7)
-    for name, depth in (("Ovarian  GSE180661", "1.3×"),
-                        ("Head and neck  GSE181919", "2.0×"),
-                        ("Colorectal  GSE225857", "3.1×")):
-        write(frame, [(name + "   ", 13, False, BODY),
-                      (depth, 13, True, ORANGE)], space_after=5,
-              line_spacing=1.15)
-    write(frame, [("两组之间的 depth 比值", 12,
-                   False, MUTED)], line_spacing=1.15)
+    top = deck.label(slide, "老版本的结论：三个数据集，方向是反的", CONTENT_TOP)
+    after = deck.table(slide, MARGIN, top, 12.3, [
+        ["数据集", "病人", "细胞（primary / met）", "retained",
+         "rejected", "差值", "Wilcoxon p"],
+        ["GSE180661  卵巢", "29", "84k / 103k", "0.0664", "0.0600",
+         "+0.0063", "1.9 × 10⁻⁸"],
+        ["GSE181919  头颈", "4", "526 / 284", "0.0235", "0.0251",
+         "−0.0099", "0.375"],
+        ["GSE225857  结肠", "5", "9,585 / 13,987", "0.0000", "0.0000",
+         "0.0000", "1.000"],
+    ], widths=[2.4, 0.8, 2.2, 1.2, 1.2, 1.1, 1.3], highlight={1})
+    deck.block(slide, MARGIN, after + 0.1, 12.3, [
+        ("唯一“显著”的那一个是 artefact",
+         "卵巢差值只有 0.0063 而 p = 1.9 × 10⁻⁸。极小 effect 加极显著 p 正是 "
+         "systematic artefact 的特征 — 后来确认是 depth：retained 与 rejected 的"
+         "测序深度差 1.32×，UCell 按细胞内排名打分，深度低的细胞检出基因少，"
+         "signature 基因够不到 maxRank，分数就偏低。"),
+        ("另外两个数据集没有复现",
+         "头颈方向相反（−0.0099，p = 0.375），结肠两组都是 0.0000。结肠那个 0 "
+         "不是生物学阴性：rejected 细胞中位只检出 1,689 个基因，signature 基因"
+         "大多未被检出，分数是被构造成 0 的。"),
+        "三个数据集里 top DEG 都是 keratins 和 SPRR family，与各自的生物学无关 — "
+        "同一个答案反复出现，就是 technical confounder 的样子。",
+    ], size=13.5, gap=7)
+
+    after = deck.label(slide, "老版本的 retained 比例，以及它为什么不能当概率读",
+                       5.16)
+    deck.table(slide, MARGIN, after, 7.4, [
+        ["数据集", "exact pairs", "rejected", "retained"],
+        ["GSE180661  卵巢", "94", "0.814", "0.186"],
+        ["GSE181919  头颈", "4", "0.844", "0.156"],
+        ["GSE225857  结肠", "5", "0.652", "0.348"],
+    ], widths=[2.6, 1.6, 1.6, 1.6], size=13, row_height=0.32)
+    frame = text_box(slide, 8.3, after - 0.02, 4.5, 1.8)
+    write(frame, [("这些比例由 cap 决定，不是测出来的概率。", 13.5, True, INK)],
+          first=True, space_after=6, line_spacing=1.2)
+    write(frame, [("source cap 设在 0.85，三个数据集的 rejected 都顶到 0.65–0.84 "
+                   "附近 — 任何 cap 都会得到等于该 cap 的 rejection rate。这就是"
+                   "后来必须先重算 c、再把 cap 去掉的原因。", 13, False, BODY)],
+          line_spacing=1.2)
+
+    # 5 -- how large the depth effect was in the old version
+    slide = deck.page()
+    top = deck.label(slide, "老版本里 depth 有多严重", CONTENT_TOP)
+    after = deck.table(slide, MARGIN, top, 11.4, [
+        ["", "GSE180661 卵巢", "GSE181919 头颈", "GSE225857 结肠"],
+        ["rho（decision cost, depth）", "−0.330", "−0.593", "−0.568"],
+        ["AUC（depth → retained）", "0.673", "0.767", "0.791"],
+        ["retained 中位深度", "13,773", "37,447", "13,002"],
+        ["rejected 中位深度", "10,433", "18,982", "4,243"],
+        ["深度比值", "1.32×", "1.97×", "3.07×"],
+    ], widths=[3.4, 2.7, 2.7, 2.7], size=13.5, highlight={2})
+    deck.block(slide, MARGIN, after + 0.1, 12.3, [
+        ("方向在三个数据集里完全一致",
+         "retained 永远是测序更深的那一批。AUC 0.673 / 0.767 / 0.791 — 0.5 才是"
+         "无关，所以 depth 一个变量就能把 gate 预测到七到八成。"),
+        ("不是 budget、也不是 solver 的问题",
+         "两个早期假设都测过并推翻了：rejection budget 最多只贡献 retained 集的"
+         "3.8%，在结肠是 0；unbalanced transport 的 mass 项不改变 gate 的排序。"
+         "gate 本身是 decision cost 上的干净阈值（与规则一致 99.7%）。"),
+        "把 depth 成分从 cost 里去掉，retained 集会变掉 25–36% — 所以它不是边缘"
+        "效应，而是决定了谁被留下。",
+    ], size=13.5, gap=7)
 
     # 5 -- cause one
     deck.split(
@@ -351,15 +448,14 @@ def build(figures: Path, output: Path, reference: bool, logo: Path | None,
           "0.5 = 完全无关，图上画的是"
           "偏离 0.5 的幅度，越短越好。"),
          ("结果",
-          "卵巢 0.09，前列腺 0.19；前列"
-          "腺完全不做 depth 处理时是 "
-          "0.44，即 gate 几乎完全由 depth 决"
-          "定。"),
+          "卵巢 0.09，前列腺 0.19；前列腺完全不做 depth 处理时是 0.44，"
+          "即 gate 几乎完全由 depth 决定。"),
+         ("和上一页的数字怎么接上",
+          "上页卵巢 AUC 0.673 是原始数据，偏离 0.5 有 0.17。这里的 0.09 已经做过 "
+          "read equalisation，加 gene rank 之后再降到 0.03 — 同一个量的三个阶段。"),
          ("Read equalisation 有用但不够",
-          "前列腺 0.44 → 0.19。depth 还会改"
-          "变哪些基因能被检出，不"
-          "只是 reads 数量，所以没能收"
-          "尾。")],
+          "前列腺 0.44 → 0.19。depth 还会改变哪些基因能被检出，不只是 reads "
+          "数量，所以没能收尾。")],
         figures / "fig1_depth_in_gate.png")
 
     # 6 -- the fix
