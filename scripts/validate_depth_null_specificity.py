@@ -390,32 +390,96 @@ def load_depth_pool(path: Path | None, cap: int | None = None) -> np.ndarray | N
     raise RuntimeError(f"{path} has neither total_counts nor a pre-downsample column")
 
 
+def load_splatter_arm(
+    root: Path, arm: str, replicate: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Counts for one arm and replicate, as prepared by splatter.
+
+    Written by ``scripts/generate_splatter_depth_arms.R``, which expresses the
+    same depth ladder in splatter's own ``lib.loc`` and ``lib.scale``. Files
+    are cells x genes, so no transpose here; the R side does it.
+
+    Replicates are one-based on disk and zero-based in this script, which is
+    the only place the two conventions meet.
+    """
+    from scipy.io import mmread
+
+    directory = Path(root) / arm / f"rep_{replicate + 1:02d}"
+    needed = ("source.mtx", "target.mtx", "source_perturbed.csv")
+    missing = [name for name in needed if not (directory / name).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"{directory} is missing {', '.join(missing)}. Generate the arms "
+            f"with scripts/generate_splatter_depth_arms.R first."
+        )
+    source = np.asarray(mmread(directory / "source.mtx").todense(),
+                        dtype=np.int64)
+    target = np.asarray(mmread(directory / "target.mtx").todense(),
+                        dtype=np.int64)
+    perturbed = (pd.read_csv(directory / "source_perturbed.csv")
+                 .perturbed.to_numpy(dtype=bool))
+    if source.shape[1] != target.shape[1]:
+        raise ValueError(
+            f"{directory}: source has {source.shape[1]} genes, target "
+            f"{target.shape[1]}"
+        )
+    if perturbed.size != source.shape[0]:
+        raise ValueError(
+            f"{directory}: {perturbed.size} perturbation flags for "
+            f"{source.shape[0]} source cells"
+        )
+    return source, target, perturbed
+
+
 def run_replicate(
     arm: str, settings: dict, replicate: int, args: argparse.Namespace,
     depth_pool: np.ndarray | None = None,
 ) -> dict[str, object]:
     seed = args.seed + 7919 * replicate + abs(hash(arm)) % 10_000
     rng = np.random.default_rng(seed)
-    # One gene mean vector for both sides: the homogeneous arms are only
-    # homogeneous if source and target share it.
-    gene_mean = rng.lognormal(mean=0.0, sigma=1.6, size=args.n_genes)
-    gene_mean /= gene_mean.sum()
-    shared = dict(
-        gene_mean=gene_mean, median_depth=args.median_depth,
-        dispersion=args.dispersion,
-        perturbation_log2=args.perturbation_log2,
-        depth_pool=depth_pool if arm.endswith("_observed") else None,
-    )
-    source_counts, source_depth, perturbed = simulate_counts(
-        rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
-        perturbed_fraction=settings["perturbed_fraction"], **shared,
-    )
-    # The target side never carries the perturbed subpopulation, so perturbed
-    # source cells are the only genuinely incompatible cells in any arm.
-    target_counts, _, _ = simulate_counts(
-        rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
-        perturbed_fraction=0.0, **shared,
-    )
+    if args.splatter_arms:
+        # Depth was applied by splatter's lib.scale rather than by the
+        # multinomial construction below. Everything downstream -- equalisation,
+        # the transform, the joint PCA, the gate, the diagnostics -- is
+        # unchanged, so the two paths differ only in where the counts came from.
+        source_counts, target_counts, perturbed = load_splatter_arm(
+            args.splatter_arms, arm, replicate
+        )
+        if source_counts.shape[0] != args.n_cells:
+            raise ValueError(
+                f"{arm} rep {replicate}: the prepared arm has "
+                f"{source_counts.shape[0]} source cells, --n-cells says "
+                f"{args.n_cells}. Regenerate, or pass the matching --n-cells."
+            )
+        expected = int(round(settings["perturbed_fraction"] * args.n_cells))
+        if int(perturbed.sum()) != expected:
+            raise ValueError(
+                f"{arm} rep {replicate}: the prepared arm plants "
+                f"{int(perturbed.sum())} cells, this arm expects {expected}"
+            )
+        source_depth = source_counts.sum(axis=1).astype(np.float64)
+    else:
+        # One gene mean vector for both sides: the homogeneous arms are only
+        # homogeneous if source and target share it.
+        gene_mean = rng.lognormal(mean=0.0, sigma=1.6, size=args.n_genes)
+        gene_mean /= gene_mean.sum()
+        shared = dict(
+            gene_mean=gene_mean, median_depth=args.median_depth,
+            dispersion=args.dispersion,
+            perturbation_log2=args.perturbation_log2,
+            depth_pool=depth_pool if arm.endswith("_observed") else None,
+        )
+        source_counts, source_depth, perturbed = simulate_counts(
+            rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
+            perturbed_fraction=settings["perturbed_fraction"], **shared,
+        )
+        # The target side never carries the perturbed subpopulation, so
+        # perturbed source cells are the only genuinely incompatible cells in
+        # any arm.
+        target_counts, _, _ = simulate_counts(
+            rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
+            perturbed_fraction=0.0, **shared,
+        )
     # Read equalisation, before anything else sees the counts. The depth the
     # diagnostics test against stays the pre-equalisation depth, because that
     # is the covariate the gate must not track -- the same reason
@@ -668,6 +732,14 @@ def main() -> None:
              "from 27_downsample_counts.py to predict the corrected behaviour",
     )
     parser.add_argument(
+        "--splatter-arms", type=Path, default=None,
+        help="Directory of arms prepared by "
+             "scripts/generate_splatter_depth_arms.R. Takes the counts from "
+             "splatter, with the depth ladder expressed as its lib.scale, "
+             "instead of building them here. Everything after the counts is "
+             "unchanged, so the two paths are directly comparable.",
+    )
+    parser.add_argument(
         "--arm", action="append", choices=sorted({*ARMS, *OBSERVED_ARMS}),
         help="Restrict to these arms; default runs all available",
     )
@@ -726,6 +798,9 @@ def main() -> None:
         # representation, cost and equalisation was its output directory's
         # name, so two runs side by side could not be told apart from their own
         # files -- and the whole point of the screen is that these differ.
+        "counts_source": ("splatter" if args.splatter_arms else "internal"),
+        "splatter_arms": (str(args.splatter_arms) if args.splatter_arms
+                          else None),
         "representation": (args.external_representation
                            or args.representation),
         "representation_is_external": bool(args.external_representation),

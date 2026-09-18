@@ -78,11 +78,17 @@ median_depth <- as.numeric(pick(6L, "10000"))
 sigmas <- as.numeric(strsplit(pick(7L, "0,0.3,0.6,0.9"), ",", fixed = TRUE)[[1]])
 perturbed_fraction <- as.numeric(pick(8L, "0.2"))
 tolerance <- as.numeric(pick(9L, "0.08"))
+# Splatter holds several dense cells-by-genes matrices at once, so the pool is
+# sized to what the composition needs rather than generously. Per batch the
+# most that is drawn is n cells of group 1, and group 1 is 70% of the pool, so
+# 2n per batch leaves a 40% margin; take() aborts if a draw ever falls short.
+pool_multiplier <- as.integer(pick(10L, "2"))
 
 stopifnot(
   n_cells >= 20L, n_genes >= 50L, replicates >= 1L,
   median_depth > 0, all(is.finite(sigmas)), all(sigmas >= 0),
-  perturbed_fraction > 0, perturbed_fraction < 1, tolerance > 0
+  perturbed_fraction > 0, perturbed_fraction < 1, tolerance > 0,
+  pool_multiplier >= 2L
 )
 
 # The names the Python runner already uses, so nothing downstream needs new
@@ -97,10 +103,9 @@ homogeneous_name <- function(sigma) {
 
 # group 1 is the shared population, group 2 the source-only perturbation.
 GROUP_PROBABILITY <- c(0.7, 0.3)
-POOL_MULTIPLIER <- 3L
 
 simulate_pool <- function(sigma, seed) {
-  pool_n <- POOL_MULTIPLIER * n_cells
+  pool_n <- pool_multiplier * n_cells
   set.seed(seed)
   splatter::splatSimulateGroups(
     batchCells = c(pool_n, pool_n),
@@ -125,7 +130,7 @@ simulate_pool <- function(sigma, seed) {
 
 take <- function(available, wanted, what) {
   if (length(available) < wanted) {
-    stop(sprintf("pool holds %d %s cells, need %d; raise POOL_MULTIPLIER",
+    stop(sprintf("pool holds %d %s cells, need %d; raise the pool multiplier",
                  length(available), what, wanted))
   }
   available[seq_len(wanted)]
