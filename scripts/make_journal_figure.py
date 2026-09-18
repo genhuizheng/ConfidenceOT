@@ -140,9 +140,23 @@ def split_variant(label: str) -> tuple[str, str]:
     return label, ""
 
 
-VARIANT_TITLE = {
-    "splatter": "splatter counts",
-}
+def variant_title(variant: str) -> str:
+    """A panel-title phrase for a variant suffix, built from its tokens.
+
+    Compound suffixes are the normal case -- a splatter run at another size is
+    `splatter_n5000` -- so this composes rather than looking up whole strings.
+    """
+    phrases = []
+    for token in variant.split("_"):
+        if token == "splatter":
+            phrases.append("splatter counts")
+        elif token.startswith("r") and token[1:].isdigit():
+            phrases.append(f"{token[1:]} replicates")
+        elif token.startswith("n") and token[1:].isdigit():
+            phrases.append(f"$N={token[1:]}$")
+        elif token:
+            phrases.append(token)
+    return ", ".join(phrases)
 
 
 def group_of(method: str) -> str:
@@ -566,7 +580,7 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
         width_effect = (right - left - between) / 1.62
         axes_effect = figure.add_axes([left, pad_bottom / height,
                                       width_effect, bands / height])
-        named = VARIANT_TITLE.get(variant, variant)
+        named = variant_title(variant) if variant else ""
         title = "(e)  Specificity: no cell here is incompatible"
         if named:
             title = f"(e)  Specificity, {named}"
