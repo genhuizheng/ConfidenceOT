@@ -472,8 +472,12 @@ def panel_depth_effect(axes, effect: pd.DataFrame, replicates: pd.DataFrame,
     axes.set_xticklabels(["0", f"{tolerance:g}", "0.1", "0.2", "0.3", "0.4"])
     axes.set_xlabel("Residual depth dependence, $|$AUC $-$ 0.5$|$")
     axes.set_yticks(range(len(rows)))
-    axes.set_yticklabels([SCREEN_LABEL.get(name, name) for name in rows],
-                         fontsize=6.6)
+    # Look the label up by base name: one plate is one variant, and the
+    # variant is named in the title, so repeating its suffix on all thirteen
+    # rows would only push the readable part out of the gutter.
+    axes.set_yticklabels(
+        [SCREEN_LABEL.get(split_variant(name)[0], name) for name in rows],
+        fontsize=6.6)
     axes.tick_params(axis="y", length=0)
     axes.set_ylim(len(rows) - 0.5, -0.5)
     for side in ("top", "right", "left"):
@@ -576,7 +580,9 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
         panel_specificity(figure.add_subplot(grid[1, 0]), rejection)
         panel_runtime(figure.add_subplot(grid[1, 1]), runtime)
 
-        left, right, between = 0.235, 0.985, 0.022
+        # 0.27, not 0.235: a passing row is drawn bold, and bold is wider,
+        # which clipped the longest label once sct_ds_cos started passing.
+        left, right, between = 0.27, 0.985, 0.022
         width_effect = (right - left - between) / 1.62
         axes_effect = figure.add_axes([left, pad_bottom / height,
                                       width_effect, bands / height])
