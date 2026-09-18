@@ -181,8 +181,9 @@ def external_normalised(
         from scipy import io as scipy_io
         from scipy import sparse as scipy_sparse
 
-        # Seurat often lives in a container rather than on PATH, so the whole
-        # invocation is configurable:
+        # R is often not on PATH at all -- here it is a conda environment
+        # built for another project -- so the whole invocation is
+        # configurable, container form included:
         #   CONFIDENCEOT_RSCRIPT="apptainer exec -B /scratch /path/r.sif Rscript"
         # CONFIDENCEOT_R_WORKDIR puts the handoff files somewhere the container
         # can actually see, since a container binds only some of the host.
@@ -193,10 +194,10 @@ def external_normalised(
             command = ["Rscript"]
         else:
             raise RuntimeError(
-                "sctransform needs R with Seurat and Matrix. Either put "
-                "Rscript on PATH, or set CONFIDENCEOT_RSCRIPT to the full "
-                "invocation, for example: CONFIDENCEOT_RSCRIPT='apptainer "
-                "exec -B /scratch /path/to/r.sif Rscript'"
+                "sctransform needs R with the sctransform and Matrix "
+                "packages. Either put Rscript on PATH, or set "
+                "CONFIDENCEOT_RSCRIPT to the full invocation. On TACC, "
+                "scripts/tacc/r_environment.sh finds one and sets it."
             )
         parent = os.environ.get("CONFIDENCEOT_R_WORKDIR") or None
         if parent:
@@ -205,7 +206,7 @@ def external_normalised(
             work = Path(workspace)
             matrix_path, out_path = work / "counts.mtx", work / "residuals.tsv"
             script_path = work / "sctransform.R"
-            # Seurat wants genes x cells.
+            # vst wants genes x cells.
             scipy_io.mmwrite(str(matrix_path),
                              scipy_sparse.csr_matrix(counts.T.astype(np.int32)))
             script_path.write_text(SCTRANSFORM_R, encoding="utf-8")
