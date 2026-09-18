@@ -74,9 +74,34 @@ def main() -> None:
         effect[column] = control[column].reindex(effect.index) \
             if column in control else pd.NA
 
-    worst = effect[[c for c in ("cv0", "low", "mid", "high")
-                    if c in effect.columns]].max(axis=1)
+    worst_columns = [c for c in ("cv0", "low", "mid", "high")
+                     if c in effect.columns]
+    worst = effect[worst_columns].max(axis=1)
     effect["worst_depth_effect"] = worst
+
+    # The range over replicates on that same worst arm. Without it the pass
+    # column reads as a property of the method, when at three replicates the
+    # tolerance can fall inside the scatter -- two runs of one method landed
+    # either side of it in the production screen.
+    replicate_frames = []
+    for path in sorted(args.root.glob("*/depth_null_replicates.csv")):
+        frame = pd.read_csv(path)
+        frame.insert(0, "configuration", path.parent.name)
+        replicate_frames.append(frame)
+    if replicate_frames:
+        per_replicate = pd.concat(replicate_frames, ignore_index=True)
+        per_replicate["depth_effect"] = \
+            (per_replicate["auc_total_counts"] - 0.5).abs()
+        long_to_short = {long: short for long, short in SHORT.items()}
+        per_replicate["short"] = per_replicate.arm.map(long_to_short)
+        spread = []
+        for configuration in effect.index:
+            arm = effect.loc[configuration, worst_columns].idxmax()
+            points = per_replicate[per_replicate.configuration.eq(configuration)
+                                   & per_replicate.short.eq(arm)].depth_effect
+            spread.append(f"{points.min():.3f}-{points.max():.3f}"
+                          if len(points) else "")
+        effect["worst_arm_over_replicates"] = spread
     effect["passes"] = [
         "yes" if (w == w and w <= args.tolerance
                   and f == f and f >= args.minimum_f1) else "no"

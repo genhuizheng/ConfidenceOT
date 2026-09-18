@@ -153,22 +153,35 @@ def load_benchmark(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame
     return f1, rejection, runtime
 
 
-def load_screen(root: Path) -> tuple[pd.DataFrame, list[str], list[str]]:
+def _read_screen(root: Path, name: str) -> pd.DataFrame:
     frames = []
-    for path in sorted(root.glob("*/depth_null_arm_summary.csv")):
+    for path in sorted(root.glob(f"*/{name}")):
         frame = pd.read_csv(path)
         frame.insert(0, "configuration", path.parent.name)
         frames.append(frame)
     if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
+    if "auc_total_counts" in combined:
+        combined["depth_effect"] = (combined["auc_total_counts"] - 0.5).abs()
+    return combined
+
+
+def load_screen(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, list[str],
+                                     list[str]]:
+    arms = _read_screen(root, "depth_null_arm_summary.csv")
+    if arms.empty:
         raise SystemExit(f"no depth_null_arm_summary.csv under {root}")
-    arms = pd.concat(frames, ignore_index=True)
-    if "auc_total_counts" not in arms:
+    if "depth_effect" not in arms:
         raise SystemExit("screen summaries carry no auc_total_counts column")
-    arms["depth_effect"] = (arms["auc_total_counts"] - 0.5).abs()
+    # Per-replicate rows, for the scatter in (e). The summary is already a
+    # median over them, and a median alone hides how much of the difference
+    # between two configurations is replicate noise.
+    replicates = _read_screen(root, "depth_null_replicates.csv")
     have = set(arms.configuration)
     present = [c for c in SCREEN_ORDER if c in have]
     present += sorted(have - set(present))
-    return arms, present, [c for c in SCREEN_ORDER if c not in have]
+    return arms, replicates, present, [c for c in SCREEN_ORDER if c not in have]
 
 
 def panel_f1(axes, f1: pd.DataFrame, batch: str, title: str, legend: bool) -> None:
@@ -310,46 +323,71 @@ def screen_tables(arms: pd.DataFrame, present: list[str],
     return effect, spread, power, worst, passes.fillna(False)
 
 
-def panel_depth_effect(axes, effect: pd.DataFrame, spread: pd.Series,
-                       passes: pd.Series, tolerance: float) -> None:
-    values = effect.to_numpy(dtype=float)
-    axes.imshow(values, cmap="Blues", vmin=0.0, vmax=0.5,
-                aspect="auto", interpolation="nearest")
-    for row in range(values.shape[0]):
-        for column in range(values.shape[1]):
-            value = values[row, column]
-            if not np.isfinite(value):
+# A sequential single-hue ramp, light to dark with depth spread, because the
+# thing it encodes is a magnitude. Four steps for the four homogeneous arms.
+DEPTH_SHADES = ["#c6dbef", "#6baed6", "#2171b5", "#08306b"]
+
+
+def panel_depth_effect(axes, effect: pd.DataFrame, replicates: pd.DataFrame,
+                       spread: pd.Series, passes: pd.Series,
+                       tolerance: float) -> None:
+    rows = list(effect.index)
+    # Every replicate, not just the median. Two runs of the same method landed
+    # either side of the tolerance in the production screen, so the scatter is
+    # the finding: at three replicates the threshold cuts inside the noise.
+    scatter = replicates if not replicates.empty else effect.reset_index()
+    for row_index, configuration in enumerate(rows):
+        axes.plot([0, 0.52], [row_index, row_index], color="0.93", lw=0.7,
+                  zorder=1)
+        for arm_index, arm in enumerate(HOMOGENEOUS):
+            offset = (arm_index - 1.5) * 0.17
+            if replicates.empty:
+                points = effect.loc[[configuration], arm].to_numpy(dtype=float)
+            else:
+                points = (scatter[scatter.configuration.eq(configuration)
+                                  & scatter.arm.eq(arm)]
+                          .depth_effect.to_numpy(dtype=float))
+            points = points[np.isfinite(points)]
+            if not len(points):
                 continue
-            axes.text(column, row, f"{value:.3f}", ha="center", va="center",
-                      fontsize=6.2,
-                      color="white" if value > 0.28 else "0.15")
-    axes.set_xticks(range(values.shape[1]))
-    axes.set_xticklabels([f"{cv:.2f}" for cv in spread.values], fontsize=7)
-    axes.set_xlabel("Sequencing-depth CV across cells")
-    axes.set_yticks(range(values.shape[0]))
-    axes.set_yticklabels([SCREEN_LABEL.get(name, name) for name in effect.index],
+            axes.plot(points, np.full(len(points), row_index + offset),
+                      marker="o", ms=3.0, ls="none",
+                      mfc=DEPTH_SHADES[arm_index], mec="white", mew=0.4,
+                      zorder=3, clip_on=True)
+
+    axes.axvline(tolerance, color="0.45", lw=0.8, ls=(0, (2, 1.6)), zorder=2)
+    axes.set_xlim(-0.012, 0.52)
+    axes.set_xticks([0, 0.05, 0.1, 0.2, 0.3, 0.4])
+    axes.set_xticklabels(["0", f"{tolerance:g}", "0.1", "0.2", "0.3", "0.4"])
+    axes.set_xlabel("Residual depth dependence, $|$AUC $-$ 0.5$|$")
+    axes.set_yticks(range(len(rows)))
+    axes.set_yticklabels([SCREEN_LABEL.get(name, name) for name in rows],
                          fontsize=6.6)
-    axes.tick_params(length=0)
-    axes.set_ylim(values.shape[0] - 0.5, -0.5)
-    for label, ok in zip(axes.get_yticklabels(), passes.reindex(effect.index)):
+    axes.tick_params(axis="y", length=0)
+    axes.set_ylim(len(rows) - 0.5, -0.5)
+    for side in ("top", "right", "left"):
+        axes.spines[side].set_visible(False)
+    for label, ok in zip(axes.get_yticklabels(), passes.reindex(rows)):
         if bool(ok):
             label.set_color(C_PART)
             label.set_fontweight("bold")
-    if FIRST_EXTERNAL in list(effect.index):
-        boundary = list(effect.index).index(FIRST_EXTERNAL) - 0.5
+    if FIRST_EXTERNAL in rows:
         # The line alone: the rows below it are named after the packages that
-        # implement them, so labelling the two blocks in words would only
-        # repeat that, and there is no space inside the cells for it.
-        axes.axhline(boundary, color="0.25", lw=0.8, ls=(0, (2, 1.6)))
-    axes.set_title("(e)  Residual depth dependence, $|$AUC $-$ 0.5$|$",
+        # implement them, so labelling the two blocks in words would repeat
+        # that and cost space the panel does not have.
+        axes.axhline(rows.index(FIRST_EXTERNAL) - 0.5, color="0.25", lw=0.8,
+                     ls=(0, (2, 1.6)), zorder=2)
+
+    handles = [plt.Line2D([], [], marker="o", ms=3.0, ls="none",
+                          mfc=shade, mec="white", mew=0.4, label=f"{cv:.2f}")
+               for shade, cv in zip(DEPTH_SHADES, spread.values)]
+    axes.set_title("(e)  Specificity: no cell here is incompatible",
                    loc="left", fontweight="bold", fontsize=8)
-    # "Passes" means the whole row is at or under the tolerance, so it belongs
-    # beside the rows rather than in the caption; the row label itself carries
-    # the colour.
     # Left of the panel, over the row-label gutter: the title is left-aligned
     # to the axes and runs most of its width, so the free space is that side.
     axes.text(-0.02, 1.012, "green = passes", transform=axes.transAxes,
               ha="right", va="bottom", fontsize=6.4, color=C_PART)
+    return handles
 
 
 def panel_power(axes, power: pd.DataFrame, passes: pd.Series,
@@ -386,7 +424,7 @@ def panel_power(axes, power: pd.DataFrame, passes: pd.Series,
 def build(benchmark_root: Path, screen_root: Path, out: Path,
           tolerance: float, minimum_f1: float) -> None:
     f1, rejection, runtime = load_benchmark(benchmark_root)
-    arms, present, missing = load_screen(screen_root)
+    arms, replicates, present, missing = load_screen(screen_root)
     effect, spread, power, worst, passes = screen_tables(
         arms, present, tolerance, minimum_f1)
     control_fraction = float(arms[arms.arm.eq(CONTROL)].perturbed_fraction.median())
@@ -397,9 +435,9 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
     # labels in (e) need a gutter three times wider than any axis above them,
     # and a gridspec would impose that gutter on every panel.
     rows = max(len(present), 4)
-    pad_top, top_block, gap, pad_bottom = 0.28, 4.30, 0.50, 0.68
+    pad_top, top_block, gap, pad_bottom, header = 0.28, 4.30, 0.50, 0.68, 0.64
     bands = 0.26 * rows
-    height = pad_top + top_block + gap + bands + 0.34 + pad_bottom
+    height = pad_top + top_block + gap + bands + header + pad_bottom
     with mpl.rc_context(STYLE):
         figure = plt.figure(figsize=(6.5, height))
         grid = figure.add_gridspec(
@@ -414,15 +452,27 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
         panel_specificity(figure.add_subplot(grid[1, 0]), rejection)
         panel_runtime(figure.add_subplot(grid[1, 1]), runtime)
 
-        left, right, between = 0.235, 0.985, 0.012
+        left, right, between = 0.235, 0.985, 0.022
         width_effect = (right - left - between) / 1.62
         axes_effect = figure.add_axes([left, pad_bottom / height,
                                       width_effect, bands / height])
-        panel_depth_effect(axes_effect, effect, spread, passes, tolerance)
+        handles = panel_depth_effect(axes_effect, effect, replicates, spread,
+                                     passes, tolerance)
         axes_power = figure.add_axes(
             [left + width_effect + between, pad_bottom / height,
              width_effect * 0.62, bands / height], sharey=axes_effect)
         panel_power(axes_power, power, passes, minimum_f1, control_fraction)
+
+        # Above (e), right-aligned to it: inside the axes the legend lands on
+        # whichever rows happen to have low values, which is a property of the
+        # results, not of the layout.
+        legend = figure.legend(
+            handles=handles, ncol=4, loc="lower right",
+            bbox_to_anchor=(left + width_effect,
+                            (pad_bottom + bands + 0.22) / height),
+            handlelength=0.8, handletextpad=0.35, columnspacing=0.9,
+            borderpad=0.2, fontsize=5.8, title="depth CV across cells")
+        legend.get_title().set_fontsize(5.8)
 
         out.mkdir(parents=True, exist_ok=True)
         stem = "fig_simulation_benchmark"
@@ -436,6 +486,14 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
     table["worst_depth_effect"] = worst
     table["passes"] = passes.map({True: "yes", False: "no"})
     table.to_csv(out / "fig_simulation_benchmark_source.csv")
+    if not replicates.empty:
+        columns = [c for c in ("configuration", "arm", "replicate",
+                               "observed_depth_cv", "auc_total_counts",
+                               "depth_effect", "source_rejection_rate",
+                               "perturbed_f1", "perturbed_recall",
+                               "perturbed_precision") if c in replicates]
+        (replicates[replicates.configuration.isin(present)][columns]
+         .to_csv(out / "fig_simulation_benchmark_replicates.csv", index=False))
 
     print(f"wrote {out / (stem + '.pdf')}")
     print(f"wrote {out / (stem + '.png')}")
