@@ -55,6 +55,7 @@ scripts/tacc/*
 !scripts/tacc/preflight_depth_screen.sh
 !scripts/tacc/r_environment.sh
 !scripts/tacc/prepare_r_sctransform.slurm
+!scripts/tacc/export_depth_screen.sh
 *.inspect.ndjson
 *.zip
 
