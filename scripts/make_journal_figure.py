@@ -193,8 +193,15 @@ def panel_f1(axes, f1: pd.DataFrame, batch: str, title: str, legend: bool) -> No
                                  ("Partial OT", C_PART, "D")):
         curve = (anomalies[anomalies.group == name]
                  .groupby("n_cells").directional_f1_mean.mean().reindex(SIZES))
-        axes.plot(SIZES, curve.values, marker=marker, color=colour, label=name,
-                  clip_on=False, zorder=3)
+        # A method present at one size only draws one marker and no line, so
+        # the legend says why rather than leaving a reader to wonder whether
+        # the run is missing.
+        drawn = name
+        if curve.notna().sum() == 1:
+            only = int(curve.dropna().index[0])
+            drawn = f"{name} ($N={only}$ only)"
+        axes.plot(SIZES, curve.values, marker=marker, color=colour,
+                  label=drawn, clip_on=False, zorder=3)
     axes.set_xscale("log")
     axes.set_xticks(SIZES)
     axes.xaxis.set_major_formatter(FuncFormatter(plain))
@@ -211,18 +218,49 @@ def panel_f1(axes, f1: pd.DataFrame, batch: str, title: str, legend: bool) -> No
                     labelspacing=0.32)
 
 
+GROUPS = ["Traditional OT", "Vanilla UOT", "ConfidenceOT", "Partial OT"]
+# Why Partial OT has only one size, stated under the bars it belongs to
+# rather than left to the caption. The comparator is the exact augmented
+# Hungarian assignment, so 5,000 and 10,000 are out of reach by construction,
+# not missing runs -- the benchmark's own audit records all 20 of its expected
+# cases as complete.
+GROUP_NOTE = {"Partial OT": "exact, $\\mathcal{O}(N^{3})$"}
+
+
 def panel_specificity(axes, rejection: pd.DataFrame) -> None:
-    groups = ["Traditional OT", "Vanilla UOT", "ConfidenceOT"]
-    positions, width = np.arange(len(groups)), 0.36
-    largest = rejection[rejection.n_cells.eq(rejection.n_cells.max())
-                        & rejection.scenario.isin(ANOMALY_SCENARIOS)
-                        & rejection.batch_condition.eq("none")]
-    planted = [largest[largest.group.eq(g) & largest.planted]
-               .rejection_signal_mean.mean() for g in groups]
-    unaffected = [largest[largest.group.eq(g) & ~largest.planted]
-                  .rejection_signal_mean.mean() for g in groups]
-    worst = [largest[largest.group.eq(g) & ~largest.planted]
-             .rejection_signal_mean.max() for g in groups]
+    anomalies = rejection[rejection.scenario.isin(ANOMALY_SCENARIOS)
+                          & rejection.batch_condition.eq("none")]
+    # Draw the bars at the largest size where every method is present, so the
+    # comparison is complete, and overlay the largest size of all for the
+    # methods that reach it. Drawing only the largest size drops Partial OT
+    # out of the panel silently, which is how it went missing.
+    sizes = sorted(anomalies.n_cells.unique())
+    complete = [s for s in sizes
+                if set(GROUPS) <= set(anomalies[anomalies.n_cells.eq(s)].group)]
+    primary = complete[-1] if complete else sizes[-1]
+    overlay = sizes[-1] if sizes[-1] != primary else None
+
+    def summarise(size):
+        frame = anomalies[anomalies.n_cells.eq(size)]
+        out = {}
+        for name in GROUPS:
+            rows = frame[frame.group.eq(name)]
+            if rows.empty:
+                out[name] = None
+                continue
+            other = rows[~rows.planted].rejection_signal_mean
+            out[name] = (rows[rows.planted].rejection_signal_mean.mean(),
+                         other.mean(), other.max())
+        return out
+
+    at_primary = summarise(primary)
+    at_overlay = summarise(overlay) if overlay else {}
+
+    present = [name for name in GROUPS if at_primary.get(name)]
+    positions, width = np.arange(len(present)), 0.36
+    planted = [at_primary[name][0] for name in present]
+    unaffected = [at_primary[name][1] for name in present]
+    worst = [at_primary[name][2] for name in present]
 
     bars_planted = axes.bar(positions - width / 2, planted, width,
                             color=C_CONF, label="Planted anomaly", zorder=3)
@@ -235,29 +273,47 @@ def panel_specificity(axes, rejection: pd.DataFrame) -> None:
     worst_handle, = axes.plot([], [], color="0.2", lw=1.0,
                               label="Worst unaffected population")
 
+    # Three things can sit at a bar's top edge: the value, the worst-population
+    # mark, and the larger-size marker. So the value goes inside a bar tall
+    # enough to hold it, and above the worst mark rather than above the bar.
     for position, value in zip(positions - width / 2, planted):
-        axes.text(position, value + 0.03, f"{value:.2f}", ha="center",
-                  va="bottom", fontsize=6.5)
-    for position, value in zip(positions + width / 2, unaffected):
-        if value > 0.12:            # inside the bar, so it clears the mark
-            axes.text(position, value - 0.035, f"{value:.2f}", ha="center",
-                      va="top", fontsize=6.5, color="0.15")
+        if value > 0.25:
+            axes.text(position, value - 0.04, f"{value:.2f}", ha="center",
+                      va="top", fontsize=6.2, color="white", zorder=7)
         else:
             axes.text(position, value + 0.03, f"{value:.2f}", ha="center",
-                      va="bottom", fontsize=6.5)
+                      va="bottom", fontsize=6.2)
+    for position, value, top in zip(positions + width / 2, unaffected, worst):
+        axes.text(position, max(value, top) + 0.035, f"{value:.2f}",
+                  ha="center", va="bottom", fontsize=6.2, color="0.15")
+
+    handles = [bars_planted, bars_other, worst_handle]
+    if at_overlay:
+        for index, name in enumerate(present):
+            values = at_overlay.get(name)
+            if not values:
+                continue
+            axes.plot([index - width / 2, index + width / 2],
+                      [values[0], values[1]], marker="D", ms=3.0, ls="none",
+                      mfc="none", mec="0.15", mew=0.8, zorder=6, clip_on=False)
+        overlay_handle, = axes.plot([], [], marker="D", ms=3.0, ls="none",
+                                    mfc="none", mec="0.15", mew=0.8,
+                                    label=f"at $N={overlay}$")
+        handles.append(overlay_handle)
 
     axes.set_xticks(positions)
-    axes.set_xticklabels(groups)
-    axes.set_ylim(0, 1.18)
+    axes.set_xticklabels(
+        [name.replace(" ", "\n") + ("\n" + GROUP_NOTE[name]
+                                    if name in GROUP_NOTE else "")
+         for name in present], fontsize=6.4)
+    axes.set_ylim(0, 1.34)
     axes.set_yticks(np.arange(0, 1.01, 0.2))
     axes.set_ylabel("Rejection signal")
-    size = int(largest.n_cells.max())
-    axes.set_title(f"(c)  Specificity at $N={size:,}$".replace(",", "{,}"),
+    axes.set_title(f"(c)  Specificity at $N={primary}$",
                    loc="left", fontweight="bold")
     tidy(axes)
-    axes.legend(handles=[bars_planted, bars_other, worst_handle],
-                loc="upper left", handlelength=1.3, borderpad=0.2,
-                labelspacing=0.32)
+    axes.legend(handles=handles, loc="upper left", handlelength=1.2,
+                borderpad=0.2, labelspacing=0.3, fontsize=6.4)
 
 
 def panel_runtime(axes, runtime: pd.DataFrame) -> None:
