@@ -94,7 +94,16 @@ fi
 entry=${configurations[$task]}
 label=${entry%%|*}
 flags=${entry#*|}
-out="$root/$label"
+# A non-default replicate count writes to its own label. Otherwise a
+# confirmation round would overwrite in place the very result it exists to
+# confirm, and nobody would have to forget anything for that to happen -- the
+# path is the same.
+replicates=${CONFIDENCEOT_REPLICATES:-3}
+if (( replicates == 3 )); then
+  out="$root/$label"
+else
+  out="$root/${label}_r${replicates}"
+fi
 
 echo "=================================================="
 echo "configuration $task  $label"
@@ -104,9 +113,15 @@ echo "started $(date --iso-8601=seconds)"
 
 # Production parameters, matching the defaults the earlier figure was drawn
 # from, so the new rows are readable beside the stored ones.
+#
+# CONFIDENCEOT_REPLICATES raises the replicate count for a confirmation round.
+# Three separates 0.49 from 0.05 easily; it does not separate 0.045 from
+# 0.062, where the per-replicate ranges overlap and the pass threshold falls
+# inside both. Point it at the few configurations actually in contention, not
+# at all thirteen: runtime scales linearly with it.
 "$CONDA_PREFIX/bin/python" scripts/validate_depth_null_specificity.py "$out" \
   $flags \
-  --replicates 3 \
+  --replicates "$replicates" \
   --n-cells 1500 \
   --n-genes 4000 \
   --n-hvg 2000 \
