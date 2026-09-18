@@ -6,7 +6,7 @@ known rather than against a cancer result.
 
 Runner: `scripts/validate_depth_null_specificity.py`
 Local triage: `scripts/screen_depth_configurations.sh`
-Cluster: `scripts/tacc/screen_depth_configurations.slurm` (`--array=0-10`)
+Cluster: `scripts/tacc/screen_depth_configurations.slurm` (`--array=0-12`)
 
 ---
 
@@ -52,13 +52,26 @@ cost geometry. `ds` = read equalisation on.
 | 6 | `pearson_ds` | analytic Pearson residuals (ours) | **yes** | Euclidean | our residual implementation |
 | 7 | `scanpy_pearson` | **scanpy** `normalize_pearson_residuals` | — | Euclidean | external reference for the residual |
 | 8 | `scanpy_pearson_ds` | **scanpy** residuals | **yes** | Euclidean | same, plus equalisation |
-| 9 | `sct` | **Seurat SCTransform v2** | — | Euclidean | field standard, external |
-| 10 | `sct_ds` | **Seurat SCTransform v2** | **yes** | Euclidean | same, plus equalisation |
+| 9 | `sct` | **`sctransform::vst`, flavour v2** | — | Euclidean | field standard, external |
+| 10 | `sct_ds` | **`sctransform::vst`, flavour v2** | **yes** | Euclidean | same, plus equalisation |
+| 11 | `pearson_ds_cos` | analytic Pearson residuals (ours) | **yes** | **cosine** | added after 0–10: the two winning levers, combined |
+| 12 | `sct_ds_cos` | **`sctransform::vst`, flavour v2** | **yes** | **cosine** | same combination on the best transform |
 
-Rows 7–10 are external packages, so the transform comparison does not rest only
-on our own code. They mirror the production tail exactly — stack both sides,
-take top-variance genes, centre, scale per gene, joint PCA — so the transform is
-the only thing that differs.
+11 and 12 were added once 0–10 were in, because those results separated on two
+different axes — see §7. They are appended rather than inserted, so array
+indices 0–10 keep meaning what they meant.
+
+The external rows call `sctransform::vst(vst.flavor = "v2", residual_type =
+"pearson", min_cells = 1)` directly, not `Seurat::SCTransform`. Seurat's
+function is a wrapper around that call, and its own dependency chain —
+interactive and plotting packages — will not build in the container that was
+first tried. Comparing against the package that implements the method is also
+the more defensible reference.
+
+The external rows are other people's implementations, so the transform
+comparison does not rest only on our own code. They mirror the production tail
+exactly — stack both sides, take top-variance genes, centre, scale per gene,
+joint PCA — so the transform is the only thing that differs.
 
 ### What each lever does
 
@@ -92,11 +105,28 @@ the only thing that differs.
 | Source rejection cap | 0.85 | 0.85 |
 | Target rejection cap | 0.00 | 0.00 |
 | Cells for calibration | 2,000 | 600 |
+| Calibration grid size | 5 | 5 |
+| Null calibration replicates | 5 | 5 |
+| Null validation replicates | 5 | 5 |
+| Entropic epsilon | 0.1 | 0.1 |
+| lambda_a, lambda_b | 1.0, 1.0 | 1.0, 1.0 |
+| Solver tolerance | 1e-4 | 1e-4 |
+| Minimum detection rate | 0.0 (no gene filter) | 0.0 |
+| Seed | 20260914 | 20260914 |
 
-The reduced local scale reproduces the production numbers: the `logcpm`
-baseline gives a depth effect of 0.000 / 0.450 / 0.490 / 0.492 across the four
-arms locally against 0.00 / 0.44 / 0.49 / 0.495 on the cluster, so the local
-triage transfers.
+Cells per side, genes, HVG, PCs, replicates and calibration cells are passed
+explicitly by `scripts/tacc/screen_depth_configurations.slurm`; everything else
+above is the script's default. The per-replicate seed is
+`seed + 7919 * replicate + hash(arm) % 10000`, so source and target of one
+replicate share a generator and therefore share `gene_mean` — which is what
+makes the homogeneous arms homogeneous.
+
+The reduced local scale reproduces production on the baseline: `logcpm` gives a
+depth effect of 0.000 / 0.450 / 0.490 / 0.492 across the four arms locally
+against 0.000 / 0.462 / 0.490 / 0.494 on the cluster, so the local triage
+transfers. (An earlier separate run, `sim_log_cpm_20260916`, gave 0.00 / 0.44 /
+0.49 / 0.495; close, but it is a different run with no read-equalisation code
+present, so it is not the comparison to quote.)
 
 ---
 
@@ -125,9 +155,19 @@ near 0 on all four homogeneous arms **and** the positive control intact.
 
 | | Where | State |
 |---|---|---|
-| Configurations 0–6 | this machine | running; `logcpm` done |
-| Configurations 7–10 | cluster only | **untested** — local scanpy is broken against anndata 0.12 and there is no R here. Both were verified only to fail with a message naming the missing dependency. |
-| All 11 at production scale | cluster | not yet submitted |
+| Configurations 0–10 | cluster, production scale | **complete**, 3 replicates |
+| Configurations 0–6 | this machine, reduced scale | complete, 2 replicates; used only as triage |
+| Configurations 11–12 | cluster | submitted after 0–10 returned |
+| Confirmation round, 10 replicates | cluster | for the configurations §7 leaves in contention |
+
+R came from `$SCRATCH/conda_envs/infercnv_r`, which already had sctransform
+0.4.3. The container route was abandoned: its image has compilers but not the
+development headers, so 19 of Seurat's dependencies would not build and the
+image is read-only.
+
+`CONFIDENCEOT_REPLICATES` raises the replicate count and changes the output
+label to `<label>_r<n>`, so a confirmation round cannot overwrite the run it
+confirms.
 
 ## 6. Prior expectation, written before the results
 
@@ -143,3 +183,81 @@ Recorded so the screen can contradict it.
 - `pearson_ds`, `scanpy_pearson*` and `sct*` are one family. Our analytic
   residual already failed, and the reason applies to all of them: a gene
   observed at zero keeps a large residual, so dropout survives the transform.
+
+---
+
+## 7. Outcome, against the prior in §6
+
+Configurations 0-10, production scale, 3 replicates. Depth effect is
+`abs(AUC - 0.5)` at depth CV 0.31 / 0.66 / 1.12; the CV-0 arm is 0.000 for
+every configuration by construction.
+
+| Configuration | 0.31 | 0.66 | 1.12 | worst, over replicates | control F1 | rejected (true 0.20) |
+|---|---:|---:|---:|---|---:|---:|
+| `logcpm` | 0.462 | 0.490 | 0.494 | 0.494 (0.494-0.495) | 0.887 | 0.249 |
+| `logcpm_ds` | 0.046 | 0.190 | 0.258 | 0.258 (0.216-0.306) | 0.872 | 0.259 |
+| `logcpm_cos` | 0.052 | 0.082 | 0.128 | 0.128 (0.111-0.142) | 0.952 | 0.220 |
+| `rank256` | 0.020 | 0.138 | 0.363 | 0.363 (0.360-0.369) | 0.855 | 0.268 |
+| `rank256_ds` | 0.022 | 0.053 | 0.127 | 0.127 (0.118-0.135) | 0.845 | 0.272 |
+| `rank256_ds_cos` | 0.062 | 0.042 | **0.019** | 0.062 (0.030-0.083) | **0.945** | **0.223** |
+| `pearson_ds` | 0.049 | 0.037 | 0.050 | 0.050 (0.025-0.055) | 0.852 | 0.269 |
+| `scanpy_pearson` | 0.436 | 0.481 | 0.488 | 0.488 (0.486-0.492) | 0.867 | 0.261 |
+| `scanpy_pearson_ds` | 0.044 | 0.031 | 0.055 | 0.055 (0.038-0.080) | 0.861 | 0.265 |
+| `sct` | 0.031 | 0.071 | 0.066 | 0.071 (0.033-0.074) | 0.884 | 0.253 |
+| `sct_ds` | **0.008** | **0.015** | 0.045 | 0.045 (0.015-0.054) | 0.870 | 0.260 |
+
+### The prior in §6 was wrong in two of three places
+
+1. **"`rank256_ds` should clear all four arms."** It does not: 0.127 at the
+   highest depth spread. The production pipeline is not depth-clean in
+   simulation.
+2. **"`cosine` should help partially and not close the high-spread arm."** It
+   closes it. `rank256_ds_cos` reaches 0.019 there, the lowest single value in
+   the table, and it is the only configuration whose depth effect *falls* as
+   depth spread rises.
+3. **"the residual family is one family and should all fail, because a gene
+   observed at zero keeps a large residual."** Right about the analytic form —
+   scanpy's `normalize_pearson_residuals` alone gives 0.488, no better than log
+   CPM — and wrong about `sctransform`, which alone gives 0.031 / 0.071 /
+   0.066. They are not one family. The regularised negative-binomial fit does
+   something a fixed-theta analytic residual does not, and that distinction is
+   the substantive answer to the question about the SCT note.
+
+### What the pass rule does not test
+
+The rule is `worst depth effect <= 0.05 AND control F1 >= 0.60`, and §4 lists a
+third criterion it never applies: the rejection *rate* on arms that contain
+nothing to reject. Measured locally at reduced scale, the homogeneous arms are
+rejected at:
+
+| | median homogeneous rejection rate |
+|---|---:|
+| `logcpm`, `logcpm_ds`, `rank256`, `rank256_ds`, `pearson_ds` | 0.076 - 0.087 |
+| `logcpm_cos` | 0.030 |
+| `rank256_ds_cos` | 0.018 |
+
+So every Euclidean configuration rejects 7-9% of a population with no
+incompatible cell in it, and the cosine cost cuts that three- to fourfold. A
+configuration can therefore pass both stated columns while still throwing away
+8% of cells for no reason. This needs confirming at production scale before it
+is relied on, and it is a second independent reason the cosine arms look
+better than their depth column alone suggests.
+
+### Where this leaves the choice
+
+The 0.05 threshold falls inside the replicate range of all four leading
+configurations: `sct_ds` 0.015-0.054, `pearson_ds` 0.025-0.055,
+`scanpy_pearson_ds` 0.038-0.080, `rank256_ds_cos` 0.030-0.083. Which of them
+"passes" is not currently a statement about the methods, so the specificity
+ranking among them is undecided at 3 replicates.
+
+The one difference that is clearly outside the noise is power. Both cosine
+arms reach F1 0.945-0.952 and reject 22.0-22.3% against a true 20%, while
+every other configuration reaches 0.845-0.887 and rejects 24.9-27.2%. Two
+different transforms, one effect.
+
+Hence configurations 11 and 12, and a 10-replicate confirmation round on the
+few that are in contention. Three implementations of "residual transform plus
+equalisation" landing within 0.010 of each other -- ours 0.050, scanpy's 0.055,
+sctransform's 0.045 -- is the external corroboration the external packages were
+added for, and it is reportable whichever configuration is finally chosen.
