@@ -94,20 +94,41 @@ fi
 entry=${configurations[$task]}
 label=${entry%%|*}
 flags=${entry#*|}
-# A non-default replicate count writes to its own label. Otherwise a
-# confirmation round would overwrite in place the very result it exists to
-# confirm, and nobody would have to forget anything for that to happen -- the
-# path is the same.
+# Anything that changes what a run means earns its own label. A confirmation
+# round at more replicates, or a run on splatter's counts, would otherwise
+# overwrite in place the very result it exists to compare against, and nobody
+# would have to forget anything for that to happen -- the path is the same.
 replicates=${CONFIDENCEOT_REPLICATES:-3}
-if (( replicates == 3 )); then
-  out="$root/$label"
-else
-  out="$root/${label}_r${replicates}"
+splatter_arms=${CONFIDENCEOT_SPLATTER_ARMS:-}
+n_cells=${CONFIDENCEOT_N_CELLS:-1500}
+suffix=""
+if (( replicates != 3 )); then
+  suffix="${suffix}_r${replicates}"
+fi
+if [[ -n "$splatter_arms" ]]; then
+  if [[ ! -f "$splatter_arms/splatter_depth_manifest.csv" ]]; then
+    echo "no splatter arms at $splatter_arms; generate them first with" >&2
+    echo "  sbatch scripts/tacc/generate_splatter_depth_arms.slurm" >&2
+    exit 2
+  fi
+  suffix="${suffix}_splatter"
+fi
+if (( n_cells != 1500 )); then
+  suffix="${suffix}_n${n_cells}"
+fi
+out="$root/${label}${suffix}"
+
+# Passed as an array so an empty value contributes no argument at all.
+extra=()
+if [[ -n "$splatter_arms" ]]; then
+  extra+=(--splatter-arms "$splatter_arms")
 fi
 
 echo "=================================================="
 echo "configuration $task  $label"
 echo "flags   $flags"
+echo "cells   $n_cells"
+echo "counts  ${splatter_arms:-internal construction}"
 echo "output  $out"
 echo "started $(date --iso-8601=seconds)"
 
@@ -121,8 +142,9 @@ echo "started $(date --iso-8601=seconds)"
 # at all thirteen: runtime scales linearly with it.
 "$CONDA_PREFIX/bin/python" scripts/validate_depth_null_specificity.py "$out" \
   $flags \
+  "${extra[@]}" \
   --replicates "$replicates" \
-  --n-cells 1500 \
+  --n-cells "$n_cells" \
   --n-genes 4000 \
   --n-hvg 2000 \
   --n-pcs 30 \
