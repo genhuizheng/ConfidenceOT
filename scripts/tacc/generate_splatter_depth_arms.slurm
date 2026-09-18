@@ -6,8 +6,8 @@
 #SBATCH -c 32
 #SBATCH -t 08:00:00
 #SBATCH -A MCB26031
-#SBATCH -o /scratch/10119/ghzheng/OT_project/depth_screen_splatter/logs/generate_%j.out
-#SBATCH -e /scratch/10119/ghzheng/OT_project/depth_screen_splatter/logs/generate_%j.err
+#SBATCH -o /scratch/10119/ghzheng/OT_project/splatter_depth_generate_%j.out
+#SBATCH -e /scratch/10119/ghzheng/OT_project/splatter_depth_generate_%j.err
 #SBATCH --mail-user=genhuizheng@utexas.edu
 #SBATCH --mail-type=END,FAIL
 
@@ -19,6 +19,11 @@
 # scaling benchmark; its library is the repo's .r-library, exactly as
 # generate_splatter_scaling.slurm and install_splatter_dependencies.slurm set
 # it up.
+#
+# Logs go straight into OT_project rather than into a subdirectory of this
+# job's own output root. Slurm opens the log files before the script runs, so a
+# directory the script creates does not exist yet, and the job dies having
+# written nothing -- the one failure that leaves no evidence behind.
 #
 # Sized from a local run of the same script against splatter 1.30.0, so this is
 # not a first attempt on the cluster. Memory is the constraint, not time:
@@ -75,7 +80,7 @@ if [[ -e "$output/splatter_depth_manifest.csv" ]]; then
   exit 3
 fi
 
-mkdir -p "$output" "$root/logs"
+mkdir -p "$output"
 export R_LIBS_USER="$library"
 cd "$repo"
 
