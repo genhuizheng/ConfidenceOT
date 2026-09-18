@@ -33,6 +33,7 @@ scripts/
 scripts/*
 !scripts/benchmark_logging.py
 !scripts/generate_splatter_population_benchmark.R
+!scripts/generate_splatter_depth_arms.R
 !scripts/run_splatter_population_uot_benchmark.py
 !scripts/run_splatter_gene_perturbation_benchmark.py
 !scripts/run_splatter_dual_backbone_calibrated_case.py
