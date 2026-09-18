@@ -46,7 +46,13 @@ def main() -> None:
                         help="depth effect below this counts as cleared")
     parser.add_argument("--minimum-f1", type=float, default=0.60,
                         help="positive-control F1 above this counts as intact")
+    parser.add_argument("--out", type=Path, default=None,
+                        help="where to write the two CSVs; defaults to the "
+                             "root, but point it elsewhere when reading a "
+                             "directory that is not ours to write into")
     args = parser.parse_args()
+    out = args.out or args.root
+    out.mkdir(parents=True, exist_ok=True)
 
     frames = []
     for path in sorted(args.root.glob("*/depth_null_arm_summary.csv")):
@@ -57,7 +63,7 @@ def main() -> None:
         raise SystemExit(f"no depth_null_arm_summary.csv under {args.root}")
 
     arms = pd.concat(frames, ignore_index=True)
-    arms.to_csv(args.root / "screen_all_arms.csv", index=False)
+    arms.to_csv(out / "screen_all_arms.csv", index=False)
     if "auc_total_counts" not in arms:
         raise SystemExit("summaries carry no auc_total_counts column")
     arms["depth_effect"] = (arms["auc_total_counts"] - 0.5).abs()
@@ -121,9 +127,9 @@ def main() -> None:
           f"arm AND control F1 >= {args.minimum_f1}")
     if missing:
         print("\nnot present yet: " + ", ".join(missing))
-    effect.to_csv(args.root / "screen_depth_effect.csv")
-    print(f"\nwrote {args.root / 'screen_all_arms.csv'}")
-    print(f"wrote {args.root / 'screen_depth_effect.csv'}")
+    effect.to_csv(out / "screen_depth_effect.csv")
+    print(f"\nwrote {out / 'screen_all_arms.csv'}")
+    print(f"wrote {out / 'screen_depth_effect.csv'}")
 
 
 if __name__ == "__main__":

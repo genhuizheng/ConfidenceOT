@@ -66,7 +66,7 @@ tar czf "$tarball" -C "$root" "${members[@]}"
 echo
 echo "wrote $tarball  ($(du -h "$tarball" | cut -f1))"
 if (( ${#skipped[@]} )); then
-  echo "still running, so not in it: ${skipped[*]}"
+  echo "no summary, so not in it (${#skipped[@]}): ${skipped[*]:0:12}"
 fi
 echo
 echo "=================================================="
