@@ -38,6 +38,32 @@ ORDER = ["logcpm", "logcpm_ds", "logcpm_cos",
          "scanpy_pearson", "scanpy_pearson_ds",
          "sct", "sct_ds", "sct_ds_cos"]
 
+# The screen job appends a suffix to a label when a run means something other
+# than the default, so two runs cannot overwrite each other. Parsing them back
+# out stops a table listing `sct_ds` and `sct_ds_splatter` as two different
+# methods, which they are not -- they are one method on two simulators.
+# Matched against the known names rather than by regex, because base labels
+# contain underscores themselves.
+def split_variant(label: str) -> tuple[str, str]:
+    """Return (base configuration, human-readable variant)."""
+    for candidate in sorted(ORDER, key=len, reverse=True):
+        if label == candidate:
+            return candidate, ""
+        if label.startswith(candidate + "_"):
+            rest = label[len(candidate) + 1:]
+            pieces = []
+            for token in rest.split("_"):
+                if token == "splatter":
+                    pieces.append("splatter counts")
+                elif token.startswith("r") and token[1:].isdigit():
+                    pieces.append(f"{token[1:]} replicates")
+                elif token.startswith("n") and token[1:].isdigit():
+                    pieces.append(f"N={token[1:]}")
+                elif token:
+                    pieces.append(token)
+            return candidate, ", ".join(pieces)
+    return label, ""
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -68,9 +94,16 @@ def main() -> None:
         raise SystemExit("summaries carry no auc_total_counts column")
     arms["depth_effect"] = (arms["auc_total_counts"] - 0.5).abs()
 
-    present = [c for c in ORDER if c in set(arms.configuration)]
-    present += sorted(set(arms.configuration) - set(present))
-    missing = [c for c in ORDER if c not in set(arms.configuration)]
+    # Group by variant, and inside a variant keep the submission order, so
+    # the default rows read as before and any comparison run reads beneath
+    # them rather than interleaved.
+    found = set(arms.configuration)
+    order_index = {name: index for index, name in enumerate(ORDER)}
+    def sort_key(label):
+        base, variant = split_variant(label)
+        return (variant, order_index.get(base, len(ORDER)), label)
+    present = sorted(found, key=sort_key)
+    missing = [c for c in ORDER if c not in found]
 
     effect = (arms[arms.arm.isin(HOMOGENEOUS)]
               .pivot_table(index="configuration", columns="arm",
@@ -113,6 +146,9 @@ def main() -> None:
             spread.append(f"{points.min():.3f}-{points.max():.3f}"
                           if len(points) else "")
         effect["worst_arm_over_replicates"] = spread
+    variants = [split_variant(name)[1] for name in effect.index]
+    if any(variants):
+        effect.insert(0, "variant", [v or "default" for v in variants])
     effect["passes"] = [
         "yes" if (w == w and w <= args.tolerance
                   and f == f and f >= args.minimum_f1) else "no"

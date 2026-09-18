@@ -119,6 +119,32 @@ SCREEN_LABEL = {
 FIRST_EXTERNAL = "scanpy_pearson"
 
 
+def split_variant(label: str) -> tuple[str, str]:
+    """Split a screen label into its configuration and its variant suffix.
+
+    The screen job appends a suffix when a run means something other than the
+    default -- _splatter for splatter's counts, _r<n> for a different replicate
+    count, _n<cells> for a different size -- so that a comparison run cannot
+    overwrite what it is compared against. One plate shows one variant: mixing
+    them would put two simulators in the same panel with nothing to tell them
+    apart, and would double the row count.
+
+    Matched against the known names rather than by regex, because the base
+    labels contain underscores themselves.
+    """
+    for candidate in sorted(SCREEN_ORDER, key=len, reverse=True):
+        if label == candidate:
+            return candidate, ""
+        if label.startswith(candidate + "_"):
+            return candidate, label[len(candidate) + 1:]
+    return label, ""
+
+
+VARIANT_TITLE = {
+    "splatter": "splatter counts",
+}
+
+
 def group_of(method: str) -> str:
     if method == "Traditional OT":
         return "Traditional OT"
@@ -182,10 +208,21 @@ def load_screen(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, list[str],
     # median over them, and a median alone hides how much of the difference
     # between two configurations is replicate noise.
     replicates = _read_screen(root, "depth_null_replicates.csv")
-    have = set(arms.configuration)
-    present = [c for c in SCREEN_ORDER if c in have]
-    present += sorted(have - set(present))
-    return arms, replicates, present, [c for c in SCREEN_ORDER if c not in have]
+    return arms, replicates
+
+
+def choose_variant(arms: pd.DataFrame, wanted: str) -> tuple[list[str], list[str], list[str]]:
+    """Rows for one variant, in display order, plus what is missing and what else exists."""
+    seen = {}
+    for label in set(arms.configuration):
+        base, variant = split_variant(label)
+        seen.setdefault(variant, {})[base] = label
+    others = sorted(v for v in seen if v != wanted)
+    chosen = seen.get(wanted, {})
+    present = [chosen[base] for base in SCREEN_ORDER if base in chosen]
+    present += sorted(set(chosen.values()) - set(present))
+    missing = [base for base in SCREEN_ORDER if base not in chosen]
+    return present, missing, others
 
 
 def panel_f1(axes, f1: pd.DataFrame, batch: str, title: str, legend: bool) -> None:
@@ -390,7 +427,7 @@ DEPTH_SHADES = ["#c6dbef", "#6baed6", "#2171b5", "#08306b"]
 
 def panel_depth_effect(axes, effect: pd.DataFrame, replicates: pd.DataFrame,
                        spread: pd.Series, passes: pd.Series,
-                       tolerance: float) -> None:
+                       tolerance: float, title: str) -> None:
     rows = list(effect.index)
     # Every replicate, not just the median. Two runs of the same method landed
     # either side of the tolerance in the production screen, so the scatter is
@@ -441,8 +478,7 @@ def panel_depth_effect(axes, effect: pd.DataFrame, replicates: pd.DataFrame,
     handles = [plt.Line2D([], [], marker="o", ms=3.0, ls="none",
                           mfc=shade, mec="white", mew=0.4, label=f"{cv:.2f}")
                for shade, cv in zip(DEPTH_SHADES, spread.values)]
-    axes.set_title("(e)  Specificity: no cell here is incompatible",
-                   loc="left", fontweight="bold", fontsize=8)
+    axes.set_title(title, loc="left", fontweight="bold", fontsize=8)
     # Left of the panel, over the row-label gutter: the title is left-aligned
     # to the axes and runs most of its width, so the free space is that side.
     axes.text(-0.02, 1.012, "green = passes", transform=axes.transAxes,
@@ -482,12 +518,26 @@ def panel_power(axes, power: pd.DataFrame, passes: pd.Series,
 
 
 def build(benchmark_root: Path, screen_root: Path, out: Path,
-          tolerance: float, minimum_f1: float) -> None:
+          tolerance: float, minimum_f1: float, variant: str = "") -> None:
     f1, rejection, runtime = load_benchmark(benchmark_root)
-    arms, replicates, present, missing = load_screen(screen_root)
+    arms, replicates = load_screen(screen_root)
+    present, missing, others = choose_variant(arms, variant)
+    if not present:
+        available = ", ".join(repr(name) for name in others) or "none"
+        raise SystemExit(
+            f"no configurations with variant {variant!r} under {screen_root}; "
+            f"available variants: {available}"
+        )
+    arms = arms[arms.configuration.isin(present)]
+    if not replicates.empty:
+        replicates = replicates[replicates.configuration.isin(present)]
     effect, spread, power, worst, passes = screen_tables(
         arms, present, tolerance, minimum_f1)
     control_fraction = float(arms[arms.arm.eq(CONTROL)].perturbed_fraction.median())
+    # Every output carries the variant, plate and source data alike. Naming
+    # only the plate would let a comparison run overwrite the source data of
+    # the run it is being compared against.
+    stem = "fig_simulation_benchmark" + (f"_{variant}" if variant else "")
 
     # The bottom block carries one band per configuration, so it grows with
     # the screen while the top block stays a fixed size. Positions are set in
@@ -516,8 +566,12 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
         width_effect = (right - left - between) / 1.62
         axes_effect = figure.add_axes([left, pad_bottom / height,
                                       width_effect, bands / height])
+        named = VARIANT_TITLE.get(variant, variant)
+        title = "(e)  Specificity: no cell here is incompatible"
+        if named:
+            title = f"(e)  Specificity, {named}"
         handles = panel_depth_effect(axes_effect, effect, replicates, spread,
-                                     passes, tolerance)
+                                     passes, tolerance, title)
         axes_power = figure.add_axes(
             [left + width_effect + between, pad_bottom / height,
              width_effect * 0.62, bands / height], sharey=axes_effect)
@@ -535,7 +589,6 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
         legend.get_title().set_fontsize(5.8)
 
         out.mkdir(parents=True, exist_ok=True)
-        stem = "fig_simulation_benchmark"
         for extension in ("pdf", "png"):
             figure.savefig(out / f"{stem}.{extension}")
         plt.close(figure)
@@ -545,7 +598,7 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
     table = table.join(power)
     table["worst_depth_effect"] = worst
     table["passes"] = passes.map({True: "yes", False: "no"})
-    table.to_csv(out / "fig_simulation_benchmark_source.csv")
+    table.to_csv(out / f"{stem}_source.csv")
     if not replicates.empty:
         columns = [c for c in ("configuration", "arm", "replicate",
                                "observed_depth_cv", "auc_total_counts",
@@ -553,16 +606,20 @@ def build(benchmark_root: Path, screen_root: Path, out: Path,
                                "perturbed_f1", "perturbed_recall",
                                "perturbed_precision") if c in replicates]
         (replicates[replicates.configuration.isin(present)][columns]
-         .to_csv(out / "fig_simulation_benchmark_replicates.csv", index=False))
+         .to_csv(out / f"{stem}_replicates.csv", index=False))
 
     print(f"wrote {out / (stem + '.pdf')}")
     print(f"wrote {out / (stem + '.png')}")
-    print(f"wrote {out / 'fig_simulation_benchmark_source.csv'}")
+    print(f"wrote {out / (stem + '_source.csv')}")
     print()
     print(table.round(3).to_string())
     if missing:
-        print("\nnot in the screen yet, so absent from (e) and (f): "
+        named = f"variant {variant!r}" if variant else "the default variant"
+        print(f"\nnot in the screen for {named}, so absent from (e) and (f): "
               + ", ".join(missing))
+    if others:
+        print("other variants in this root, each needing its own --variant: "
+              + ", ".join(repr(name) for name in others))
 
 
 def main() -> None:
@@ -575,9 +632,15 @@ def main() -> None:
                         help="depth effect at or below this counts as cleared")
     parser.add_argument("--minimum-f1", type=float, default=0.60,
                         help="positive-control F1 at or above this is intact")
+    parser.add_argument("--variant", default="",
+                        help="which screen variant to plate: empty for the "
+                             "default runs, 'splatter' for the ones built on "
+                             "splatter's counts, 'r10' for a 10-replicate "
+                             "round. One plate shows one variant, so two "
+                             "simulators never share a panel.")
     arguments = parser.parse_args()
     build(arguments.benchmark_root, arguments.screen_root, arguments.out,
-          arguments.tolerance, arguments.minimum_f1)
+          arguments.tolerance, arguments.minimum_f1, arguments.variant)
 
 
 if __name__ == "__main__":
