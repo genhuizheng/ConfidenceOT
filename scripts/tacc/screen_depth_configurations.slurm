@@ -76,6 +76,13 @@ configurations=(
   "scanpy_pearson_ds|--external-representation scanpy_pearson --equalise-depth"
   "sct|--external-representation sctransform"
   "sct_ds|--external-representation sctransform --equalise-depth"
+  # The screen's own result asks for these two. Residual transforms plus
+  # equalisation won specificity (sct_ds 0.045, pearson_ds 0.050) while the
+  # cosine cost won power (F1 0.945 against 0.85-0.88) and owned the high-depth
+  # end (0.019). The flags compose, so the combination is one more run rather
+  # than a new method.
+  "pearson_ds_cos|--representation pearson_residuals --equalise-depth --cost cosine"
+  "sct_ds_cos|--external-representation sctransform --equalise-depth --cost cosine"
 )
 
 task=${SLURM_ARRAY_TASK_ID:-0}

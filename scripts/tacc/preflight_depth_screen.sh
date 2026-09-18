@@ -93,9 +93,10 @@ fi
                              || echo "configurations 9-10 (sctransform): NOT AVAILABLE"
 echo
 if [[ $ours_ok -eq 1 ]]; then
+  # 11 is ours, 12 needs R; 7-10 need scanpy or R as noted above.
   last=6
   [[ $external_scanpy -eq 1 ]] && last=8
-  [[ $external_scanpy -eq 1 && $external_r -eq 1 ]] && last=10
+  [[ $external_scanpy -eq 1 && $external_r -eq 1 ]] && last=12
   echo "submit:  sbatch --array=0-$last scripts/tacc/screen_depth_configurations.slurm"
   if [[ $external_scanpy -eq 1 && $external_r -ne 1 ]]; then
     echo "  (9-10 need R with sctransform; add them with --array=9-10 later)"

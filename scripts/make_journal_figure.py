@@ -90,13 +90,15 @@ HOMOGENEOUS = ["homogeneous_depth_cv0", "homogeneous_depth_cv_low",
                "homogeneous_depth_cv_mid", "homogeneous_depth_cv_high"]
 CONTROL = "perturbed_depth_cv0"
 
-# Submission order, ours then the external packages, which is also how the
-# rows should read: each block goes untreated, equalised, then equalised with
-# the cosine cost.
+# Row order: ours then the external packages, each block reading untreated,
+# equalised, then equalised with the cosine cost. Not the array's submission
+# order -- that has to stay append-only, since the earlier indices have run --
+# so the divider below keeps meaning what it says.
 SCREEN_ORDER = ["logcpm", "logcpm_ds", "logcpm_cos",
                 "rank256", "rank256_ds", "rank256_ds_cos",
-                "pearson_ds",
-                "scanpy_pearson", "scanpy_pearson_ds", "sct", "sct_ds"]
+                "pearson_ds", "pearson_ds_cos",
+                "scanpy_pearson", "scanpy_pearson_ds",
+                "sct", "sct_ds", "sct_ds_cos"]
 SCREEN_LABEL = {
     "logcpm": "log CPM",
     "logcpm_ds": "log CPM + equalise",
@@ -109,6 +111,8 @@ SCREEN_LABEL = {
     "scanpy_pearson_ds": "scanpy Pearson + equalise",
     "sct": "sctransform v2",
     "sct_ds": "sctransform v2 + equalise",
+    "pearson_ds_cos": "Pearson resid. + eq. + cosine",
+    "sct_ds_cos": "sctransform v2 + eq. + cosine",
 }
 # Everything from here down is somebody else's implementation, which is the
 # point of including it: the transform comparison should not rest only on ours.

@@ -43,6 +43,7 @@ configurations=(
   "rank256_ds|--representation rank_value --rank-top-n 256 --equalise-depth"
   "rank256_ds_cos|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine"
   "pearson_ds|--representation pearson_residuals --equalise-depth"
+  "pearson_ds_cos|--representation pearson_residuals --equalise-depth --cost cosine"
 )
 
 mkdir -p "$root"

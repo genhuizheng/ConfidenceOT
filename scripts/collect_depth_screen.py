@@ -28,10 +28,15 @@ HOMOGENEOUS = ("homogeneous_depth_cv0", "homogeneous_depth_cv_low",
 CONTROL = "perturbed_depth_cv0"
 SHORT = {"homogeneous_depth_cv0": "cv0", "homogeneous_depth_cv_low": "low",
          "homogeneous_depth_cv_mid": "mid", "homogeneous_depth_cv_high": "high"}
-# Submission order, so the table reads in the order the array ran.
-ORDER = ["logcpm", "logcpm_ds", "logcpm_cos", "rank256", "rank256_ds",
-         "rank256_ds_cos", "pearson_ds", "scanpy_pearson",
-         "scanpy_pearson_ds", "sct", "sct_ds"]
+# Display order: ours first, then the external packages, each block reading
+# untreated, equalised, equalised with the cosine cost. This is deliberately
+# not the array's submission order, which has to stay append-only because the
+# earlier indices have already run.
+ORDER = ["logcpm", "logcpm_ds", "logcpm_cos",
+         "rank256", "rank256_ds", "rank256_ds_cos",
+         "pearson_ds", "pearson_ds_cos",
+         "scanpy_pearson", "scanpy_pearson_ds",
+         "sct", "sct_ds", "sct_ds_cos"]
 
 
 def main() -> None:

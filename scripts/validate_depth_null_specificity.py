@@ -722,6 +722,23 @@ def main() -> None:
         "cells_per_side": args.n_cells,
         "depth_source": str(args.depth_source) if args.depth_source else None,
         "depth_cap": args.depth_cap,
+        # What was actually compared. Until now the only record of a run's
+        # representation, cost and equalisation was its output directory's
+        # name, so two runs side by side could not be told apart from their own
+        # files -- and the whole point of the screen is that these differ.
+        "representation": (args.external_representation
+                           or args.representation),
+        "representation_is_external": bool(args.external_representation),
+        "rank_top_n": (args.rank_top_n
+                       if args.representation == "rank_value" else None),
+        "equalise_depth": bool(args.equalise_depth),
+        "equalise_quantile": (args.equalise_quantile
+                              if args.equalise_depth else None),
+        "cost": args.cost,
+        "n_genes": args.n_genes,
+        "n_hvg": args.n_hvg,
+        "n_pcs": args.n_pcs,
+        "seed": args.seed,
         "arms": {arm: available[arm] for arm in selected},
         "expected_outcomes": {
             "homogeneous arms": (
