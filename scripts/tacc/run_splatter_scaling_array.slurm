@@ -88,8 +88,17 @@ for ((case_index=worker_id; case_index<20; case_index+=worker_count)); do
             --skip-coupling-stability
     fi
 
-    if (( n_cells > 1000 )); then
-        echo "Partial OT is N/A at N=$n_cells: exact augmented Hungarian comparator is cubic"
+    # Partial OT's cap used to be 1000, on the grounds that the exact
+    # augmented Hungarian comparator is cubic. It is, but cubic is not the same
+    # as unaffordable, and the cap was set when this comparator ran on the
+    # workstation rather than here. Measured on the augmented shape the
+    # benchmark actually solves -- 1.15N square, since the transported mass is
+    # 0.85 -- scipy's Jonker-Volgenant comes out at N^2.9: 0.67 s at N=1000,
+    # 9.6 s at N=2500, so about 70 s at N=5000 and 10 minutes at N=10000, in
+    # roughly 4 GB. Four doses per case, two cases per worker: well inside the
+    # 48 hours this job asks for.
+    if (( n_cells > ${CONFIDENCEOT_PARTIAL_MAX_N:-10000} )); then
+        echo "Partial OT skipped at N=$n_cells: above CONFIDENCEOT_PARTIAL_MAX_N"
     elif [[ -f "$partial_output/manifest.json" ]]; then
         echo "Partial OT already complete: $partial_output"
     elif [[ -e "$partial_output" ]]; then

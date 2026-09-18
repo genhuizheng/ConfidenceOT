@@ -69,8 +69,8 @@ def partial_wasserstein_uniform(
 
     ``transported_mass`` is expressed on the unit-mass scale.  It must select
     an integer number of samples, i.e. ``transported_mass * n`` must be an
-    integer up to ``cardinality_tolerance``.  This holds for the benchmark's
-    N=(100, 500, 1000) and transported mass 0.85.
+    integer up to ``cardinality_tolerance``.  This holds at transported mass
+    0.85 for every benchmark size, N=(100, 500, 1000, 5000, 10000).
     """
     cost = _cost_matrix(cost_matrix)
     n_source, n_target = cost.shape
