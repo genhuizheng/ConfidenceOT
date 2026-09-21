@@ -115,17 +115,39 @@ and reject 21.4–22.3% against a true 20%, where every non-cosine configuration
 reaches 0.845–0.887 and rejects 24.9–27.2%. Two different transforms, one
 effect, so it is not noise.
 
-### The recommendation, and it is the simple one
+### The recommendation
 
-`log CPM + cosine` is the most stable configuration across all three settings —
-worst arm **0.083 / 0.128 / 0.089**, control F1 0.945–0.958 — and it is the
-simplest: no read equalisation, no rank encoding, one change to the cost.
-`rank-value + equalisation + cosine` reaches a lower best case (0.031 on
-splatter at N=1500, the only configuration to clear 0.05 there) but is less
-consistent (0.122 at N=5000).
+Read on the column that does not break when a method succeeds — the
+false-rejection rate of §4b — the three **equalisation + cosine**
+configurations lead, and by a wide margin:
 
-**Nothing clears the prespecified 0.05 on every arm of both simulators.** The
-honest claim is a three- to fivefold reduction, not a solution.
+| | false reject, N=1500 | false reject, N=5000 | readable depth effect | control F1 |
+|---|---:|---:|---:|---:|
+| `rank + eq. + cosine` | 0.021 | **0.001** | 0.026 – 0.062 | 0.945 – 0.967 |
+| `sctransform + eq. + cosine` | 0.021 | **0.000** | 0.036 – 0.112 | 0.940 – 0.947 |
+| `Pearson + eq. + cosine` | 0.020 | **0.001** | 0.051 – 0.063 | 0.924 – 0.954 |
+| `log CPM + cosine` | 0.057 | 0.032 | 0.083 – 0.128 | 0.945 – 0.958 |
+| everything Euclidean | 0.071 – 0.098 | 0.076 – 0.098 | 0.045 – 0.494 | 0.816 – 0.887 |
+
+They reject essentially nothing where nothing should be rejected *and* hold the
+highest control F1 in the table, so this is not a gate that has gone quiet:
+it rejects about 21% where the truth is 20%.
+
+`log CPM + cosine` remains the simplest — no equalisation, no rank encoding,
+one change to the cost — and it is the one whose depth effect stays readable
+everywhere, but it false-rejects two to thirty times more.
+
+**This qualifies §2 rather than reversing it.** Equalisation's apparent benefit
+*to the depth AUC* was an artefact of the hand-built construction. Its
+contribution *to the false-rejection rate*, in combination with cosine, is
+visible on both simulators. But the design cannot attribute it: there is no
+`logcpm_ds_cos` arm, so "equalisation helps the rate" is not separated from
+"the transform helps the rate". One run would settle that, and it should be run
+before the configuration is fixed.
+
+**Nothing clears the prespecified 0.05 on every readable arm of both
+simulators.** The honest claim is a large reduction in false rejection and a
+three- to fivefold reduction in the depth effect, not a solution.
 
 ---
 
@@ -245,12 +267,16 @@ contention, and writes to its own label so it cannot overwrite what it confirms.
 
 ## 6. What would close this out
 
-1. Read the production homogeneous rejection rates, and decide whether §4b
-   joins the pass rule — **before** reading index 13.
+1. ~~Read the production homogeneous rejection rates~~ — done, §4b, and it
+   is the cleanest separation in the screen. The decision it forces, recorded
+   before index 13 was looked at: the false-rejection rate carries the reading,
+   the depth AUC is secondary and is withheld where it is not estimable.
 2. Compute `sd(log depth)` per real dataset and mark which arm is the relevant
    one.
 3. Land index 13 on both constructions and resolve §4a.
 4. Ten-replicate confirmation on `logcpm_cos`, `rank256_ds_cos`, `sct_ds_cos`,
    `pearson_ds` — the four that are actually in contention.
-5. Fix the configuration, write it down, and only then re-run the cancer
+5. Add `logcpm_ds_cos`, the arm that separates "equalisation helps the
+   false-rejection rate" from "the transform does".
+6. Fix the configuration, write it down, and only then re-run the cancer
    analysis.
