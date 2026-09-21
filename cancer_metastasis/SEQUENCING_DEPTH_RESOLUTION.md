@@ -10,6 +10,13 @@ independent simulators. Nothing measured so far removes the effect.** The
 treatment that looked best for a week — read equalisation — turns out to be
 favoured by an artefact of our own simulation.
 
+**And on real data it is not resolved.** The chosen configuration ran on all
+four datasets on 2026-09-21 (§8). A third of ovarian pairs and half of prostate
+pairs still exceed the bound, the pooled statistic the acceptance test first
+named hid that by averaging effects in both directions, and all four datasets
+sit at or above the hardest rung the screen ever measured. No differential
+expression from these runs.
+
 ---
 
 ## 1. The problem, on real data
@@ -271,8 +278,10 @@ contention, and writes to its own label so it cannot overwrite what it confirms.
    is the cleanest separation in the screen. The decision it forces, recorded
    before index 13 was looked at: the false-rejection rate carries the reading,
    the depth AUC is secondary and is withheld where it is not estimable.
-2. Compute `sd(log depth)` per real dataset and mark which arm is the relevant
-   one.
+2. ~~Compute `sd(log depth)` per real dataset and mark which arm is the
+   relevant one~~ — done, §8. All four sit at or above the highest rung, and
+   every one of them spans more than a rung across its own samples, so none is
+   located by a single number.
 3. Land index 13 on both constructions and resolve §4a.
 4. Ten-replicate confirmation on `logcpm_cos`, `rank256_ds_cos`, `sct_ds_cos`,
    `pearson_ds` — the four that are actually in contention.
@@ -398,10 +407,19 @@ nothing.
 
 | statistic | current | acceptance |
 |---|---:|---:|
-| `auc_predownsample_total_counts` | 0.67 (ovarian), 0.79 (colorectal) | ≤ 0.60 |
+| `auc_predownsample_total_counts` | 0.67 (ovarian), 0.79 (colorectal) | \|AUC − 0.5\| ≤ 0.10, **median over pairs** |
 | `spearman_decision_cost_predownsample_total_counts` | −0.33 to −0.59 | \|rho\| ≤ 0.20 |
 | `depth_residual_gate_jaccard` | 0.47–0.60 | ≥ 0.75 |
 | source rejection rate | — | reported, not constrained |
+
+**Two corrections to that first row, both made after it was written and before
+the numbers were read.** It said `auc ≤ 0.60`, which is one-sided: an AUC of
+0.35 clears it while tracking depth exactly as hard in the other direction, so
+the criterion has to be the distance from the null. And it said nothing about
+*which* AUC, which the tooling then took to mean the pooled one — see §8, where
+that choice turned out to hide the answer entirely. It is the median of the
+per-pair deviations on any dataset with at least six pairs, and the pooled
+value only below that, where there is no distribution to form.
 
 0.60 rather than 0.55 because the screen's own best readable depth effect was
 0.026–0.062 on simulated data with a known answer, and no real dataset has yet
@@ -485,3 +503,123 @@ the thing the per-pair view exists to show. A pooled GSE181919 result at 0.55
 means "this dataset, taken together, still tracks depth a little"; it does not
 mean every pair does, and the four per-pair numbers should be printed beside it
 so a reader can see the spread they are not being asked to interpret.
+
+---
+
+## 8. What the run found: the depth confound is not resolved
+
+All four datasets ran to completion on 2026-09-21 under `rank256_ds_cos`: 127
+pairs, every job `COMPLETED 0:0`, the rank cut held on all four (§7), and the
+configuration reached the pipeline by name rather than by three variables.
+
+**The answer is no, and the statistic in §7 as first written would have said
+yes.**
+
+### Read on the per-pair deviations
+
+| | pairs | pooled AUC | median per-pair \|AUC − 0.5\| | pairs over 0.10 | worst pair | retained |
+|---|---:|---:|---:|---:|---:|---:|
+| GSE180661 ovarian | 94 | **0.497** | 0.061 | **34%** | 0.417 | 32% |
+| GSE271675 prostate | 24 | 0.562 | 0.101 | **50%** | 0.429 | 11% |
+| GSE225857 colorectal | 5 | 0.776 | 0.231 | 80% | 0.362 | 71% |
+| GSE181919 head & neck | 4 | 0.536 | 0.031 | 25% | 0.309 | 54% |
+
+Ovarian pools to 0.497 — as clean a null as one could ask for — while its 92
+estimable pairs run from **0.18 to 0.92**. The pooled figure averages a gate
+favouring deep cells in one pair against a gate favouring shallow cells in
+another, and that average is not a measurement of whether the gate tracks
+depth. Prostate is worse: pooled 0.562, but the *mean* of its per-pair AUCs is
+0.437, so the two disagree about the direction.
+
+Colorectal is the one dataset where nothing cancels — its five pairs read 0.52,
+0.63, 0.73, 0.74, 0.86, all on the same side — and it is also the one that fails
+by any reading, with rho(cost, depth) = −0.41 and retained cells 2.2× deeper
+than rejected ones.
+
+Head and neck is reported without a verdict: 810 cells over four pairs, for the
+reason recorded in §7 before the numbers existed.
+
+### Two defects in my own measurement, both found by reading the result
+
+The standard error was `sqrt(1/(12k))` with `k` the rejected count. That
+approximates the exact Mann-Whitney null error only when `k` is the *smaller*
+class, and a gate rejecting 89% of cells makes it the larger one: the reported
+error was 3.0× too small on prostate and 1.8× on ovarian. It is
+`sqrt((n1+n2+1)/(12·n1·n2))` now. No verdict moved, but the estimability check
+depends on it.
+
+And the acceptance criterion was one-sided and silent about which AUC. Both are
+corrected in §7 with the reasoning; the second is what let the pooled statistic
+be used at all.
+
+### The retention rates are implausible
+
+Against the stated expectation that no more than about 15% of primary malignant
+cells carry metastatic potential:
+
+- prostate retains **11%** — on target,
+- ovarian **32%**,
+- head and neck **54%**,
+- colorectal **71%**, and two of its five pairs retain 88% and 71%.
+
+This reverses an earlier reading of mine. I had called prostate's 89% rejection
+rate the "returns almost nothing" pathology of §5.8.4; against a ≤15% prior it
+is the expected magnitude, and the datasets in trouble are the two that retain
+most. Colorectal both retains 71% *and* has the worst depth signal, with its
+retained cells 1.22× deeper in the two pairs measured so far — so a large part
+of what that 71% selects is depth.
+
+The bound is reported and not tested. It is an expectation about the biology,
+not something these data established, and choosing a configuration because it
+reproduces the expected rate would be selecting on the answer, which §5.1 of
+`CURRENT_WORK_SUMMARY_2026-09-13.md` sets as a standard for exactly this
+situation.
+
+### The real data is harder than anything the screen measured
+
+The screen's arms sit at `sd(log depth)` of 0.0, 0.3, 0.6 and 0.9, and every
+conclusion in §3 is stated per rung. Measured on the equalisation step's own
+pre-equalisation depths (§4c, now closed):
+
+| | pooled | per-sample range | nearest rung |
+|---|---:|---|---|
+| GSE180661 | 0.759 | 0.50 – **1.41** | high (0.9) |
+| GSE271675 | 0.916 | 0.60 – **1.30** | high (0.9) |
+| GSE225857 | 0.682 | 0.49 – 0.96 | mid (0.6) |
+| GSE181919 | 0.782 | 0.38 – 1.07 | high (0.9) |
+
+Two things follow. Every dataset sits at or above the screen's **hardest** rung,
+so §3's numbers at "moderate spread" never described this data. And every
+dataset's samples span **more than one rung**, several reaching past 0.9 into a
+regime the screen never tested at all — a pair is two samples seen jointly, so
+those datasets are not located by any single number and the per-sample rows are
+the ones to read.
+
+### What this does and does not change
+
+It does not overturn §3. Cosine still separated from Euclidean on both
+simulators, and nothing here restores a Euclidean configuration. What it
+removes is the inference from "best of the screened configurations" to
+"sufficient on real data": the best screened configuration leaves a third to a
+half of pairs over the bound, in a depth regime harder than the screen ever
+reached.
+
+It also means **no differential expression from these runs**, which §7 already
+required and which now has a measured reason rather than a precautionary one.
+
+### What would move this
+
+1. The dose-response, which the tooling now computes: per-pair depth deviation
+   against that pair's own `sd(log depth)`. A correlation would say the residual
+   effect is a property of how hard the data is, and the ladder predicts it; no
+   correlation would say the cosine cost is not addressing the cause and
+   something else is.
+2. The per-pair UMAPs, for the pairs at the extremes. If a 0.92-AUC pair's
+   retained set is visibly the deep lobe of its own embedding, that is the
+   mechanism; if it is not, the AUC is picking up something the geometry does
+   not show.
+3. A screen arm above 0.9, because three of four datasets sit there and it has
+   never been measured.
+4. The retention rate needs its own treatment, separate from depth. A gate
+   keeping 71% of primary cells is making a different error from one that
+   tracks depth, and no configuration tested so far addresses it.
