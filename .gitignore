@@ -45,7 +45,6 @@ scripts/*
 !scripts/screen_depth_configurations.sh
 !scripts/collect_depth_screen.py
 !scripts/make_journal_figure.py
-!scripts/make_method_figure.py
 !scripts/make_method_schematic.py
 !scripts/tacc/
 scripts/tacc/*
