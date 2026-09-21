@@ -52,6 +52,8 @@ for _variable in ("NUMBA_NUM_THREADS", "OMP_NUM_THREADS",
                   "NUMEXPR_NUM_THREADS"):
     os.environ.setdefault(_variable, UMAP_THREADS)
 
+import concurrent.futures  # noqa: E402
+import multiprocessing  # noqa: E402
 from pathlib import Path  # noqa: E402
 import traceback  # noqa: E402
 import warnings  # noqa: E402
@@ -98,8 +100,10 @@ def embed(coordinates: np.ndarray, seed: int) -> np.ndarray:
     ``n_neighbors`` is capped by the cloud: the default of 15 is larger than
     some pairs here have cells, and UMAP silently reduces it while warning,
     which is a warning nobody reads in a batch of ninety-four.
+
+    Module level and importable, because :func:`embed_isolated` runs it in a
+    spawned child process and a closure cannot be pickled.
     """
-    import joblib
     import umap
 
     n = len(coordinates)
@@ -108,21 +112,35 @@ def embed(coordinates: np.ndarray, seed: int) -> np.ndarray:
         warnings.simplefilter("ignore")
         reducer = umap.UMAP(n_neighbors=neighbours, min_dist=0.3,
                             random_state=seed, n_components=2)
-        # The environment caps numba; this caps the joblib pool pynndescent
-        # opens for its random-projection forest, which is the one that
-        # actually ran out of threads. Both are needed: they are different
-        # pools. `parallel_config` arrived in joblib 1.3 and
-        # `parallel_backend` is what older versions have, so take whichever
-        # exists rather than pinning a version for two lines.
-        limit = (joblib.parallel_config if hasattr(joblib, "parallel_config")
-                 else joblib.parallel_backend)
-        keywords = ({"n_jobs": int(UMAP_THREADS)}
-                    if hasattr(joblib, "parallel_config")
-                    else {"backend": "threading",
-                          "n_jobs": int(UMAP_THREADS)})
-        with limit(**keywords):
-            return reducer.fit_transform(
-                np.asarray(coordinates, dtype=np.float32))
+        return reducer.fit_transform(np.asarray(coordinates,
+                                                dtype=np.float32))
+
+
+def embed_isolated(executor, coordinates: np.ndarray, seed: int) -> np.ndarray:
+    """Run :func:`embed` in a child process that then exits.
+
+    Capping thread counts does not fix this, and an earlier attempt to do so
+    made one path worse. UMAP reaches two different thread pools -- joblib's,
+    opened by pynndescent for its random-projection forest with an explicit
+    ``n_jobs=-1``, and another opened by sklearn's ``pairwise_distances`` for
+    the small clouds that skip nearest-neighbour descent. ``parallel_backend``
+    only supplies a default ``n_jobs``, so it cannot override the explicit -1,
+    while it *does* apply to the sklearn call, which had been asking for no
+    pool at all: setting it turned a pool-free path into a pool.
+
+    The problem was never the width of one pool anyway. It is that none of them
+    are released, so a batch accumulates threads until the process cannot make
+    another one, which is what happened three pairs into a five-pair dataset.
+    A child process per pair bounds the total to one pair's worth however many
+    pairs there are, because the child exits and the operating system takes its
+    threads back.
+
+    ``executor`` is created with ``max_tasks_per_child=1``, which is what makes
+    each submission a fresh process rather than a reused one.
+    """
+    if executor is None:
+        return embed(coordinates, seed)
+    return executor.submit(embed, coordinates, seed).result()
 
 
 def draw(frame: pd.DataFrame, dataset: str, pair_id: str, out: Path,
@@ -274,12 +292,36 @@ def main() -> None:
     parser.add_argument("--pair", action="append", default=[],
                         help="restrict to these pair ids; default is all")
     parser.add_argument("--no-contact-sheet", action="store_true")
+    parser.add_argument(
+        "--in-process", action="store_true",
+        help="Embed in this process instead of a child per pair. Faster "
+             "by a few seconds per pair and liable to run out of threads "
+             "part way through a batch, which is why it is not the "
+             "default.")
     args = parser.parse_args()
     depths_for = args.predownsample_depth or [None] * len(args.dataset)
     if len(depths_for) != len(args.dataset):
         raise SystemExit("--dataset and --predownsample-depth must pair up")
 
     summary, failures = [], []
+    # One executor for the whole run, but max_tasks_per_child=1 means every
+    # submission gets a fresh child that exits afterwards. "spawn" rather than
+    # "fork" so a child does not inherit the parent's thread state, which is
+    # the state being escaped.
+    executor = None
+    if not args.in_process:
+        try:
+            executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=1, max_tasks_per_child=1,
+                mp_context=multiprocessing.get_context("spawn"),
+            )
+        except (TypeError, ValueError) as error:
+            # max_tasks_per_child needs Python 3.11. Without it a pool would
+            # reuse one child and accumulate exactly as before, so fall back
+            # to running in this process and say so rather than pretending to
+            # isolate.
+            print(f"per-pair process isolation unavailable ({error}); running "
+                  f"in this process, so a long batch may exhaust its threads")
     for (label, root), depth_path in zip(args.dataset, depths_for):
         depths = None
         if depth_path is not None:
@@ -327,7 +369,9 @@ def main() -> None:
             # the failure that prompted this -- a thread limit -- is exactly
             # the kind that hits partway through.
             try:
-                points = embed(coordinates[pca_columns].to_numpy(), args.seed)
+                points = embed_isolated(
+                    executor, coordinates[pca_columns].to_numpy(),
+                    args.seed)
                 frame = pd.DataFrame({
                     "x": points[:, 0], "y": points[:, 1],
                     "side": coordinates["side"].astype(str),
@@ -364,6 +408,8 @@ def main() -> None:
             sheet = args.output_dir / f"{label}_contact_sheet.png"
             contact_sheet(panels, label, sheet)
             print(f"{label}: contact sheet -> {sheet}")
+    if executor is not None:
+        executor.shutdown(wait=True)
     if failures:
         print(f"\n{len(failures)} pair(s) failed:")
         for record in failures:
