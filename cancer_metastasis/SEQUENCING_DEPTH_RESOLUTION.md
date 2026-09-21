@@ -101,9 +101,14 @@ Every configuration improves under it on splatter, by large factors:
 | | hand-built | splatter | splatter, N=5000 |
 |---|---:|---:|---:|
 | log CPM + eq. → **+ cosine** | 0.258 → 0.128 | 0.448 → **0.083** | 0.409 → **0.089** |
-| rank + eq. → **+ cosine** | 0.127 → 0.062 | 0.219 → **0.031** | 0.183 → 0.122 |
-| Pearson + eq. → **+ cosine** | 0.050 → 0.063 | 0.428 → **0.051** | 0.403 → 0.300 |
-| sctransform + eq. → **+ cosine** | 0.045 → 0.036 | 0.458 → **0.112** | 0.452 → 0.221 |
+| rank + eq. → **+ cosine** | 0.127 → 0.062 | 0.219 → **0.026** | 0.183 → not measurable |
+| Pearson + eq. → **+ cosine** | 0.050 → 0.063 | 0.428 → **0.051** | 0.403 → not measurable |
+| sctransform + eq. → **+ cosine** | 0.045 → 0.036 | 0.458 → **0.112** | 0.452 → not measurable |
+
+"Not measurable" is the point of §4b, not a gap: at N=5000 those three reject
+one to five cells on arms that should reject none, and an AUC on five cells has
+a standard error of 0.13. The numbers 0.122, 0.300 and 0.221 previously written
+here were noise, and are withdrawn.
 
 It also costs nothing in power. Both cosine arms reach control F1 0.945–0.958
 and reject 21.4–22.3% against a true 20%, where every non-cosine configuration
@@ -152,25 +157,48 @@ Two checks are running or queued:
    constructions, so a real difference between the residuals separates from
    something the HVG selection, the PCA or the calibration does downstream.
 
-### 4b. The pass rule ignores a criterion it lists
+### 4b. Resolved, and it is the cleanest result in the screen
 
 `DEPTH_SCREEN_SETUP.md` §4 lists the rejection *rate* on arms containing
-nothing to reject, and the rule never applies it. Measured locally at reduced
-scale:
+nothing to reject, and the pass rule never applied it. Measured at production
+scale across all 39 configurations, two simulators and two sizes, it separates
+**perfectly**:
 
-| | median homogeneous rejection rate |
-|---|---:|
-| every Euclidean configuration | 0.076 – 0.087 |
-| log CPM + cosine | 0.030 |
-| rank + eq. + cosine | 0.018 |
+| | median false-rejection rate |
+|---|---|
+| all 27 Euclidean configurations | **0.071 – 0.098** |
+| all 12 cosine configurations | **0.000 – 0.057** |
 
-Every Euclidean configuration discards 7–9% of a population with no
-incompatible cell in it, and the cosine cost cuts that three- to fourfold. So a
-configuration can pass both stated columns while throwing away 8% of cells for
-no reason — a second, independent reason the cosine arms look better than their
-depth column alone says. **Unconfirmed at production scale**, and whether it
-joins the pass rule has to be decided before the outstanding configurations are
-read, not after.
+No overlap anywhere. That is a cleaner separation than the depth-effect column
+itself achieves, and it does not depend on which simulator produced the counts.
+Within the cosine arms the three that also equalise reach 0.019–0.021 at
+N=1500 and **0.000–0.001** at N=5000 — one to five cells out of five thousand,
+which is the correct answer.
+
+So every Euclidean configuration discards 7–10% of a population containing
+nothing to discard, and the cosine cost cuts that by four- to a hundredfold.
+
+Two consequences:
+
+1. **The depth AUC breaks exactly when a configuration succeeds.** It is an AUC
+   of depth against the retained/rejected label, so its standard error is about
+   `sqrt(1/(12k))` in `k` rejected cells: 0.17 at one cell, 0.05 at twenty. A
+   method that correctly rejects almost nothing therefore reports a *large*
+   depth effect made entirely of noise. Checked against the data: grouped by
+   how many cells each arm rejected, the observed replicate spread tracks that
+   standard error to within a few thousandths (0.152 observed against 0.167
+   predicted below ten cells; 0.022 against 0.024 above a hundred). The
+   collector now withholds an arm below twenty rejected cells and reports
+   `unread` when no arm clears it.
+2. **The false-rejection rate should carry the decision, not the AUC.** It is
+   directly interpretable, it has no such failure mode, and §4 listed it from
+   the start. That is a change to how the prespecified rule is *read*, not a
+   change to the threshold, and it is being written down before index 13's
+   result is looked at.
+
+One gap this exposes: the design has no `logcpm_ds_cos` arm, so within the
+cosine configurations "equalisation helps the rate" cannot be separated from
+"the transform helps the rate". One more run would settle it.
 
 ### 4c. Nobody has located the real data on the ladder
 

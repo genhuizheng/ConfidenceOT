@@ -72,6 +72,15 @@ def main() -> None:
                         help="depth effect below this counts as cleared")
     parser.add_argument("--minimum-f1", type=float, default=0.60,
                         help="positive-control F1 above this counts as intact")
+    parser.add_argument(
+        "--minimum-rejected", type=int, default=20,
+        help="Fewest rejected cells for the depth AUC to be readable. It is "
+             "an AUC of depth against the retained/rejected label, so its "
+             "standard error runs about sqrt(1/(12k)) in k rejected cells: "
+             "0.17 at k=1, 0.05 at k=20. A configuration that correctly "
+             "rejects almost nothing therefore reports a large depth effect "
+             "made entirely of noise, and the better its specificity the "
+             "worse that gets. Below this the arm is withheld.")
     parser.add_argument("--out", type=Path, default=None,
                         help="where to write the two CSVs; defaults to the "
                              "root, but point it elsewhere when reading a "
@@ -118,10 +127,28 @@ def main() -> None:
         effect[column] = control[column].reindex(effect.index) \
             if column in control else pd.NA
 
-    worst_columns = [c for c in ("cv0", "low", "mid", "high")
-                     if c in effect.columns]
-    worst = effect[worst_columns].max(axis=1)
+    # How many cells each arm's depth AUC was actually estimated from, and the
+    # rejection rate on arms whose correct answer is to reject nothing. The
+    # cv0 arm leaves the worst-arm search: it has no depth spread to detect, so
+    # its effect is 0 by construction and says nothing about a method.
+    homogeneous = arms[arms.arm.isin(HOMOGENEOUS)].copy()
+    homogeneous["rejected_cells"] = (homogeneous.source_rejection_rate
+                                     * homogeneous.source_n)
+    rejected = (homogeneous.pivot_table(index="configuration", columns="arm",
+                                        values="rejected_cells",
+                                        aggfunc="median")
+                .reindex(index=present, columns=HOMOGENEOUS)
+                .rename(columns=SHORT))
+    effect["false_reject"] = (
+        homogeneous.groupby("configuration").source_rejection_rate.median()
+        .reindex(present))
+
+    worst_columns = [c for c in ("low", "mid", "high") if c in effect.columns]
+    readable = effect[worst_columns].where(
+        rejected[worst_columns] >= args.minimum_rejected)
+    worst = readable.max(axis=1)
     effect["worst_depth_effect"] = worst
+    effect["readable_arms"] = readable.notna().sum(axis=1).astype(int)
 
     # The range over replicates on that same worst arm. Without it the pass
     # column reads as a property of the method, when at three replicates the
@@ -149,18 +176,31 @@ def main() -> None:
     variants = [split_variant(name)[1] for name in effect.index]
     if any(variants):
         effect.insert(0, "variant", [v or "default" for v in variants])
+    # The prespecified rule, unchanged, applied only where the statistic is
+    # readable. A configuration with no readable arm is marked as such rather
+    # than passed or failed: it rejected too little to measure a depth effect,
+    # which is an answer about the rate and not about the effect.
     effect["passes"] = [
+        "unread" if r == 0 else
         "yes" if (w == w and w <= args.tolerance
                   and f == f and f >= args.minimum_f1) else "no"
-        for w, f in zip(worst, effect.get("perturbed_f1", worst * float("nan")))
+        for w, f, r in zip(worst,
+                           effect.get("perturbed_f1", worst * float("nan")),
+                           effect["readable_arms"])
     ]
 
     pd.set_option("display.width", 220)
     print("depth effect |AUC - 0.5| by depth spread, lower is better; "
           "then the positive control\n")
     print(effect.round(3).to_string())
-    print(f"\npasses = depth effect <= {args.tolerance} on every homogeneous "
-          f"arm AND control F1 >= {args.minimum_f1}")
+    print(f"\npasses = depth effect <= {args.tolerance} on every readable "
+          f"arm AND control F1 >= {args.minimum_f1}. An arm is readable when "
+          f"it rejected at least {args.minimum_rejected} cells, giving the "
+          f"AUC a standard error near "
+          f"{(1.0 / (12.0 * args.minimum_rejected)) ** 0.5:.3f}; 'unread' "
+          f"means no arm cleared that, which is itself a good sign.")
+    print("false_reject = median rejection rate on arms containing nothing "
+          "to reject, where the correct answer is 0.")
     if missing:
         print("\nnot present yet: " + ", ".join(missing))
     effect.to_csv(out / "screen_depth_effect.csv")
