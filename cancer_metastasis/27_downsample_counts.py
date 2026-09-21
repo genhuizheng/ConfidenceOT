@@ -51,6 +51,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from confidenceot import equalise_depth
 from cancer_metastasis.common import cell_qc_table, expression_matrix, load_exact_side
 from cancer_metastasis.gse180661.primary_pseudobulk import (
     malignant_annotation_mask,
@@ -135,30 +136,18 @@ def downsample_matrix(
 
     Returns the new matrix, each row's original depth, and a mask of the rows
     that were already at or below the target and so were left untouched.
+
+    The implementation is ``confidenceot.equalise_depth``: the simulation that
+    chose this configuration and the stage that applies it to real counts have
+    to be the same operation, or the screen's conclusion is about a pipeline
+    nobody runs. It is verified bit-identical to the version that produced the
+    equalised objects already on disk, so those stay valid and are reused
+    rather than regenerated.
     """
-    matrix = sparse.csr_matrix(matrix, dtype=np.int64)
-    original = np.asarray(matrix.sum(axis=1), dtype=np.int64).ravel()
-    untouched = original <= target
-    rows = []
-    for index in range(matrix.shape[0]):
-        start, end = matrix.indptr[index], matrix.indptr[index + 1]
-        counts = matrix.data[start:end]
-        if untouched[index] or counts.size == 0:
-            rows.append(counts)
-            continue
-        # Exact hypergeometric read subsampling, as in
-        # scanpy.pp.downsample_counts.
-        rows.append(rng.multivariate_hypergeometric(counts, int(target)))
-    reduced = sparse.csr_matrix(
-        (np.concatenate(rows) if rows else np.zeros(0, dtype=np.int64),
-         matrix.indices.copy(), matrix.indptr.copy()),
-        shape=matrix.shape,
-        dtype=np.int64,
+    return equalise_depth(
+        sparse.csr_matrix(matrix, dtype=np.int64), rng=rng, target=int(target),
+        return_untouched=True,
     )
-    # Genes that lost all their reads become explicit zeros; drop them so the
-    # matrix stays a faithful sparse representation.
-    reduced.eliminate_zeros()
-    return reduced, original, untouched
 
 
 def main() -> None:

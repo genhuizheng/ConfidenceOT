@@ -79,7 +79,15 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("manifest_csv", type=Path)
-    parser.add_argument("--rank-top-n", type=int, default=256)
+    parser.add_argument("--rank-top-n", type=int, default=None)
+    parser.add_argument(
+        "--preprocessing", default=None, metavar="LABEL",
+        help="Take the cut from a configuration label instead, as the run "
+             "itself does: 'rank256_ds_cos' audits a cut of 256. The label is "
+             "parsed by confidenceot.Preprocessing, the same parser the pair "
+             "runner uses, so the audited cut and the applied cut cannot "
+             "disagree -- which is the whole point of auditing it.",
+    )
     parser.add_argument("--analysis-scope", choices=("all", "malignant"),
                         default="all")
     parser.add_argument("--include-annotation", action="append", default=[])
@@ -103,6 +111,21 @@ def main() -> None:
     if args.analysis_scope == "malignant" and not args.include_annotation:
         raise SystemExit("malignant scope requires at least one "
                          "--include-annotation")
+    if args.preprocessing is not None:
+        if args.rank_top_n is not None:
+            raise SystemExit("--preprocessing carries the cut; drop "
+                             "--rank-top-n")
+        from confidenceot import Preprocessing
+
+        configuration = Preprocessing.from_label(args.preprocessing)
+        if not configuration.normalisation.startswith("rank"):
+            print(f"{args.preprocessing} is not a rank encoding, so there is "
+                  f"no cut to audit. Nothing to check.")
+            return
+        args.rank_top_n = configuration.rank_top_n
+        print(f"auditing {args.preprocessing}: cut {args.rank_top_n}")
+    if args.rank_top_n is None:
+        args.rank_top_n = 256
 
     manifest = pd.read_csv(args.manifest_csv)
     indices = args.index or list(range(len(manifest)))

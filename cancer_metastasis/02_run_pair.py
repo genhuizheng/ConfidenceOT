@@ -13,6 +13,7 @@ import pandas as pd
 
 from confidenceot import (
     ConfidenceOT,
+    Preprocessing,
     calibrate_confidence_cost,
     median_pair_scale,
     rotation_null_costs,
@@ -180,9 +181,22 @@ def main() -> None:
     parser.add_argument("--minimum-detected-genes", type=int, default=500)
     parser.add_argument("--maximum-mitochondrial-percent", type=float, default=20.0)
     parser.add_argument(
+        "--preprocessing", default=None, metavar="LABEL",
+        help="Name the whole configuration at once, as the depth screen names "
+             "it: 'rank256_ds_cos' is rank encoding at 256, read equalisation "
+             "and the cosine cost. Mutually exclusive with --representation, "
+             "--rank-top-n and --cost, so that a job script sets one string "
+             "rather than three variables that can disagree -- a rank cut set "
+             "while the transform was left at its default produces a run with "
+             "an ignored cut and no name. The '_ds' part is recorded, not "
+             "applied: equalisation happens upstream in "
+             "27_downsample_counts.py, at the file level, so that every later "
+             "stage sees the same matrix.",
+    )
+    parser.add_argument(
         "--representation",
         choices=("log_cpm", "rank_value", "rank_no_median", "pearson_residuals"),
-        default="log_cpm",
+        default=None,
         help="Cell representation the transport cost is computed in. "
              "'rank_value' is the Geneformer formulation and removes most of "
              "the depth dependence: on simulated homogeneous data it takes "
@@ -191,7 +205,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--cost", choices=("squared_euclidean", "cosine"),
-        default="squared_euclidean",
+        default=None,
         help="Cost geometry. 'cosine' L2-normalises each cell's PCA "
              "coordinates before the scale estimate, which discards "
              "magnitude and nothing else: for unit vectors "
@@ -203,7 +217,7 @@ def main() -> None:
              "-- at no cost in power. See SEQUENCING_DEPTH_RESOLUTION.md.",
     )
     parser.add_argument(
-        "--rank-top-n", type=int, default=512,
+        "--rank-top-n", type=int, default=None,
         help="Genes kept per cell under a rank representation. Cells with "
              "fewer detected genes get a shorter vector and sit nearer the "
              "origin, which is how the encoding can create its own low-content "
@@ -274,6 +288,43 @@ def main() -> None:
     parser.add_argument("--skip-completed", action="store_true",
                         help="Return immediately when the pair output already contains SUCCESS")
     args = parser.parse_args()
+    args.equalise_depth_upstream = False
+    if args.preprocessing is not None:
+        named = [name for name, value in (("--representation", args.representation),
+                                          ("--rank-top-n", args.rank_top_n),
+                                          ("--cost", args.cost))
+                 if value is not None]
+        if named:
+            parser.error(
+                f"--preprocessing names the whole configuration, so "
+                f"{', '.join(named)} cannot also be given. Drop them, or drop "
+                f"--preprocessing."
+            )
+        try:
+            configuration = Preprocessing.from_label(args.preprocessing)
+        except ValueError as error:
+            parser.error(f"--preprocessing {args.preprocessing!r}: {error}")
+        if configuration.normalisation == "precomputed":
+            # An unrecognised stem becomes 'precomputed', which on raw counts
+            # means "use them as the representation" -- a silently wrong answer
+            # rather than an error. A typo must not reach that.
+            parser.error(
+                f"--preprocessing {args.preprocessing!r} names a transform "
+                f"this script cannot compute. It builds the representation "
+                f"from counts, so the label's transform has to be one of "
+                f"log_cpm (logcpm), rank_value (rank<N>), rank_no_median "
+                f"(ranknm<N>) or pearson_residuals (pearson)."
+            )
+        args.representation = configuration.normalisation
+        args.rank_top_n = configuration.rank_top_n
+        args.cost = configuration.cost
+        args.equalise_depth_upstream = configuration.equalise_depth
+    if args.representation is None:
+        args.representation = "log_cpm"
+    if args.rank_top_n is None:
+        args.rank_top_n = 512
+    if args.cost is None:
+        args.cost = "squared_euclidean"
     shared_budget = 0.95 if args.rejection_budget is None else args.rejection_budget
     source_budget = (
         shared_budget if args.source_rejection_budget is None
@@ -389,6 +440,7 @@ def main() -> None:
         source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=args.seed + args.index,
         representation=args.representation, rank_top_n=args.rank_top_n,
         minimum_detection_rate=args.minimum_detection_rate, cost=args.cost,
+        equalise_depth=args.equalise_depth_upstream,
     )
     rng = np.random.default_rng(args.seed + args.index * 104729)
     scale = median_pair_scale(source_pca, target_pca, rng=rng)
@@ -617,6 +669,7 @@ def main() -> None:
         "rejection_cost_mode": rejection_cost_mode,
         "calibration_null": calibration_null,
         "cost": args.cost,
+        "preprocessing_label": preprocessing.get("label"),
         "calibration_valid_for_m4r": calibration_valid,
         "calibration_m4e_inference_valid": m4e_inference_valid,
         "calibration_feasible_cost_found": feasible_cost_found,

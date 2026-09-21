@@ -1,12 +1,21 @@
 #!/bin/bash
 # Run one dataset under the configuration the depth screen selected:
-# rank encoding + read equalisation + cosine cost.
 #
-#   representation  rank_value, top 256 genes per cell
-#   equalisation    every cell subsampled to one shared depth, outside the
-#                   algorithm, by 27_downsample_counts.py
-#   cost            cosine, i.e. the joint PCA representation L2-normalised
-#                   before the cost and before the median scale
+#   rank256_ds_cos
+#
+# That string is the configuration, not a description of one. It is the name
+# confidenceot.Preprocessing prints for rank encoding at 256 genes per cell,
+# read equalisation, and the cosine cost -- the joint PCA representation
+# L2-normalised before the cost and before the median scale -- and the same
+# string is parsed back by the pair runner and by the rank-cut audit. One name
+# in one place, instead of three variables that can disagree: a rank cut set
+# while the transform was left at its default produces a run with an ignored
+# cut and no name.
+#
+# The equalisation itself happens in 27_downsample_counts.py, at the file
+# level, so that the OT, the pseudobulk, the DEG and the scoring all see one
+# matrix. The `_ds` in the label is therefore recorded by the run rather than
+# applied by it, which is what lets the run carry its real name.
 #
 # Why this configuration. Across two simulators and two sizes the rate of
 # rejection on populations containing nothing to reject separated perfectly by
@@ -29,7 +38,7 @@
 #                 when more than 1% of any pair's cells fall below the cut,
 #                 which leaves the OT unsubmitted instead of producing a run
 #                 that silently differs from the screened configuration.
-#   J3 ot         tacc_full_array.slurm with the three settings above
+#   J3 ot         tacc_full_array.slurm, given the configuration by name
 #   J4 diagnose   25_diagnose_gate_covariates.py against each cell's *original*
 #                 depth, plus 26_diagnose_pairing_quality.py. This is the
 #                 acceptance test: auc_predownsample_total_counts near 0.5 and
@@ -47,7 +56,7 @@
 # Usage:
 #   bash cancer_metastasis/submit_rank_cosine_chain.sh ovarian
 #   bash cancer_metastasis/submit_rank_cosine_chain.sh colorectal
-#   RANK_TOP_N=128 bash cancer_metastasis/submit_rank_cosine_chain.sh headneck
+#   PREPROCESSING=rank128_ds_cos bash cancer_metastasis/submit_rank_cosine_chain.sh headneck
 #   DRY_RUN=1 bash cancer_metastasis/submit_rank_cosine_chain.sh prostate
 set -eo pipefail
 
@@ -67,7 +76,7 @@ repo=$CONFIDENCEOT_REPO
 result=$CANCER_COT_ROOT
 replication_root=${CONFIDENCEOT_REPLICATION_ROOT:-$result/author_labeled_replication_GSE181919_GSE225857_20260912}
 stamp=${RANK_COSINE_STAMP:-20260921}
-rank_top_n=${RANK_TOP_N:-256}
+preprocessing=${PREPROCESSING:-rank256_ds_cos}
 target_quantile=${TARGET_QUANTILE:-0.10}
 max_fraction_short=${MAX_FRACTION_SHORT:-0.01}
 
@@ -109,8 +118,8 @@ case "$dataset" in
     ;;
 esac
 
-ot=$result/ot_${accession}_rank${rank_top_n}_ds_cos_$stamp
-diagnostics=$result/gate_diagnostic_${accession}_rank${rank_top_n}_ds_cos_$stamp
+ot=$result/ot_${accession}_${preprocessing}_$stamp
+diagnostics=$result/gate_diagnostic_${accession}_${preprocessing}_$stamp
 manifest=$equalised/pair_manifest_downsampled.csv
 
 for name in repo result env_path equalised ot; do
@@ -173,8 +182,8 @@ audit_job=$(submit "${audit_dependency[@]}" \
   -p gg -N 1 -n 1 -t 02:00:00 -A MCB26031 -J "cot_rankaudit_$dataset" \
   -o "$result/logs/rankaudit_${dataset}_%j.out" \
   -e "$result/logs/rankaudit_${dataset}_%j.err" \
-  --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/tools/audit_rank_top_n.py $manifest --rank-top-n $rank_top_n --analysis-scope malignant $(printf '%q ' "${scope_args[@]}")--cell-qc --minimum-total-counts 0 --minimum-detected-genes 0 --maximum-mitochondrial-percent 100 --max-fraction-short $max_fraction_short --out $ot/rank_top_n_audit.csv")
-echo "J2 rank audit  $audit_job  (cut $rank_top_n, tolerance $max_fraction_short)"
+  --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/tools/audit_rank_top_n.py $manifest --preprocessing $preprocessing --analysis-scope malignant $(printf '%q ' "${scope_args[@]}")--cell-qc --minimum-total-counts 0 --minimum-detected-genes 0 --maximum-mitochondrial-percent 100 --max-fraction-short $max_fraction_short --out $ot/rank_top_n_audit.csv")
+echo "J2 rank audit  $audit_job  ($preprocessing, tolerance $max_fraction_short)"
 
 # J3. The OT array, under the screened configuration.
 export CONFIDENCEOT_MANIFEST="$manifest"
@@ -182,9 +191,10 @@ export CONFIDENCEOT_OUTPUT_ROOT="$ot"
 export CONFIDENCEOT_ANALYSIS_SCOPE=malignant
 printf -v joined '%s|' "${annotations[@]}"
 export CONFIDENCEOT_INCLUDE_ANNOTATIONS="${joined%|}"
-export CONFIDENCEOT_REPRESENTATION=rank_value
-export CONFIDENCEOT_RANK_TOP_N="$rank_top_n"
-export CONFIDENCEOT_COST=cosine
+export CONFIDENCEOT_PREPROCESSING="$preprocessing"
+# The array job refuses these alongside a named configuration, so anything left
+# in the submitting shell would stop the job rather than silently override it.
+unset CONFIDENCEOT_REPRESENTATION CONFIDENCEOT_RANK_TOP_N CONFIDENCEOT_COST
 export CONFIDENCEOT_DEVICE=cpu
 export CONFIDENCEOT_THREADS=144
 export CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE=10000
@@ -218,8 +228,7 @@ echo "J4 diagnose    $diagnose_job -> $diagnostics"
 
 echo
 printf 'dataset        %s (%s)\n' "$dataset" "$accession"
-printf 'representation rank_value, top %s\n' "$rank_top_n"
-printf 'cost           cosine\n'
+printf 'preprocessing  %s\n' "$preprocessing"
 printf 'equalised      %s\n' "$equalised"
 printf 'manifest       %s\n' "$manifest"
 printf 'ot             %s\n' "$ot"

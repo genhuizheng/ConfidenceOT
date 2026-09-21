@@ -21,6 +21,7 @@ import hashlib
 import unittest
 
 import numpy as np
+from scipy import sparse
 
 from confidenceot import Preprocessing
 from confidenceot.preprocessing import (
@@ -145,6 +146,40 @@ class PreprocessingContractTest(unittest.TestCase):
             "sct_ds_cos",
         )
 
+    def test_every_label_rebuilds_the_configuration_that_printed_it(self):
+        for label in ("cpm", "logcpm", "log1p", "pearson", "rank256",
+                      "ranknm256", "logcpm_cos", "pearson_ds_cos",
+                      "rank256_ds_cos", "rank512", "sct_ds_cos",
+                      "scanpy_pearson_ds"):
+            with self.subTest(label=label):
+                self.assertEqual(Preprocessing.from_label(label).label(), label)
+
+    def test_from_label_recovers_the_three_screened_axes(self):
+        configuration = Preprocessing.from_label("rank256_ds_cos")
+        self.assertEqual(configuration.normalisation, "rank_value")
+        self.assertEqual(configuration.rank_top_n, 256)
+        self.assertTrue(configuration.equalise_depth)
+        self.assertEqual(configuration.cost, "cosine")
+        # An unknown stem is an external transform, named by the caller.
+        external = Preprocessing.from_label("sct_ds_cos")
+        self.assertEqual(external.normalisation, "precomputed")
+        self.assertEqual(external.label_stem, "sct")
+
+    def test_from_label_takes_the_axes_it_does_not_carry_as_overrides(self):
+        configuration = Preprocessing.from_label("rank256_ds_cos", n_pcs=50,
+                                                 equalise_target=3119)
+        self.assertEqual(configuration.n_pcs, 50)
+        self.assertEqual(configuration.equalise_target, 3119)
+        self.assertEqual(configuration.label(), "rank256_ds_cos")
+
+    def test_a_label_that_would_not_round_trip_is_refused(self):
+        # 'rank_ds' omits the cut, so it would rebuild as 'rank256_ds' and a
+        # job script would record a configuration it did not ask for.
+        for label in ("", "   ", "_ds_cos", "cos", "rank_ds"):
+            with self.subTest(label=label):
+                with self.assertRaises(ValueError):
+                    Preprocessing.from_label(label)
+
     def test_precomputed_without_a_name_is_refused(self):
         with self.assertRaises(ValueError):
             Preprocessing(normalisation="precomputed")
@@ -198,6 +233,80 @@ class PrimitiveTest(unittest.TestCase):
         np.testing.assert_array_equal(equalised.sum(axis=1), [6, 2, 6])
         # Reads are moved, never invented.
         self.assertTrue(np.all(equalised <= counts))
+
+    def test_equalise_depth_matches_the_production_stage_bit_for_bit(self):
+        """The equalised objects already on disk were produced by this.
+
+        ``cancer_metastasis/27_downsample_counts.py`` wrote the depth-equalised
+        h5ads that the ovarian and prostate re-runs reuse rather than
+        regenerate. Its ``downsample_matrix`` now delegates here, so this is
+        the check that delegating did not silently invalidate those files.
+        """
+        def reference(matrix, target, rng):
+            # downsample_matrix as it stood before it delegated.
+            matrix = sparse.csr_matrix(matrix, dtype=np.int64)
+            original = np.asarray(matrix.sum(axis=1), dtype=np.int64).ravel()
+            untouched = original <= target
+            rows = []
+            for index in range(matrix.shape[0]):
+                start, end = matrix.indptr[index], matrix.indptr[index + 1]
+                counts = matrix.data[start:end]
+                if untouched[index] or counts.size == 0:
+                    rows.append(counts)
+                    continue
+                rows.append(rng.multivariate_hypergeometric(counts,
+                                                            int(target)))
+            reduced = sparse.csr_matrix(
+                (np.concatenate(rows) if rows
+                 else np.zeros(0, dtype=np.int64),
+                 matrix.indices.copy(), matrix.indptr.copy()),
+                shape=matrix.shape, dtype=np.int64)
+            reduced.eliminate_zeros()
+            return reduced, original, untouched
+
+        rng = np.random.default_rng(11)
+        counts = (rng.poisson(0.4, size=(50, 120))
+                  * rng.integers(1, 40, size=(50, 1)))
+        want, want_original, want_untouched = reference(
+            counts, 80, np.random.default_rng(5))
+        got, got_original, got_untouched = equalise_depth(
+            sparse.csr_matrix(counts), rng=np.random.default_rng(5),
+            target=80, return_untouched=True,
+        )
+        self.assertEqual((want != got).nnz, 0)
+        np.testing.assert_array_equal(want_original, got_original)
+        np.testing.assert_array_equal(want_untouched, got_untouched)
+
+    def test_dense_and_sparse_input_equalise_identically(self):
+        """Otherwise the simulation and the production stage are two operations.
+
+        The draw is over each cell's nonzero genes. Drawing over the full gene
+        vector instead is the same distribution -- a colour with zero balls
+        contributes nothing -- but consumes the generator differently, so a
+        dense path that did that would give the simulation different counts
+        from the ones the real pipeline produces, and the screen's conclusion
+        would not transfer.
+        """
+        rng = np.random.default_rng(21)
+        counts = (rng.poisson(0.3, size=(30, 80))
+                  * rng.integers(1, 30, size=(30, 1)))
+        dense = equalise_depth(counts, rng=np.random.default_rng(7), target=50)
+        from_sparse = equalise_depth(sparse.csr_matrix(counts),
+                                     rng=np.random.default_rng(7), target=50)
+        self.assertFalse(sparse.issparse(dense))
+        self.assertTrue(sparse.issparse(from_sparse))
+        np.testing.assert_array_equal(dense,
+                                      np.asarray(from_sparse.todense()))
+
+    def test_equalise_depth_leaves_no_explicit_zeros(self):
+        # A gene that lost all its reads must not stay a stored zero: the rank
+        # cut is audited against detected-gene counts, which read the stored
+        # pattern.
+        rng = np.random.default_rng(31)
+        counts = rng.poisson(1.0, size=(20, 40)) * 20
+        reduced = equalise_depth(sparse.csr_matrix(counts),
+                                 rng=np.random.default_rng(2), target=30)
+        self.assertEqual(reduced.nnz, int((reduced.toarray() != 0).sum()))
 
     def test_equalise_depth_refuses_a_target_of_zero(self):
         with self.assertRaises(ValueError):

@@ -111,6 +111,7 @@ failures=0
 echo "Worker $task_id/$task_count processing $pair_count manifest rows"
 echo "Rejection caps: source=$source_budget target=$target_budget"
 echo "Maximum observed cells per side: $maximum_observed_cells"
+echo "Preprocessing: ${preprocessing:-${CONFIDENCEOT_REPRESENTATION:-log_cpm} / ${CONFIDENCEOT_COST:-squared_euclidean}}"
 scope_args=(--analysis-scope "$analysis_scope")
 pairing_args=()
 qc_args=()
@@ -132,25 +133,45 @@ fi
 if [[ -n "$target_bounds" ]]; then
   qc_args+=(--target-rejection-bounds $target_bounds)
 fi
-# Representation the transport cost is computed in. rank_value is the
-# Geneformer formulation: it removed most of the depth dependence in
-# simulation, taking auc_total_counts from 0.945 to 0.475 at moderate depth
-# spread for 0.008 of perturbed F1. rank_top_n has to stay below the
-# shallowest cell's detected-gene count or the encoding manufactures its own
-# low-content artefact.
-if [[ -n "${CONFIDENCEOT_REPRESENTATION:-}" ]]; then
-  qc_args+=(--representation "$CONFIDENCEOT_REPRESENTATION")
-fi
-if [[ -n "${CONFIDENCEOT_RANK_TOP_N:-}" ]]; then
-  qc_args+=(--rank-top-n "$CONFIDENCEOT_RANK_TOP_N")
-fi
-# Cost geometry. `cosine` L2-normalises the joint representation before the
-# cost and the median scale, which discards each cell's magnitude and nothing
-# else. In the depth screen this is the one change that separated the rate of
-# rejection on populations containing nothing to reject, on both simulators and
-# at both sizes, with no loss of power. See SEQUENCING_DEPTH_RESOLUTION.md.
-if [[ -n "${CONFIDENCEOT_COST:-}" ]]; then
-  qc_args+=(--cost "$CONFIDENCEOT_COST")
+# The preprocessing configuration. Either name it whole with
+# CONFIDENCEOT_PREPROCESSING -- 'rank256_ds_cos' is rank encoding at 256, read
+# equalisation and the cosine cost, which is the name the depth screen reports
+# that configuration under -- or set the three axes separately. Not both: three
+# variables that can disagree is how a rank cut gets set while the transform
+# stays at its default, producing a run with an ignored cut and no name.
+#
+# The axes, for the record. rank_value is the Geneformer formulation, and
+# rank_top_n has to stay below the shallowest cell's detected-gene count or the
+# encoding manufactures its own low-content artefact. `cosine` L2-normalises
+# the joint representation before the cost and the median scale, discarding
+# each cell's magnitude and nothing else; in the screen that is the one change
+# that separated the rate of rejection on populations containing nothing to
+# reject, on both simulators and at both sizes, with no loss of power. See
+# SEQUENCING_DEPTH_RESOLUTION.md.
+preprocessing=${CONFIDENCEOT_PREPROCESSING:-}
+if [[ -n "$preprocessing" ]]; then
+  conflicting=()
+  for name in CONFIDENCEOT_REPRESENTATION CONFIDENCEOT_RANK_TOP_N CONFIDENCEOT_COST; do
+    if [[ -n "${!name:-}" ]]; then
+      conflicting+=("$name")
+    fi
+  done
+  if (( ${#conflicting[@]} > 0 )); then
+    echo "CONFIDENCEOT_PREPROCESSING=$preprocessing names the whole" >&2
+    echo "configuration, so these cannot also be set: ${conflicting[*]}" >&2
+    exit 2
+  fi
+  qc_args+=(--preprocessing "$preprocessing")
+else
+  if [[ -n "${CONFIDENCEOT_REPRESENTATION:-}" ]]; then
+    qc_args+=(--representation "$CONFIDENCEOT_REPRESENTATION")
+  fi
+  if [[ -n "${CONFIDENCEOT_RANK_TOP_N:-}" ]]; then
+    qc_args+=(--rank-top-n "$CONFIDENCEOT_RANK_TOP_N")
+  fi
+  if [[ -n "${CONFIDENCEOT_COST:-}" ]]; then
+    qc_args+=(--cost "$CONFIDENCEOT_COST")
+  fi
 fi
 if [[ -n "${CONFIDENCEOT_MINIMUM_DETECTION_RATE:-}" ]]; then
   qc_args+=(--minimum-detection-rate "$CONFIDENCEOT_MINIMUM_DETECTION_RATE")

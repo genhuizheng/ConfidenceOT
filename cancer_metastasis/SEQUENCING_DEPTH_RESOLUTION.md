@@ -293,11 +293,22 @@ decision and not an oversight; what it rests on and what it does not is below.
 
 ### The configuration
 
-```
---representation rank_value --rank-top-n 256    # rank
-27_downsample_counts.py --target-quantile 0.10  # equalisation
---cost cosine                                   # cosine
-```
+    rank256_ds_cos
+
+That string *is* the configuration. `confidenceot.Preprocessing` prints it for
+rank encoding at 256 genes per cell, read equalisation, and the cosine cost, and
+parses it back — so the same name reaches the pair runner (`--preprocessing`),
+the rank-cut audit, the output directory and the run record. Setting the three
+axes separately is still possible and is no longer how the chain does it: three
+variables that can disagree is how a rank cut gets set while the transform stays
+at its default, producing a run with an ignored cut and no name.
+
+The equalisation happens at the file level, in
+`27_downsample_counts.py --target-quantile 0.10`, so that the OT, the
+pseudobulk, the differential expression and the scoring all read one matrix. The
+`_ds` in the label is therefore *recorded* by the run, not applied by it; without
+that, a depth-equalised cosine rank run would record itself as `rank256_cos` and
+be indistinguishable from one on untouched counts.
 
 Submitted by `cancer_metastasis/submit_rank_cosine_chain.sh`, one dataset per
 invocation, into `ot_<accession>_rank256_ds_cos_<stamp>`. Every existing output
@@ -334,6 +345,30 @@ anything.
   configuration is unchanged.
 - **§4a is unresolved.** The two external residual methods swap places between
   the simulators. Neither is in this configuration, so it does not bear on it.
+
+### One more thing changed, and it changed a number
+
+The screen's read equalisation drew over each cell's full gene vector; the
+production stage draws over its nonzero genes. The two are the same distribution
+— a colour with zero balls contributes nothing — but they consume the random
+generator differently, so they were not the same operation, and the screen's
+conclusion only transfers if they are. They are now both the production form,
+which is also the only one possible on a real matrix: densifying 150,000 cells
+by 30,000 genes to subsample them is not an option.
+
+That moves the simulated arms where equalisation does something. The arms where
+it does not — `perturbed_depth_cv0`, at zero depth spread — are unchanged, which
+is the consistency check. The equalised objects already on disk are unaffected:
+the production draw is bit-identical to the one that wrote them, pinned by
+`tests/test_preprocessing.py`.
+
+Past screen runs were already unreproducible for a separate reason: the per-arm
+seed was `abs(hash(arm)) % 10_000`, and Python randomises string hashing per
+process, so no two invocations ever ran the same configuration. It is a stable
+digest now. The table above survives that — it is an average over replicates and
+arms, and the cosine/Euclidean separation has no overlap to flip — but the
+individual numbers in it cannot be re-derived exactly, which is the same
+limitation §4d already states.
 
 ### The new risk, which is specific to real data
 

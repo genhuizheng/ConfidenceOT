@@ -96,42 +96,66 @@ def equalise_depth(
     rng: np.random.Generator,
     target: int | None = None,
     quantile: float = 0.10,
-) -> NDArray[np.int64]:
+    return_untouched: bool = False,
+):
     """Subsample every cell's reads to one shared total.
 
-    Exact multivariate hypergeometric sampling of reads without replacement --
-    the same operation as ``scanpy.pp.downsample_counts`` and as
-    ``cancer_metastasis/27_downsample_counts.py``.  Cells already at or below
-    the target are left untouched; they are the residual depth gradient and the
-    caller should report how many there were.
+    Exact multivariate hypergeometric sampling of reads without replacement,
+    the same operation as ``scanpy.pp.downsample_counts``.  Cells already at or
+    below the target are left untouched; they are the residual depth gradient,
+    so ``return_untouched`` hands back the mask and the pre-equalisation depth
+    for a caller that has to report them.
 
     ``target`` fixes the shared depth.  Omit it and the ``quantile`` of the
-    pooled depth is used, but note that a quantile makes the target a function
-    of the cell set: two runs on different cells then differ in two ways at
-    once, so pass ``target`` explicitly when reproducing one.
+    pooled depth is used, but a quantile makes the target a function of the cell
+    set: two runs on different cells then differ in two ways at once, so pass
+    ``target`` explicitly when reproducing one.
+
+    The draw is taken over each cell's **nonzero** genes, not over the full gene
+    vector.  The two are the same distribution -- a colour with zero balls
+    contributes nothing -- but they consume the generator differently, and only
+    the first is possible on a real matrix: densifying 150,000 cells by 30,000
+    genes to subsample them is not an option.  Sparse and dense input therefore
+    give the identical result here, which is the property that lets the
+    simulation and the production stage be compared at all.
 
     A warning that is easy to lose: on data whose depth mechanism is
     ``Multinomial(depth, p)`` with ``p`` independent of depth, this operation is
     that mechanism's exact inverse, and any measurement of it on such data is
     circular.  That is what happened to this project's first depth simulation.
     """
-    values = np.asarray(counts)
-    if sparse.issparse(counts):
-        values = np.asarray(counts.todense())
-    if values.ndim != 2:
+    was_sparse = sparse.issparse(counts)
+    matrix = sparse.csr_matrix(counts, dtype=np.int64)
+    if matrix.ndim != 2:
         raise ValueError("counts must be a 2-D cells-by-genes matrix")
-    equalised = np.array(values, dtype=np.int64, copy=True)
-    totals = equalised.sum(axis=1)
+    original = np.asarray(matrix.sum(axis=1), dtype=np.int64).ravel()
     if target is None:
         if not 0.0 < quantile < 1.0:
             raise ValueError("quantile must lie in (0, 1)")
-        target = int(np.quantile(totals, quantile))
+        target = int(np.quantile(original, quantile))
     if target < 1:
         raise ValueError(f"target depth resolved to {target}; raise the quantile")
-    for index in np.flatnonzero(totals > target):
-        equalised[index] = rng.multivariate_hypergeometric(
-            equalised[index], int(target)
-        )
+    untouched = original <= target
+    rows = []
+    for index in range(matrix.shape[0]):
+        start, stop = matrix.indptr[index], matrix.indptr[index + 1]
+        row = matrix.data[start:stop]
+        if untouched[index] or row.size == 0:
+            rows.append(row)
+            continue
+        rows.append(rng.multivariate_hypergeometric(row, int(target)))
+    reduced = sparse.csr_matrix(
+        (np.concatenate(rows) if rows else np.zeros(0, dtype=np.int64),
+         matrix.indices.copy(), matrix.indptr.copy()),
+        shape=matrix.shape, dtype=np.int64,
+    )
+    # A gene that lost all of its reads would otherwise stay an explicit zero,
+    # which makes the matrix disagree with itself about what was detected --
+    # and detection breadth is exactly what the rank cut is measured against.
+    reduced.eliminate_zeros()
+    equalised = reduced if was_sparse else np.asarray(reduced.todense())
+    if return_untouched:
+        return equalised, original, untouched
     return equalised
 
 
@@ -449,11 +473,11 @@ class Preprocessing:
             raise ValueError("equalise_target must be a positive read count")
         if not 0.0 < self.equalise_quantile < 1.0:
             raise ValueError("equalise_quantile must lie in (0, 1)")
-        if self.normalisation == "precomputed" and self.label_stem is None:
+        if self.normalisation == "precomputed" and not (self.label_stem or ""):
             raise ValueError(
-                "normalisation='precomputed' needs label_stem: only the caller "
-                "knows what produced the matrix, and an unnamed configuration "
-                "cannot be reported"
+                "normalisation='precomputed' needs a non-empty label_stem: "
+                "only the caller knows what produced the matrix, and an "
+                "unnamed configuration cannot be reported"
             )
 
     # ---- naming and recording -------------------------------------------
@@ -474,6 +498,68 @@ class Preprocessing:
         if self.cost == "cosine":
             parts.append("cos")
         return "_".join(parts)
+
+    @classmethod
+    def from_label(cls, label: str, **overrides: Any) -> "Preprocessing":
+        """Rebuild a configuration from the name it is reported under.
+
+        ``rank256_ds_cos`` gives back rank encoding at 256 with equalisation and
+        the cosine cost.  This exists so that a pipeline names the
+        configuration **once** -- in one job script, as one string -- instead of
+        setting three variables that can disagree.  The failure it removes is
+        real and silent: a rank cut set while the transform was left at its
+        default produces a run with an ignored cut and no name.
+
+        The label carries the three axes the depth screen varied and nothing
+        else.  ``n_hvg``, ``n_pcs``, ``residual_theta``,
+        ``minimum_detection_rate`` and ``equalise_quantile`` come from the
+        defaults unless passed in ``overrides``, so a label identifies a
+        configuration only together with those -- which is why
+        :meth:`as_dict` records all of them and not just the label.
+
+        A stem this class does not own is treated as an external transform, so
+        ``sct_ds_cos`` round-trips to ``precomputed`` named ``sct``. Anything
+        the caller then supplies is its own business, which is the point.
+        """
+        if not label or not label.strip():
+            raise ValueError("label must be a non-empty string")
+        parts = label.strip().split("_")
+        cost = "squared_euclidean"
+        if parts[-1] == "cos":
+            cost, parts = "cosine", parts[:-1]
+        equalise = False
+        if parts and parts[-1] == "ds":
+            equalise, parts = True, parts[:-1]
+        stem = "_".join(parts)
+        if not stem:
+            raise ValueError(f"label {label!r} names no transform")
+        settings: dict[str, Any] = {"cost": cost, "equalise_depth": equalise}
+        inverse = {value: key for key, value in _LABEL_STEM.items()}
+        rank_stems = tuple(
+            value for key, value in _LABEL_STEM.items() if key.startswith("rank")
+        )
+        for rank_stem in sorted(rank_stems, key=len, reverse=True):
+            digits = stem[len(rank_stem):]
+            if stem.startswith(rank_stem) and digits.isdigit():
+                settings["normalisation"] = inverse[rank_stem]
+                settings["rank_top_n"] = int(digits)
+                break
+        else:
+            if stem in inverse:
+                settings["normalisation"] = inverse[stem]
+            else:
+                settings["normalisation"] = "precomputed"
+                settings["label_stem"] = stem
+        settings.update(overrides)
+        configuration = cls(**settings)
+        if configuration.label() != label.strip():
+            # A label that does not survive the round trip would let a job
+            # script ask for one configuration and record another.
+            raise ValueError(
+                f"label {label!r} does not round-trip; it rebuilt as "
+                f"{configuration.label()!r}"
+            )
+        return configuration
 
     def as_dict(self) -> dict[str, Any]:
         """The configuration as plain JSON-safe values, for the run record.

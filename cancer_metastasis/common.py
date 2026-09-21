@@ -333,7 +333,8 @@ def prepare_joint_representation(
     source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int,
     representation: str = "log_cpm", rank_top_n: int = 512,
     minimum_detection_rate: float = 0.0, residual_theta: float = 100.0,
-    cost: str = "squared_euclidean",
+    cost: str = "squared_euclidean", equalise_depth: bool = False,
+    label_stem: str | None = None,
 ):
     """Joint representation of one pair, from two AnnData objects.
 
@@ -350,6 +351,14 @@ def prepare_joint_representation(
     ``cost='cosine'`` L2-normalises the coordinates before returning them, so a
     caller cannot reach the cosine configuration by remembering to do it
     afterwards and miss it.
+
+    ``equalise_depth`` is **recorded, not applied**. Read equalisation happens
+    upstream in ``27_downsample_counts.py``, at the file level, so that the OT,
+    the pseudobulk, the differential expression and the scoring all see one
+    matrix and no stage can disagree with another about which counts it used.
+    Setting it here is what lets the run carry the configuration's real name:
+    without it a depth-equalised cosine rank run would record itself as
+    ``rank256_cos`` and be indistinguishable from one on untouched counts.
 
     One behaviour change: the two sides must now declare the same expression
     kind for *every* representation. The rank and residual paths already
@@ -368,16 +377,17 @@ def prepare_joint_representation(
             f"{representation} needs both sides on one scale; found "
             f"{source_kind!r} and {target_kind!r}"
         )
-    normalisation, label_stem = _library_normalisation(representation, source_kind)
+    normalisation, resolved_stem = _library_normalisation(representation, source_kind)
     configuration = Preprocessing(
         normalisation=normalisation,
         rank_top_n=rank_top_n,
         residual_theta=residual_theta,
         minimum_detection_rate=minimum_detection_rate,
+        equalise_depth=equalise_depth,
         n_hvg=n_hvg,
         n_pcs=n_pcs,
         cost=cost,
-        label_stem=label_stem,
+        label_stem=label_stem or resolved_stem,
     )
     prepared = configuration.representation(
         expression_matrix(source), expression_matrix(target), seed=seed,
@@ -392,6 +402,8 @@ def prepare_joint_representation(
         "target_transform": prepared.provenance["transform"],
         "representation": representation,
         **prepared.provenance,
+        # Set last so it cannot read as though this call did the subsampling.
+        "equalise_applied_here": False,
     }
     return prepared.source, prepared.target, prepared.selected_genes, provenance
 
