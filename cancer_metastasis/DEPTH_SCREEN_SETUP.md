@@ -188,6 +188,15 @@ Recorded so the screen can contradict it.
 
 ## 7. Outcome, against the prior in §6
 
+> **Superseded in part.** Everything below is the hand-built construction. The
+> splatter round showed that read equalisation only helps there, because
+> multivariate-hypergeometric downsampling is the exact inverse of how that
+> construction creates depth variation, so this section's ranking of the
+> equalised configurations does not transfer. See
+> `SEQUENCING_DEPTH_RESOLUTION.md`. The cosine result below does transfer, and
+> transfers more strongly.
+
+
 Configurations 0-10, production scale, 3 replicates. Depth effect is
 `abs(AUC - 0.5)` at depth CV 0.31 / 0.66 / 1.12; the CV-0 arm is 0.000 for
 every configuration by construction.

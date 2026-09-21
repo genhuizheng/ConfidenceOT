@@ -76,6 +76,10 @@ scripts/tacc/*
 # The screen's design, written before its results, for the same reason the
 # prespecification is tracked.
 !/cancer_metastasis/DEPTH_SCREEN_SETUP.md
+# The standing answer on the depth confound, and the caveats that come with
+# it. Tracked because the splatter round overturned what the screen's own
+# outcome section concluded, and that reversal must not live only in a chat.
+!/cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md
 
 # OS/editor files
 .DS_Store
