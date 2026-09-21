@@ -37,13 +37,29 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-import warnings
+import os
 
-import numpy as np
-import pandas as pd
+# Thread caps, set before anything imports numba. UMAP's nearest-neighbour
+# search runs `joblib.Parallel(n_jobs=-1)` inside pynndescent, which on a
+# 144-core node asks for 144 threads per call and accumulates across pairs:
+# the third pair of a batch hit "can't start new thread" on a login node.
+# Numba fixes its pool size at import, so this cannot be a command-line flag --
+# it has to be in the environment before the import below, which is why it
+# sits here rather than in main().
+UMAP_THREADS = os.environ.get("CONFIDENCEOT_UMAP_THREADS", "4")
+for _variable in ("NUMBA_NUM_THREADS", "OMP_NUM_THREADS",
+                  "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                  "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_variable, UMAP_THREADS)
 
-import matplotlib
+from pathlib import Path  # noqa: E402
+import traceback  # noqa: E402
+import warnings  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
@@ -83,6 +99,7 @@ def embed(coordinates: np.ndarray, seed: int) -> np.ndarray:
     some pairs here have cells, and UMAP silently reduces it while warning,
     which is a warning nobody reads in a batch of ninety-four.
     """
+    import joblib
     import umap
 
     n = len(coordinates)
@@ -91,7 +108,21 @@ def embed(coordinates: np.ndarray, seed: int) -> np.ndarray:
         warnings.simplefilter("ignore")
         reducer = umap.UMAP(n_neighbors=neighbours, min_dist=0.3,
                             random_state=seed, n_components=2)
-        return reducer.fit_transform(np.asarray(coordinates, dtype=np.float32))
+        # The environment caps numba; this caps the joblib pool pynndescent
+        # opens for its random-projection forest, which is the one that
+        # actually ran out of threads. Both are needed: they are different
+        # pools. `parallel_config` arrived in joblib 1.3 and
+        # `parallel_backend` is what older versions have, so take whichever
+        # exists rather than pinning a version for two lines.
+        limit = (joblib.parallel_config if hasattr(joblib, "parallel_config")
+                 else joblib.parallel_backend)
+        keywords = ({"n_jobs": int(UMAP_THREADS)}
+                    if hasattr(joblib, "parallel_config")
+                    else {"backend": "threading",
+                          "n_jobs": int(UMAP_THREADS)})
+        with limit(**keywords):
+            return reducer.fit_transform(
+                np.asarray(coordinates, dtype=np.float32))
 
 
 def draw(frame: pd.DataFrame, dataset: str, pair_id: str, out: Path,
@@ -248,7 +279,7 @@ def main() -> None:
     if len(depths_for) != len(args.dataset):
         raise SystemExit("--dataset and --predownsample-depth must pair up")
 
-    summary = []
+    summary, failures = [], []
     for (label, root), depth_path in zip(args.dataset, depths_for):
         depths = None
         if depth_path is not None:
@@ -290,26 +321,39 @@ def main() -> None:
                 print(f"{label} {pair_id}: {len(coordinates)} cells, below "
                       f"--minimum-cells; skipped")
                 continue
-            points = embed(coordinates[pca_columns].to_numpy(), args.seed)
-            frame = pd.DataFrame({
-                "x": points[:, 0], "y": points[:, 1],
-                "side": coordinates["side"].astype(str),
-                "sample_id": coordinates["sample_id"].astype(str),
-                "observation_id": coordinates["observation_id"].astype(str),
-            })
-            gate = dict(zip(confidence["observation_id"].astype(str),
-                            confidence["retained"].astype(bool)))
-            # A metastatic cell has no source-side gate; False keeps it out of
-            # the retained set, and it is only ever drawn as the backdrop.
-            frame["retained"] = [gate.get(name, False)
-                                 for name in frame.observation_id]
-            if depths is not None:
-                frame = frame.merge(
-                    depths, on=["sample_id", "observation_id"], how="left")
-                frame = frame.rename(
-                    columns={"predownsample_total_counts": "depth"})
-            out = args.output_dir / label / f"{pair_id}.png"
-            measured = draw(frame, label, pair_id, out, args.configuration)
+            # One pair failing must not lose the batch. Ninety-four pairs at
+            # a few seconds each is a long enough run that an exception on
+            # pair three would otherwise throw away everything after it, and
+            # the failure that prompted this -- a thread limit -- is exactly
+            # the kind that hits partway through.
+            try:
+                points = embed(coordinates[pca_columns].to_numpy(), args.seed)
+                frame = pd.DataFrame({
+                    "x": points[:, 0], "y": points[:, 1],
+                    "side": coordinates["side"].astype(str),
+                    "sample_id": coordinates["sample_id"].astype(str),
+                    "observation_id": coordinates["observation_id"].astype(str),
+                })
+                gate = dict(zip(confidence["observation_id"].astype(str),
+                                confidence["retained"].astype(bool)))
+                # A metastatic cell has no source-side gate; False keeps it out
+                # of the retained set, and it is only drawn as the backdrop.
+                frame["retained"] = [gate.get(name, False)
+                                     for name in frame.observation_id]
+                if depths is not None:
+                    frame = frame.merge(
+                        depths, on=["sample_id", "observation_id"], how="left")
+                    frame = frame.rename(
+                        columns={"predownsample_total_counts": "depth"})
+                out = args.output_dir / label / f"{pair_id}.png"
+                measured = draw(frame, label, pair_id, out, args.configuration)
+            except Exception as error:  # noqa: BLE001 - reported, not hidden
+                failures.append({"dataset": label, "pair_id": pair_id,
+                                 "error": f"{type(error).__name__}: {error}"})
+                print(f"{label} {pair_id}: FAILED {type(error).__name__}: "
+                      f"{error}")
+                traceback.print_exc()
+                continue
             summary.append({"dataset": label, "pair_id": pair_id,
                             "cells": len(frame), **measured,
                             "figure": str(out)})
@@ -320,6 +364,14 @@ def main() -> None:
             sheet = args.output_dir / f"{label}_contact_sheet.png"
             contact_sheet(panels, label, sheet)
             print(f"{label}: contact sheet -> {sheet}")
+    if failures:
+        print(f"\n{len(failures)} pair(s) failed:")
+        for record in failures:
+            print(f"  {record['dataset']} {record['pair_id']}: "
+                  f"{record['error']}")
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(failures).to_csv(
+            args.output_dir / "individual_umap_failures.csv", index=False)
     if not summary:
         raise SystemExit("no pair produced a figure")
     table = pd.DataFrame(summary)
