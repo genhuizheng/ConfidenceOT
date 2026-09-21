@@ -34,7 +34,7 @@ SHORT = {"homogeneous_depth_cv0": "cv0", "homogeneous_depth_cv_low": "low",
 # earlier indices have already run.
 ORDER = ["logcpm", "logcpm_ds", "logcpm_cos",
          "rank256", "rank256_ds", "rank256_ds_cos",
-         "pearson_ds", "pearson_ds_cos",
+         "pearson", "pearson_ds", "pearson_ds_cos",
          "scanpy_pearson", "scanpy_pearson_ds",
          "sct", "sct_ds", "sct_ds_cos"]
 

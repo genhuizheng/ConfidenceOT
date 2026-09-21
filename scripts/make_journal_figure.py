@@ -96,7 +96,7 @@ CONTROL = "perturbed_depth_cv0"
 # so the divider below keeps meaning what it says.
 SCREEN_ORDER = ["logcpm", "logcpm_ds", "logcpm_cos",
                 "rank256", "rank256_ds", "rank256_ds_cos",
-                "pearson_ds", "pearson_ds_cos",
+                "pearson", "pearson_ds", "pearson_ds_cos",
                 "scanpy_pearson", "scanpy_pearson_ds",
                 "sct", "sct_ds", "sct_ds_cos"]
 SCREEN_LABEL = {
@@ -106,6 +106,7 @@ SCREEN_LABEL = {
     "rank256": "rank-value",
     "rank256_ds": "rank-value + equalise",
     "rank256_ds_cos": "rank-value + eq. + cosine",
+    "pearson": "Pearson resid. (ours)",
     "pearson_ds": "Pearson resid. + equalise",
     "scanpy_pearson": "scanpy Pearson resid.",
     "scanpy_pearson_ds": "scanpy Pearson + equalise",

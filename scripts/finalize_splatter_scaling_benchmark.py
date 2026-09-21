@@ -29,6 +29,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("output_root", type=Path)
     parser.add_argument("--sizes", nargs="+", type=int, default=SIZES)
     parser.add_argument("--replicates", type=int, default=2)
+    parser.add_argument(
+        "--partial-max-n", type=int, default=10_000,
+        help="Largest size the Partial OT comparator is expected at. It was "
+             "capped at 1000 while that comparator ran on a workstation; the "
+             "exact augmented-Hungarian solve is O(N^3) but measures about two "
+             "minutes per fit at N=10000, so it now runs at every benchmark "
+             "size. Mirrors CONFIDENCEOT_PARTIAL_MAX_N in "
+             "scripts/tacc/run_splatter_scaling_array.slurm, and the two have "
+             "to agree or this check fails on a complete benchmark.",
+    )
     return parser.parse_args()
 
 
@@ -46,7 +56,8 @@ def main() -> None:
     args = parse_args()
     sizes = tuple(sorted(set(args.sizes)))
     expected_m4_cases = 2 * 5 * len(sizes) * args.replicates
-    partial_sizes = tuple(size for size in sizes if size <= 1000)
+    partial_sizes = tuple(size for size in sizes
+                          if size <= args.partial_max_n)
     expected_partial_cases = 2 * 5 * len(partial_sizes) * args.replicates
     counts = {
         "m4": manifest_count(args.m4_root),
@@ -188,8 +199,17 @@ def main() -> None:
         "expected_cases": expected_counts,
         "completed_cases": counts,
         "partial_ot_sizes": list(partial_sizes),
+        # Derived, not asserted. This said larger sizes were N/A, which was
+        # true only while the comparator was capped at 1000; leaving it fixed
+        # would have put a false statement in the audit of a benchmark where
+        # Partial OT ran at every size.
+        "partial_ot_excluded_sizes": [size for size in sizes
+                                      if size not in partial_sizes],
         "partial_ot_larger_sizes_status": (
-            "N/A: the historical exact augmented-Hungarian comparator is O(N^3)"
+            "complete at every benchmark size"
+            if len(partial_sizes) == len(sizes) else
+            f"not run above N={args.partial_max_n}: the exact "
+            f"augmented-Hungarian comparator is O(N^3)"
         ),
         "coupling_stability_metric_skipped_for_memory": True,
         "runtime_definition": (

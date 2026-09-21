@@ -29,9 +29,16 @@ fi
 cd "$repo"
 python scripts/aggregate_confidenceot_grid.py "$m4"
 python scripts/aggregate_confidenceot_grid.py "$partial"
+# 20000 is not in the size list: that run was cancelled, so expecting it makes
+# the completeness check fail on a benchmark that is in fact complete.
+# CONFIDENCEOT_SIZES puts it back if it is ever run. CONFIDENCEOT_PARTIAL_MAX_N
+# has to match what the array job used, or the same check fails the other way --
+# Partial OT now runs at every size, and the finalizer used to expect it at one.
 python scripts/finalize_splatter_scaling_benchmark.py \
     "$m4" "$partial" "$report" \
-    --sizes 1000 5000 10000 20000 --replicates 2
+    --sizes ${CONFIDENCEOT_SIZES:-1000 5000 10000} \
+    --partial-max-n "${CONFIDENCEOT_PARTIAL_MAX_N:-10000}" \
+    --replicates "${CONFIDENCEOT_REPLICATES:-2}"
 
 cd "$root"
 tar -czf "$bundle" report

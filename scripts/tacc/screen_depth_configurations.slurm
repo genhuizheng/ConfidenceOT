@@ -83,6 +83,14 @@ configurations=(
   # than a new method.
   "pearson_ds_cos|--representation pearson_residuals --equalise-depth --cost cosine"
   "sct_ds_cos|--external-representation sctransform --equalise-depth --cost cosine"
+  # The one empty cell in the table, and now the decisive one. Every other
+  # family has an "alone" arm; ours does not, so when scanpy's analytic
+  # residual and sctransform's fitted one swapped places between the two count
+  # constructions there was no way to ask whether our analytic residual
+  # behaves like scanpy's. If it does, the analytic-versus-fitted distinction
+  # is real; if it does not, one of the implementations is doing something
+  # unexpected and the swap is not a property of the transforms.
+  "pearson|--representation pearson_residuals"
 )
 
 task=${SLURM_ARRAY_TASK_ID:-0}
