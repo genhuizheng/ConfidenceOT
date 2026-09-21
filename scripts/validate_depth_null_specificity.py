@@ -53,7 +53,10 @@ from scipy.stats import rankdata, spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cancer_metastasis.common import prepare_joint_representation  # noqa: E402
+from cancer_metastasis.common import (  # noqa: E402
+    prepare_joint_representation,
+    unit_rows,
+)
 from confidenceot import (  # noqa: E402
     ConfidenceOT,
     calibrate_confidence_cost,
@@ -262,19 +265,6 @@ def external_joint_pca(
     coordinates = PCA(n_components=components,
                       random_state=seed).fit_transform(dense)
     return coordinates[: len(source_counts)], coordinates[len(source_counts):]
-
-
-def unit_rows(matrix: np.ndarray) -> np.ndarray:
-    """L2-normalise each row, leaving any all-zero row alone.
-
-    Cosine distance on these rows is the squared Euclidean distance on them:
-    for unit vectors ``||a-b||^2 = 2 - 2 cos(a, b)``. Normalising here therefore
-    turns the existing cost, scaling and calibration machinery into the cosine
-    version without touching any of it, and makes explicit that "use cosine"
-    means "discard each cell's magnitude" and nothing else.
-    """
-    norm = np.linalg.norm(matrix, axis=1, keepdims=True)
-    return matrix / np.where(norm > 0, norm, 1.0)
 
 
 def rank_auc(values: np.ndarray, positive: np.ndarray) -> float:

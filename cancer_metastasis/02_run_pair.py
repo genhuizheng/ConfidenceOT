@@ -17,7 +17,8 @@ from confidenceot import (
     rotation_null_costs,
     within_side_null_costs,
 )
-from common import cell_qc_table, json_ready, load_exact_side, prepare_joint_representation
+from common import (cell_qc_table, json_ready, load_exact_side,
+                    prepare_joint_representation, unit_rows)
 
 
 def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -190,6 +191,19 @@ def main() -> None:
              "the depth dependence: on simulated homogeneous data it takes "
              "auc_total_counts from 0.945 to 0.475 at moderate depth spread, "
              "at a cost of 0.008 in perturbed F1.",
+    )
+    parser.add_argument(
+        "--cost", choices=("squared_euclidean", "cosine"),
+        default="squared_euclidean",
+        help="Cost geometry. 'cosine' L2-normalises each cell's PCA "
+             "coordinates before the scale estimate, which discards "
+             "magnitude and nothing else: for unit vectors "
+             "||a-b||^2 = 2 - 2cos, so the same cost, scale and "
+             "calibration machinery becomes a cosine cost. In the depth "
+             "screen it is the only change that separated the false-rejection "
+             "rate on both simulators -- every Euclidean configuration sat at "
+             "0.071-0.098, every cosine one at 0.000-0.057, with no overlap "
+             "-- at no cost in power. See SEQUENCING_DEPTH_RESOLUTION.md.",
     )
     parser.add_argument(
         "--rank-top-n", type=int, default=512,
@@ -374,6 +388,15 @@ def main() -> None:
         representation=args.representation, rank_top_n=args.rank_top_n,
         minimum_detection_rate=args.minimum_detection_rate,
     )
+    if args.cost == "cosine":
+        # Before the scale estimate below, so the median is measured on the
+        # geometry the gate will see. Validated in the depth screen: on
+        # splatter counts this cuts the false-rejection rate on populations
+        # containing nothing to reject from 7-10% to 2%, and at N=5000 to
+        # 0.1%, while holding the highest positive-control F1 in the screen.
+        # See cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md.
+        source_pca, target_pca = unit_rows(source_pca), unit_rows(target_pca)
+
     rng = np.random.default_rng(args.seed + args.index * 104729)
     pairs = min(1_000_000, max(len(source_pca) * len(target_pca), 1))
     sampled = np.sum((source_pca[rng.integers(len(source_pca), size=pairs)] - target_pca[rng.integers(len(target_pca), size=pairs)]) ** 2, axis=1)
@@ -602,6 +625,7 @@ def main() -> None:
         "rejection_cost": rejection_cost,
         "rejection_cost_mode": rejection_cost_mode,
         "calibration_null": calibration_null,
+        "cost": args.cost,
         "calibration_valid_for_m4r": calibration_valid,
         "calibration_m4e_inference_valid": m4e_inference_valid,
         "calibration_feasible_cost_found": feasible_cost_found,

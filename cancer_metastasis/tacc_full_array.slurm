@@ -144,6 +144,14 @@ fi
 if [[ -n "${CONFIDENCEOT_RANK_TOP_N:-}" ]]; then
   qc_args+=(--rank-top-n "$CONFIDENCEOT_RANK_TOP_N")
 fi
+# Cost geometry. `cosine` L2-normalises the joint representation before the
+# cost and the median scale, which discards each cell's magnitude and nothing
+# else. In the depth screen this is the one change that separated the rate of
+# rejection on populations containing nothing to reject, on both simulators and
+# at both sizes, with no loss of power. See SEQUENCING_DEPTH_RESOLUTION.md.
+if [[ -n "${CONFIDENCEOT_COST:-}" ]]; then
+  qc_args+=(--cost "$CONFIDENCEOT_COST")
+fi
 if [[ -n "${CONFIDENCEOT_MINIMUM_DETECTION_RATE:-}" ]]; then
   qc_args+=(--minimum-detection-rate "$CONFIDENCEOT_MINIMUM_DETECTION_RATE")
 fi

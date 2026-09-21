@@ -278,5 +278,107 @@ contention, and writes to its own label so it cannot overwrite what it confirms.
    `pearson_ds` — the four that are actually in contention.
 5. Add `logcpm_ds_cos`, the arm that separates "equalisation helps the
    false-rejection rate" from "the transform does".
-6. Fix the configuration, write it down, and only then re-run the cancer
-   analysis.
+6. ~~Fix the configuration, write it down, and only then re-run the cancer
+   analysis~~ — done, §7, ahead of items 2 to 5 and saying so. Items 2 to 5
+   remain open and can still change the ranking among the cosine
+   configurations; none of them can restore a Euclidean one.
+
+---
+
+## 7. The configuration fixed for the real-data re-run
+
+Written on 2026-09-21, before the run, so the comparison cannot be chosen after
+seeing it. This is item 6 of §6 executed with items 2–5 still open, which is a
+decision and not an oversight; what it rests on and what it does not is below.
+
+### The configuration
+
+```
+--representation rank_value --rank-top-n 256    # rank
+27_downsample_counts.py --target-quantile 0.10  # equalisation
+--cost cosine                                   # cosine
+```
+
+Submitted by `cancer_metastasis/submit_rank_cosine_chain.sh`, one dataset per
+invocation, into `ot_<accession>_rank256_ds_cos_<stamp>`. Every existing output
+root is untouched, so the two configurations are read side by side rather than
+one overwriting the other.
+
+Four datasets: GSE180661 (ovarian), GSE271675 (prostate), GSE225857
+(colorectal), GSE181919 (head & neck). The first two already have equalised
+counts and reuse them; re-running the quantile on a different cell set would
+change the target depth as well, and two runs would then differ in two ways at
+once. The last two are equalised for the first time by the same chain.
+
+### Why this one
+
+`rank + eq. + cosine` leads the false-rejection column at both sizes (0.021 and
+0.001) and holds the highest control F1 in the screen (0.945–0.967). The
+simpler `log CPM + cosine` was the alternative and was rejected on that one
+column: it false-rejects 0.057 and 0.032, two to thirty times more. On a method
+whose entire output is a partition, the rate at which it rejects cells that
+should not be rejected is the quantity that decides whether the partition means
+anything.
+
+### What it does not rest on
+
+- **Three replicates.** §4d: the tolerance falls inside the replicate scatter
+  for the contenders. The ten-replicate round (§6 item 4) has not run. The
+  ranking among the three cosine configurations is therefore not established;
+  the separation of cosine from Euclidean is.
+- **Equalisation is carried unattributed.** §3: there is no `logcpm_ds_cos`
+  arm, so "equalisation helps the rate" is not separated from "the transform
+  does". It is kept because it is cheap, decoupled, and preserves integer
+  counts, not because the screen established it. Should item 5 show the
+  transform carries the effect, the equalisation stage drops out and the OT
+  configuration is unchanged.
+- **§4a is unresolved.** The two external residual methods swap places between
+  the simulators. Neither is in this configuration, so it does not bear on it.
+
+### The new risk, which is specific to real data
+
+`rank_value` keeps each cell's top 256 genes, and `rank_value_encode` keeps
+`min(256, detected)` of them. A cell detecting fewer than 256 genes is encoded
+on fewer coordinates, which is the low-content artefact the fixed cut exists to
+prevent. Equalised counts are where that is least safe: every cell has been
+subsampled to the 10th percentile of pooled depth. The screen ran at 256 on
+simulated cells with 4,000 genes and near-uniform detection, which is no
+evidence at all about these cells — and GSE225857's rejected cells already sat
+at a median of 4,243 counts before any equalisation.
+
+`cancer_metastasis/tools/audit_rank_top_n.py` measures this on the equalised
+manifest, over the gene intersection the run uses and after the same annotation
+scoping, and the chain makes it a **gate**: more than 1% of any pair's cells
+below the cut and the OT is never submitted. It reports the largest cut that
+would clear the tolerance, so a failure is actionable rather than terminal.
+Under the cosine cost a short vector's smaller norm is normalised away, so the
+magnitude half of the artefact goes; the support difference does not.
+
+### Acceptance test, prespecified
+
+Run by the chain's last stage, against each cell's **original** depth from
+`predownsample_depth.csv.gz` — after equalisation the stored depth is nearly
+constant, so testing the gate against it would be trivially 0.5 and prove
+nothing.
+
+| statistic | current | acceptance |
+|---|---:|---:|
+| `auc_predownsample_total_counts` | 0.67 (ovarian), 0.79 (colorectal) | ≤ 0.60 |
+| `spearman_decision_cost_predownsample_total_counts` | −0.33 to −0.59 | \|rho\| ≤ 0.20 |
+| `depth_residual_gate_jaccard` | 0.47–0.60 | ≥ 0.75 |
+| source rejection rate | — | reported, not constrained |
+
+0.60 rather than 0.55 because the screen's own best readable depth effect was
+0.026–0.062 on simulated data with a known answer, and no real dataset has yet
+been placed on that depth ladder (§4c). A result between 0.60 and 0.67 is a
+partial reduction and should be reported as one, not as a pass.
+
+The rejection rate is deliberately unconstrained. §5.8.4 of
+`CURRENT_WORK_SUMMARY_2026-09-13.md` records that the retained fraction is
+close to inversely proportional to how far apart the two sides are, so a target
+rate would be a target for the wrong quantity.
+
+**No differential expression from these runs until the three statistics above
+are read.** The prostate arm is the precedent: 996 significant genes raw, 3
+after equalisation. A DEG computed before the acceptance test is a number that
+cannot be withdrawn once it has been seen.

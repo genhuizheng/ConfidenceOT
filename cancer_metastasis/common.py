@@ -412,6 +412,37 @@ def pearson_residual_block(joint: Any, genes: np.ndarray, theta: float) -> np.nd
     return residual.astype(np.float32)
 
 
+def unit_rows(matrix: np.ndarray) -> np.ndarray:
+    """L2-normalise each row, leaving any all-zero row alone.
+
+    Cosine distance on these rows is the squared Euclidean distance on them:
+    for unit vectors ``||a - b||^2 = 2 - 2 cos(a, b)``. Normalising the joint
+    representation therefore turns the existing cost, median scaling and null
+    calibration into the cosine version without touching any of them, and makes
+    explicit that "use cosine" means "discard each cell's magnitude and nothing
+    else".
+
+    Applied to the representation before the cost is built and before the
+    median scale is estimated, so the scale is measured on the same geometry
+    the gate sees.
+
+    It lives here rather than in either caller because the depth screen and the
+    production pair runner must apply the identical operation for the screen's
+    conclusion to carry over, and two copies of four lines drift.
+
+    The floating dtype is preserved rather than promoted to float64. The screen
+    hands this float32 PCA coordinates, and the configuration choice recorded in
+    SEQUENCING_DEPTH_RESOLUTION.md was measured that way; promoting here would
+    make those runs non-reproducible for no gain, since the norm of a 30-vector
+    is nowhere near float32's limits.
+    """
+    values = np.asarray(matrix)
+    if not np.issubdtype(values.dtype, np.floating):
+        values = values.astype(np.float64)
+    norm = np.linalg.norm(values, axis=1, keepdims=True)
+    return values / np.where(norm > 0.0, norm, 1.0)
+
+
 def prepare_joint_representation(
     source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int,
     representation: str = "log_cpm", rank_top_n: int = 512,
