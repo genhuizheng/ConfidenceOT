@@ -133,6 +133,11 @@ def main() -> None:
     parser.add_argument("--side", default="source",
                         choices=("source", "target"))
     parser.add_argument("--scope", default="scope_malignant")
+    parser.add_argument(
+        "--expected-retained-maximum", type=float, default=0.15,
+        help="Reported, not tested: the largest fraction of primary cells "
+             "expected to carry metastatic potential. Pairs above it are "
+             "counted so an implausible retention rate is visible.")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     if len(args.dataset) != len(args.predownsample_depth):
@@ -274,10 +279,22 @@ def main() -> None:
             block_depth = block["predownsample_total_counts"].to_numpy(
                 dtype=np.float64)
             block_k = int((~block_retained).sum())
+            block_auc = rank_auc(block_depth, block_retained)
+            positive = block_depth[block_depth > 0]
             per_pair_rows.append({
                 "dataset": label, "pair_id": pair_id, "cells": len(block),
                 "rejected": block_k,
-                "auc": rank_auc(block_depth, block_retained),
+                "retained_fraction": float(block_retained.mean()),
+                "auc": block_auc,
+                "deviation": abs(block_auc - 0.5),
+                # This pair's own rung on the screen's ladder, from the same
+                # cells the gate saw. The screen's arms are indexed by
+                # sd(log depth), so this is what makes the dose-response
+                # question answerable at all.
+                "sd_log_depth": (float(np.log(positive).std(ddof=1))
+                                 if positive.size > 1 else float("nan")),
+                "median_depth": (float(np.median(positive)) if positive.size
+                                 else float("nan")),
                 "standard_error": auc_standard_error(
                     int(block_retained.sum()), block_k),
             })
@@ -303,10 +320,51 @@ def main() -> None:
     if per_pair_rows:
         # ASCII only: a section sign prints as mojibake on a console that is
         # not UTF-8, and a garbled caveat is a caveat nobody reads.
-        print("\nPer pair, for the spread only. Where the standard error is "
-              "large these are not verdicts, by the amendment in "
+        pairs_table = pd.DataFrame(per_pair_rows)
+        # Does the depth effect track how widely depth is spread in that pair?
+        # If it does, the residual effect is a property of how hard the data is
+        # and the screen's ladder predicts it. If it does not, it comes from
+        # something else and the cost change is not addressing the cause.
+        print("\nDose-response: per-pair depth effect against that pair's own "
+              "depth spread\n")
+        print(f"{'dataset':12s} {'pairs':>5s} {'rho(dev,sd)':>12s} {'p':>9s} "
+              f"{'rho(kept,sd)':>13s} {'p':>9s}")
+        usable_all = []
+        for dataset, block in pairs_table.groupby("dataset", sort=True):
+            usable = block.dropna(subset=["deviation", "sd_log_depth"])
+            usable_all.append(usable)
+            if len(usable) < 4:
+                print(f"{dataset:12s} {len(usable):5d} {'too few':>12s}")
+                continue
+            first = spearmanr(usable.deviation, usable.sd_log_depth)
+            second = spearmanr(usable.retained_fraction, usable.sd_log_depth)
+            print(f"{dataset:12s} {len(usable):5d} {first.statistic:12.3f} "
+                  f"{first.pvalue:9.2g} {second.statistic:13.3f} "
+                  f"{second.pvalue:9.2g}")
+        combined = (pd.concat(usable_all, ignore_index=True) if usable_all
+                    else None)
+        if combined is not None and len(combined) >= 4:
+            first = spearmanr(combined.deviation, combined.sd_log_depth)
+            second = spearmanr(combined.retained_fraction,
+                               combined.sd_log_depth)
+            print(f"{'all four':12s} {len(combined):5d} "
+                  f"{first.statistic:12.3f} {first.pvalue:9.2g} "
+                  f"{second.statistic:13.3f} {second.pvalue:9.2g}")
+            print("\nThe combined row mixes tissues and protocols, so it is "
+                  "weaker evidence than\nthe per-dataset rows agreeing with "
+                  "each other.")
+        over = pairs_table.retained_fraction.gt(args.expected_retained_maximum)
+        print(f"\n{int(over.sum())} of {len(pairs_table)} pairs retain more "
+              f"than {args.expected_retained_maximum:.0%} of primary cells.")
+        print("That bound is a stated expectation about how many primary cells "
+              "carry metastatic\npotential, not something these data "
+              "established. It is reported, not tested:\nchoosing a "
+              "configuration because it yields the expected rate would be "
+              "selecting\non the answer.")
+        print("\nPer pair. Where the standard error is large these are not "
+              "verdicts, by the\namendment in "
               "SEQUENCING_DEPTH_RESOLUTION.md:\n")
-        print(pd.DataFrame(per_pair_rows).round(4).to_string(index=False))
+        print(pairs_table.round(4).to_string(index=False))
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         pooled.to_csv(args.out, index=False)
