@@ -166,16 +166,32 @@ else
   if [[ ! -f "$source_manifest" ]]; then
     echo "Configured source manifest is absent: $source_manifest" >&2
     echo "Searching $result for one belonging to $accession ..." >&2
+    # The accession has to be the directory holding `manifest/`, not merely
+    # somewhere in the path: the replication roots are named after *both*
+    # datasets, so a substring match returns the other one's manifest too.
     mapfile -t found < <(find "$result" -maxdepth 4 -type f \
       \( -name 'pair_manifest_malignant_eligible.csv' \
          -o -name 'pair_manifest_eligible.csv' \) \
-      -path "*${accession}*" 2>/dev/null | sort)
+      -path "*/${accession}/manifest/*" 2>/dev/null | sort)
+    if (( ${#found[@]} == 0 )); then
+      # Datasets whose manifest does not sit under an accession directory.
+      mapfile -t found < <(find "$result" -maxdepth 4 -type f \
+        \( -name 'pair_manifest_malignant_eligible.csv' \
+           -o -name 'pair_manifest_eligible.csv' \) \
+        -path "*${accession}*" 2>/dev/null | sort)
+    fi
     if (( ${#found[@]} == 1 )); then
       source_manifest=${found[0]}
       echo "Found: $source_manifest" >&2
     elif (( ${#found[@]} > 1 )); then
-      echo "Several candidates; re-run with SOURCE_MANIFEST=<one of these>:" >&2
-      printf '  %s\n' "${found[@]}" >&2
+      echo "Several candidates. Rows and content hash are printed so an" >&2
+      echo "identical pair can be told from a real choice; re-run with" >&2
+      echo "SOURCE_MANIFEST=<one of these>:" >&2
+      for candidate in "${found[@]}"; do
+        rows=$(( $(wc -l < "$candidate") - 1 ))
+        digest=$(md5sum "$candidate" | cut -c1-12)
+        printf '  %s  rows=%s  md5=%s\n' "$candidate" "$rows" "$digest" >&2
+      done
       exit 2
     else
       echo "No manifest for $accession under $result." >&2
