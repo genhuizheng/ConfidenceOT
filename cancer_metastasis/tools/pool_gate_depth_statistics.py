@@ -46,7 +46,15 @@ REQUIRED = ("method", "side", "observation_id", "retained", "decision_cost")
 # depth exactly as hard, in the other direction, so the criterion has to be
 # the distance from the null. The bound is unchanged; only its two-sidedness
 # is, and no measured value moves.
-ACCEPTANCE = {"abs_auc_deviation": 0.10, "abs_spearman": 0.20}
+ACCEPTANCE = {
+    "abs_auc_deviation": 0.10,
+    "abs_spearman": 0.20,
+    # Below this many pairs there is no distribution to read, so the
+    # pooled value is all there is. Six is where the per-pair Wilcoxon in
+    # 25_diagnose_gate_covariates.py becomes possible, kept the same here
+    # so the two scripts change their mind at the same place.
+    "minimum_pairs_for_per_pair": 6,
+}
 
 
 def dataset_argument(value: str) -> tuple[str, Path]:
@@ -54,6 +62,22 @@ def dataset_argument(value: str) -> tuple[str, Path]:
         raise argparse.ArgumentTypeError("expected LABEL=OT_ROOT")
     label, path = value.split("=", 1)
     return label, Path(path)
+
+
+def auc_standard_error(n_positive: int, n_negative: int) -> float:
+    """Exact null standard error of the Mann-Whitney AUC.
+
+    ``sqrt((n1 + n2 + 1) / (12 * n1 * n2))``. The approximation
+    ``sqrt(1 / (12 * k))`` that this project has used elsewhere is that formula
+    when one class is far smaller than the other and ``k`` is the smaller one.
+    Applied with ``k`` as the *larger* class it understates the error -- by
+    3.0x on a gate rejecting 89% of cells, where the retained class is the
+    small one. The exact form has no such failure mode.
+    """
+    if n_positive < 1 or n_negative < 1:
+        return float("nan")
+    return float(np.sqrt((n_positive + n_negative + 1.0)
+                         / (12.0 * n_positive * n_negative)))
 
 
 def rank_auc(values: np.ndarray, positive: np.ndarray) -> float:
@@ -169,27 +193,70 @@ def main() -> None:
         auc = rank_auc(depth, retained)
         rho = (float(spearmanr(joined["decision_cost"], depth).statistic)
                if len(joined) > 2 else float("nan"))
-        standard_error = np.sqrt(1.0 / (12.0 * k)) if k else float("nan")
+        standard_error = auc_standard_error(int(retained.sum()), k)
+
+        # The per-pair deviations, which are the primary reading wherever
+        # there are enough pairs to form them. The pooled AUC cancels
+        # opposite-direction per-pair effects against each other: on GSE180661
+        # it reads 0.497, which looks like no depth dependence at all, while
+        # its 92 pairs run from 0.18 to 0.92 and a third of them exceed the
+        # bound. A statistic that averages a gate favouring deep cells in one
+        # pair against one favouring shallow cells in another is not measuring
+        # whether the gate tracks depth.
+        deviations = []
+        for _, block in joined.groupby("pair_id", sort=True):
+            block_retained = (block["retained"].astype(bool).to_numpy()
+                              if "retained" in block
+                              else ~block["final_rejected"].astype(bool).to_numpy())
+            block_auc = rank_auc(
+                block["predownsample_total_counts"].to_numpy(dtype=np.float64),
+                block_retained,
+            )
+            if np.isfinite(block_auc):
+                deviations.append(abs(block_auc - 0.5))
+        deviations = np.asarray(deviations)
+        bound = ACCEPTANCE["abs_auc_deviation"]
+        median_deviation = (float(np.median(deviations)) if deviations.size
+                            else float("nan"))
+        over_bound = (float(np.mean(deviations > bound)) if deviations.size
+                      else float("nan"))
+
         verdict = "unread"
-        if np.isfinite(auc) and np.isfinite(standard_error):
-            deviation = abs(auc - 0.5)
-            if standard_error > 0 and (ACCEPTANCE["abs_auc_deviation"]
-                                       / standard_error) < 2.0:
-                # The threshold sits inside two standard errors of the null, so
-                # neither outcome would carry information.
+        pooled_deviation = abs(auc - 0.5)
+        if deviations.size >= ACCEPTANCE["minimum_pairs_for_per_pair"]:
+            verdict = ("pass" if median_deviation <= bound
+                       and abs(rho) <= ACCEPTANCE["abs_spearman"]
+                       else f"fail (median deviation {median_deviation:.3f}, "
+                            f"{over_bound:.0%} of pairs over)")
+        elif np.isfinite(auc) and np.isfinite(standard_error):
+            # Too few pairs to read a distribution, so the pooled value is all
+            # there is -- with the estimability check it needs.
+            if standard_error > 0 and (bound / standard_error) < 2.0:
                 verdict = "not estimable"
-            elif (deviation <= ACCEPTANCE["abs_auc_deviation"]
+            elif (pooled_deviation <= bound
                   and abs(rho) <= ACCEPTANCE["abs_spearman"]):
-                verdict = "pass"
+                verdict = f"pass, pooled only ({deviations.size} pairs)"
             else:
-                verdict = f"fail (deviation {deviation:.3f})"
+                verdict = (f"fail, pooled only (deviation "
+                           f"{pooled_deviation:.3f})")
+        # Cancellation, stated as a number rather than left for a reader to
+        # notice. A pooled deviation far below the typical per-pair one means
+        # the pooled figure is an average of effects in both directions.
+        cancellation = (median_deviation - pooled_deviation
+                        if np.isfinite(median_deviation) else float("nan"))
         rows.append({
             "dataset": label,
             "pairs": joined["pair_id"].nunique(),
             "cells": len(joined),
             "rejected": k,
             "rejection_rate": float(rejected.mean()),
+            "median_per_pair_deviation": median_deviation,
+            "pairs_over_bound": over_bound,
+            "max_per_pair_deviation": (float(deviations.max())
+                                       if deviations.size else float("nan")),
             "auc_predownsample_total_counts": auc,
+            "pooled_deviation": pooled_deviation,
+            "cancellation": cancellation,
             "auc_standard_error": standard_error,
             "auc_in_standard_errors": ((auc - 0.5) / standard_error
                                        if standard_error else float("nan")),
@@ -211,21 +278,28 @@ def main() -> None:
                 "dataset": label, "pair_id": pair_id, "cells": len(block),
                 "rejected": block_k,
                 "auc": rank_auc(block_depth, block_retained),
-                "standard_error": (np.sqrt(1.0 / (12.0 * block_k))
-                                   if block_k else float("nan")),
+                "standard_error": auc_standard_error(
+                    int(block_retained.sum()), block_k),
             })
 
     if not rows:
         raise SystemExit("no dataset produced a pooled statistic")
     pooled = pd.DataFrame(rows)
     pd.set_option("display.width", 220)
-    print("Pooled across pairs, source side, depth from before equalisation\n")
+    print("Source side, depth from before equalisation. The verdict reads the")
+    print("per-pair deviations where there are enough pairs to form them, and")
+    print("the pooled AUC only where there are not.\n")
     print(pooled.round(4).to_string(index=False))
-    print(f"\nacceptance: |auc - 0.5| <= {ACCEPTANCE['abs_auc_deviation']} AND "
-          f"|spearman| <= {ACCEPTANCE['abs_spearman']}. AUC > 0.5 means "
-          f"retained cells are deeper, the direction every dataset showed. "
-          f"'not estimable' means the bound sits within two standard errors of "
-          f"0.5 even pooled, so neither outcome would carry information.")
+    bound = ACCEPTANCE["abs_auc_deviation"]
+    print(f"\nacceptance: median per-pair |auc - 0.5| <= {bound} AND "
+          f"|spearman| <= {ACCEPTANCE['abs_spearman']}, on datasets with at "
+          f"least {ACCEPTANCE['minimum_pairs_for_per_pair']} pairs; the pooled "
+          f"AUC with an estimability check below that. AUC > 0.5 means "
+          f"retained cells are deeper.")
+    print("\n`cancellation` is the median per-pair deviation minus the pooled "
+          "one. A large value\nmeans the pooled figure averages per-pair "
+          "effects running in both directions, so\nreading it as 'no depth "
+          "dependence' would be wrong.")
     if per_pair_rows:
         # ASCII only: a section sign prints as mojibake on a console that is
         # not UTF-8, and a garbled caveat is a caveat nobody reads.
