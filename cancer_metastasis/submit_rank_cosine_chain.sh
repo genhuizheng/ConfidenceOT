@@ -57,6 +57,7 @@
 #   bash cancer_metastasis/submit_rank_cosine_chain.sh ovarian
 #   bash cancer_metastasis/submit_rank_cosine_chain.sh colorectal
 #   PREPROCESSING=rank128_ds_cos bash cancer_metastasis/submit_rank_cosine_chain.sh headneck
+#   SOURCE_MANIFEST=/path/to/manifest.csv bash cancer_metastasis/submit_rank_cosine_chain.sh colorectal
 #   DRY_RUN=1 bash cancer_metastasis/submit_rank_cosine_chain.sh prostate
 set -eo pipefail
 
@@ -155,10 +156,32 @@ if [[ -f "$manifest" ]]; then
   echo "J1 equalise    reusing $manifest"
   equalise_job=""
 else
+  # The replication roots carry a date in their name, so the configured path
+  # above is a guess about a stamp. Search for the manifest rather than insist
+  # on the guess: one match is used, several are reported for the caller to
+  # choose between with SOURCE_MANIFEST, none is a real error.
+  if [[ ! -f "$source_manifest" && -n "${SOURCE_MANIFEST:-}" ]]; then
+    source_manifest=$SOURCE_MANIFEST
+  fi
   if [[ ! -f "$source_manifest" ]]; then
-    echo "Source manifest does not exist: $source_manifest" >&2
-    echo "Build it before running this chain." >&2
-    exit 2
+    echo "Configured source manifest is absent: $source_manifest" >&2
+    echo "Searching $result for one belonging to $accession ..." >&2
+    mapfile -t found < <(find "$result" -maxdepth 4 -type f \
+      \( -name 'pair_manifest_malignant_eligible.csv' \
+         -o -name 'pair_manifest_eligible.csv' \) \
+      -path "*${accession}*" 2>/dev/null | sort)
+    if (( ${#found[@]} == 1 )); then
+      source_manifest=${found[0]}
+      echo "Found: $source_manifest" >&2
+    elif (( ${#found[@]} > 1 )); then
+      echo "Several candidates; re-run with SOURCE_MANIFEST=<one of these>:" >&2
+      printf '  %s\n' "${found[@]}" >&2
+      exit 2
+    else
+      echo "No manifest for $accession under $result." >&2
+      echo "Build it first, or pass SOURCE_MANIFEST=<path>." >&2
+      exit 2
+    fi
   fi
   equalise_job=$(submit \
     -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J "cot_ds_$dataset" \
