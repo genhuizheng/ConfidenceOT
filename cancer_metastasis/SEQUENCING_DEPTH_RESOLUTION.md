@@ -417,3 +417,71 @@ rate would be a target for the wrong quantity.
 are read.** The prostate arm is the precedent: 996 significant genes raw, 3
 after equalisation. A DEG computed before the acceptance test is a number that
 cannot be withdrawn once it has been seen.
+
+### What the rank-cut audit actually found, 2026-09-21
+
+All four datasets cleared a cut of 256 with no cell encoded short. The margins
+are the interesting part:
+
+| dataset | cells equalised | pairs | target depth | largest cut every cell fills |
+|---|---:|---:|---:|---:|
+| GSE180661 ovarian | — (reused) | 20 | 3,119 | **282** |
+| GSE271675 prostate | — (reused) | 23 | — | 501 |
+| GSE225857 colorectal | 23,954 | 5 | 2,455 | (see log) |
+| GSE181919 head & neck | 810 | 4 | 4,933 | 981 |
+
+Two things follow.
+
+**Ovarian clears 256 by 26 genes.** The pipeline's own default is
+`--rank-top-n 512`, and at 512 that dataset would have been encoded short — some
+cells on fewer coordinates than others, which is the low-content artefact the
+fixed cut exists to prevent. The audit was worth the job number.
+
+**Prostate's floor of 501 is a QC threshold, not a property of the data.** Every
+one of its pairs reports `detected_min` of exactly 501, because the object was
+prepared with `--minimum-detected-genes 500`. Anyone reading `safe_top_n = 501`
+as "this data supports a cut of 500" would be reading the filter.
+
+### The acceptance test is not estimable on GSE181919, and I should have checked
+
+§7 prescribes one threshold — `auc_predownsample_total_counts ≤ 0.60` — for all
+four datasets. It was written without checking that any of them could carry it.
+GSE181919 cannot.
+
+That dataset has **810 malignant cells in total**, across four pairs of 89, 112,
+182 and 427 cells counting both sides. The depth AUC is an AUC of depth against
+the retained/rejected label, so its standard error runs about `sqrt(1/(12k))` in
+`k` rejected cells. Splitting each pair evenly and assuming a 20% rejection rate:
+
+| pair | cells | source | rejected `k` | s.e.(AUC) | 0.10 expressed in s.e. |
+|---|---:|---:|---:|---:|---:|
+| P22 | 182 | 91 | 18 | 0.068 | 1.5 |
+| P38 | 112 | 56 | 11 | 0.086 | 1.2 |
+| P46 | 427 | 214 | 43 | 0.044 | 2.3 |
+| P59 | 89 | 44 | 9 | 0.097 | 1.0 |
+
+The distance between the null and the acceptance threshold is one to two
+standard errors. Three of the four pairs cannot distinguish a pass from a
+failure, and a per-pair verdict on them would be a coin toss wearing a
+threshold.
+
+**Amendment, recorded before the numbers exist.** For GSE181919 the acceptance
+test is evaluated on the gate **pooled across pairs** — 810 cells, about 81
+rejected, s.e. 0.032, which does resolve 0.10 — and the per-pair statistics are
+reported without a verdict. This is not a free move:
+`25_diagnose_gate_covariates.py` aggregates per-pair statistics by their median
+and tests them with a Wilcoxon that needs at least six values, so on four pairs
+it produces neither a usable median nor a p-value. The pooled figure has to be
+computed separately when the results land; the per-pair file it writes carries
+what is needed.
+
+The same arithmetic passes the other three: GSE225857 has 23,954 cells over five
+pairs, and ovarian and prostate have 20 and 23 pairs. The threshold stands for
+them unchanged.
+
+**What this does not license.** Pooling is the right estimator for a small
+dataset and it is also the one that hides heterogeneity between pairs, which is
+the thing the per-pair view exists to show. A pooled GSE181919 result at 0.55
+means "this dataset, taken together, still tracks depth a little"; it does not
+mean every pair does, and the four per-pair numbers should be printed beside it
+so a reader can see the spread they are not being asked to interpret.
