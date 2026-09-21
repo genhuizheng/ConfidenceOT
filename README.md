@@ -43,7 +43,9 @@ platform-specific CUDA wheel.
 
 ## Basic usage
 
-ConfidenceOT accepts a non-negative source-by-target cost matrix.
+ConfidenceOT accepts a non-negative source-by-target cost matrix. To go
+from counts to that cost matrix, see [From counts to a cost
+matrix](#from-counts-to-a-cost-matrix).
 
 ```python
 import numpy as np
@@ -85,6 +87,79 @@ print(result.source_confidence.normalized_rejection_score())
 `True` in a gate means that the observation is retained. `False` means that it
 is rejected by the confidence filter. Iteration caps and detected cycles are
 reported as warnings while the finite terminal result is retained.
+
+## From counts to a cost matrix
+
+`ConfidenceOT.fit` takes a cost matrix, and on single-cell counts what decides
+the answer is mostly upstream of it: the transform the representation is built
+in, whether read depth was equalised first, and whether the cost is squared
+Euclidean or cosine. `Preprocessing` carries that whole chain as one object you
+can name, record and reuse.
+
+```python
+import numpy as np
+from confidenceot import ConfidenceOT, Preprocessing
+
+configuration = Preprocessing(
+    normalisation="rank_value",   # cpm | log_cpm | log1p | precomputed
+                                  # pearson_residuals | rank_value | rank_no_median
+    rank_top_n=256,
+    equalise_depth=True,          # subsample every cell to one shared depth
+    equalise_quantile=0.10,
+    n_hvg=2000,
+    n_pcs=30,
+    cost="cosine",                # squared_euclidean | cosine
+)
+
+print(configuration.label())      # "rank256_ds_cos"
+
+model = ConfidenceOT(variant="exact", rejection_cost=0.5, device="cpu")
+result, prepared = model.fit_counts(
+    source_counts, target_counts,          # cells x genes, raw counts
+    preprocessing=configuration, seed=0,
+    source_genes=source_gene_names,        # optional; intersects the two sides
+    target_genes=target_gene_names,
+)
+
+print(prepared.scale)             # the median sampled pair distance
+print(prepared.provenance)        # the configuration plus what each step did
+```
+
+`fit_counts` returns both halves on purpose. `rejection_cost` is in units of
+`prepared.scale`, and `prepared.provenance` is what a run record needs, so a
+result on its own cannot be read back.
+
+The steps are also available individually — `equalise_depth`, `unit_rows`,
+`squared_euclidean`, `median_pair_scale`, `rank_value_encode` — and
+`configuration.representation(...)` stops at the coordinates if you want the
+representation without a cost.
+
+`normalisation="precomputed"` is how a transform from another package enters:
+compute it yourself, pass the matrix, and name it with `label_stem` so the run
+is still identifiable.
+
+```python
+configuration = Preprocessing(
+    normalisation="precomputed", label_stem="sctransform",
+    equalise_depth=True, cost="cosine",
+)
+representation = configuration.representation(source_residuals,
+                                               target_residuals, seed=0)
+```
+
+**Which options have evidence behind them.** On two independent simulators, the
+choice that separated a gate's false-rejection rate was the cost: every squared
+Euclidean configuration false-rejected 0.071–0.098 of cells that should not have
+been rejected, every cosine one 0.000–0.057, with no overlap. `cpm` and `log1p`
+exist because the chain needs them and were not measured. `equalise_depth` is
+not attributed: on a simulation whose depth mechanism is multinomial, read
+equalisation is that mechanism's exact inverse, so measuring it there is
+circular. `cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md` has the full table
+and the caveats.
+
+`Preprocessing` needs scikit-learn for the PCA step:
+`pip install "confidenceot[preprocessing]"`. The solver itself does not, so
+`fit(cost_matrix)` still runs on numpy and scipy alone.
 
 ## M4-E and M4-R
 

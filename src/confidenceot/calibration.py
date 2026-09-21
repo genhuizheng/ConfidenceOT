@@ -10,16 +10,10 @@ import warnings
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from confidenceot.api import ConfidenceOT
-
-
-def _squared_euclidean(left: NDArray[np.float64], right: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Pairwise squared Euclidean distance using only NumPy."""
-    distances = (
-        np.sum(left * left, axis=1)[:, None]
-        + np.sum(right * right, axis=1)[None, :]
-        - 2.0 * left @ right.T
-    )
-    return np.maximum(distances, 0.0)
+# The same construction the observed cost is built with. A null calibrated
+# through a second implementation of the cost would be calibrating against a
+# slightly different geometry than the one it is meant to threshold.
+from confidenceot.preprocessing import squared_euclidean as _squared_euclidean
 
 
 @dataclass(frozen=True)

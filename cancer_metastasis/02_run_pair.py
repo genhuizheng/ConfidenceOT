@@ -14,16 +14,13 @@ import pandas as pd
 from confidenceot import (
     ConfidenceOT,
     calibrate_confidence_cost,
+    median_pair_scale,
     rotation_null_costs,
+    squared_euclidean,
     within_side_null_costs,
 )
 from common import (cell_qc_table, json_ready, load_exact_side,
-                    prepare_joint_representation, unit_rows)
-
-
-def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    value = np.sum(left * left, axis=1)[:, None] + np.sum(right * right, axis=1)[None, :] - 2 * left @ right.T
-    return np.maximum(value, 0.0)
+                    prepare_joint_representation)
 
 
 def budget_tag(
@@ -383,24 +380,18 @@ def main() -> None:
     if args.max_observed_cells_per_side > 0 and target.n_obs > args.max_observed_cells_per_side:
         keep = np.sort(sample_rng.choice(target.n_obs, args.max_observed_cells_per_side, replace=False))
         target = target[keep].copy()
+    # cost='cosine' L2-normalises the coordinates inside, before the scale is
+    # estimated below, so the median is measured on the geometry the gate will
+    # see. In the depth screen that is the one change that separated the rate
+    # of rejection on populations containing nothing to reject, on both
+    # simulators, at no cost in power. See SEQUENCING_DEPTH_RESOLUTION.md.
     source_pca, target_pca, hvg, preprocessing = prepare_joint_representation(
         source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=args.seed + args.index,
         representation=args.representation, rank_top_n=args.rank_top_n,
-        minimum_detection_rate=args.minimum_detection_rate,
+        minimum_detection_rate=args.minimum_detection_rate, cost=args.cost,
     )
-    if args.cost == "cosine":
-        # Before the scale estimate below, so the median is measured on the
-        # geometry the gate will see. Validated in the depth screen: on
-        # splatter counts this cuts the false-rejection rate on populations
-        # containing nothing to reject from 7-10% to 2%, and at N=5000 to
-        # 0.1%, while holding the highest positive-control F1 in the screen.
-        # See cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md.
-        source_pca, target_pca = unit_rows(source_pca), unit_rows(target_pca)
-
     rng = np.random.default_rng(args.seed + args.index * 104729)
-    pairs = min(1_000_000, max(len(source_pca) * len(target_pca), 1))
-    sampled = np.sum((source_pca[rng.integers(len(source_pca), size=pairs)] - target_pca[rng.integers(len(target_pca), size=pairs)]) ** 2, axis=1)
-    scale = float(np.median(sampled[sampled > 0]))
+    scale = median_pair_scale(source_pca, target_pca, rng=rng)
     cost = squared_euclidean(source_pca, target_pca) / scale
     if args.fixed_rejection_cost is None:
         # One subsample size for both sides so every null shares one shape, as

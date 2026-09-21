@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal, Sequence
+from typing import Literal, Sequence, TYPE_CHECKING
 import warnings
 
 import numpy as np
@@ -12,6 +12,9 @@ from numpy.typing import ArrayLike
 
 from confidenceot.cuda import CUDAUnavailableError, cuda_available, fit_cuda
 from confidenceot.result import BinConfidence, ConfidenceOTResult
+
+if TYPE_CHECKING:  # the preprocessing module needs scikit-learn
+    from confidenceot.preprocessing import CostMatrix, Preprocessing
 
 
 Backbone = Literal["balanced", "uot"]
@@ -130,6 +133,52 @@ class ConfidenceOT:
                     stacklevel=2,
                 )
         return self._warn_if_needed(self._fit_cpu(cost, **kwargs))
+
+    def fit_counts(
+        self,
+        source_counts: ArrayLike,
+        target_counts: ArrayLike,
+        *,
+        preprocessing: "Preprocessing",
+        seed: int,
+        rng: np.random.Generator | None = None,
+        source_genes: Sequence[object] | None = None,
+        target_genes: Sequence[object] | None = None,
+        equalise: bool = True,
+        **fit_kwargs: object,
+    ) -> tuple[ConfidenceOTResult, "CostMatrix"]:
+        """Build the cost matrix from counts, then fit; return both.
+
+        A two-line composition, kept here because those two lines had been
+        written separately at every call site and had already drifted: the
+        median scale estimate and the cosine step existed in two copies, and
+        the screen's conclusions are statements about a configuration that the
+        production runner assembled by hand.
+
+        Both halves come back deliberately. The result alone cannot be read:
+        ``rejection_cost`` is in units of ``CostMatrix.scale``, and
+        ``CostMatrix.provenance`` is what a run record needs. Returning only
+        the result would make the configuration unrecoverable, which is the
+        problem this method exists to fix.
+
+        The preprocessing stays a separate object rather than constructor
+        arguments, so that "the depth correction is decoupled from the
+        algorithm" remains inspectable rather than a claim about code nobody
+        can point at.
+        """
+        from confidenceot.preprocessing import Preprocessing  # noqa: F401
+
+        if not isinstance(preprocessing, Preprocessing):
+            raise TypeError(
+                "preprocessing must be a confidenceot.Preprocessing; got "
+                f"{type(preprocessing).__name__}"
+            )
+        prepared = preprocessing.cost_matrix(
+            source_counts, target_counts, seed=seed, rng=rng,
+            source_genes=source_genes, target_genes=target_genes,
+            equalise=equalise,
+        )
+        return self.fit(prepared.cost, **fit_kwargs), prepared
 
     def fit_many(
         self,

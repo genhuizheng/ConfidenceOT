@@ -1,4 +1,14 @@
-"""Shared I/O and representation helpers for metastatic cancer analyses."""
+"""Shared I/O and the AnnData adapter over the library's preprocessing.
+
+Everything from the gene intersection onwards now lives in
+``confidenceot.preprocessing``, so the depth screen and this pipeline run
+the same code. What stays here is what the library has no business knowing:
+h5ad loading, sample selection, gene-key resolution, declared expression
+kinds and per-cell QC.
+
+The transforms, the read equalisation, the cost geometry and their
+provenance are re-exported below so existing imports keep working.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +19,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy import sparse
+
+# Re-exported so that `from common import unit_rows` and friends keep working
+# in the scripts that already do it; the implementations are the library's.
+from confidenceot.preprocessing import (  # noqa: F401
+    Preprocessing,
+    equalise_depth,
+    median_pair_scale,
+    pearson_residual_block,
+    pearson_residual_gene_variance,
+    rank_value_encode,
+    squared_euclidean,
+    unit_rows,
+)
 
 
 def string_list(value: Any) -> list[str]:
@@ -285,294 +308,92 @@ def cell_qc_table(
     })
 
 
-def _nonzero_median_per_gene(matrix: Any) -> np.ndarray:
-    """Median of each gene's nonzero values, as Geneformer defines its scale.
+REPRESENTATIONS = ("log_cpm", "rank_value", "rank_no_median",
+                   "pearson_residuals")
 
-    Zeros are excluded because including them would make the median zero for
-    almost every gene in single-cell data, leaving nothing to divide by.
+
+def _library_normalisation(representation: str, kind: str) -> tuple[str, str | None]:
+    """Map a representation and a stored expression kind onto the library's.
+
+    The library's normalisations say what they do to the numbers; an h5ad's
+    ``expression_kind`` says what has already been done to them. Only this
+    layer knows both, which is why the mapping lives here and not in
+    ``confidenceot.preprocessing``.
     """
-    columns = matrix.tocsc()
-    medians = np.ones(columns.shape[1], dtype=np.float64)
-    for gene in range(columns.shape[1]):
-        start, stop = columns.indptr[gene], columns.indptr[gene + 1]
-        if stop > start:
-            medians[gene] = float(np.median(columns.data[start:stop]))
-    return np.where(medians > 0, medians, 1.0)
-
-
-def rank_value_encode(joint: Any, top_n: int, use_gene_median: bool = True) -> Any:
-    """Encode each cell as its ranking of genes, in Geneformer's formulation.
-
-    Each cell is divided by its own total, each gene by its nonzero median over
-    the joint matrix, and the genes are then ranked within the cell.  The two
-    divisions are what make the ordering informative: ranking raw expression
-    puts the same housekeeping genes on top of every cell, whereas ranking
-    ``expression / gene median`` puts whatever is unusually high in *this* cell
-    on top.
-
-    The median must be taken over both sides together.  Taken per side it would
-    normalise away exactly the cross-side differences the gate exists to
-    detect, and the method would be blind by construction.
-
-    Only the top ``top_n`` genes are kept, and the value falls linearly from
-    1.0 to 1/top_n across them.  A fixed cut is what makes the encoding
-    depth-invariant: cells differ in how many genes they detect, so a variable
-    cut would let detection breadth back in, which is the part of the depth
-    effect that survives subsampling to a common total -- on GSE180661 the gate
-    still tracked original depth at AUC 0.557 among cells all sitting at
-    exactly 3,119 counts. ``top_n`` therefore has to stay below the shallowest
-    cell's detected-gene count.
-    """
-    if top_n < 2:
-        raise ValueError("top_n must be at least 2")
-    totals = np.asarray(joint.sum(axis=1)).ravel()
-    scaled = sparse.diags(1.0 / np.maximum(totals, 1e-12)) @ sparse.csr_matrix(joint)
-    if use_gene_median:
-        medians = _nonzero_median_per_gene(scaled)
-        scaled = (scaled @ sparse.diags(1.0 / medians)).tocsr()
-    else:
-        # The ablation: ranking library-normalised expression directly. Kept so
-        # the claim that this is dominated by housekeeping genes, and therefore
-        # nearly identical across cells, is measured rather than asserted.
-        scaled = scaled.tocsr()
-
-    rows, columns, values = [], [], []
-    for cell in range(scaled.shape[0]):
-        start, stop = scaled.indptr[cell], scaled.indptr[cell + 1]
-        if stop == start:
-            continue
-        data = scaled.data[start:stop]
-        genes = scaled.indices[start:stop]
-        keep = min(top_n, data.size)
-        # Stable sort so ties break on gene order, making the encoding
-        # reproducible rather than dependent on the sort implementation.
-        order = np.argsort(-data, kind="stable")[:keep]
-        rows.append(np.full(keep, cell, dtype=np.int64))
-        columns.append(genes[order])
-        values.append(1.0 - np.arange(keep, dtype=np.float64) / float(top_n))
-    if not rows:
-        raise ValueError("Every cell is empty; nothing to rank")
-    return sparse.csr_matrix(
-        (np.concatenate(values), (np.concatenate(rows), np.concatenate(columns))),
-        shape=scaled.shape,
-    )
-
-
-REPRESENTATIONS = ("log_cpm", "rank_value", "rank_no_median", "pearson_residuals")
-
-
-def pearson_residual_gene_variance(
-    joint: Any, theta: float, chunk: int = 512
-) -> np.ndarray:
-    """Per-gene variance of analytic Pearson residuals.
-
-    The residual of a count against the depth-only expectation
-    ``mu = cell_total * gene_share`` under a negative binomial with dispersion
-    ``theta``.  Its point is that a zero in a deep cell and a zero in a shallow
-    cell receive different residuals, which is the part of the depth effect
-    that library-size division cannot reach and that subsampling to a common
-    total does not remove.
-
-    Computed in gene blocks because the residual matrix is dense -- every entry,
-    including the zeros, has a nonzero residual -- and materialising all of it
-    for tens of thousands of genes is unnecessary when only the most variable
-    are kept.
-    """
-    totals = np.asarray(joint.sum(axis=1), dtype=np.float64).ravel()
-    gene_totals = np.asarray(joint.sum(axis=0), dtype=np.float64).ravel()
-    grand = float(gene_totals.sum())
-    if grand <= 0:
-        raise ValueError("Joint matrix carries no counts")
-    share = gene_totals / grand
-    limit = np.sqrt(joint.shape[0])
-    columns = joint.tocsc()
-    variances = np.zeros(joint.shape[1], dtype=np.float64)
-    for start in range(0, joint.shape[1], chunk):
-        stop = min(start + chunk, joint.shape[1])
-        expected = np.outer(totals, share[start:stop])
-        scale = np.sqrt(expected + expected * expected / theta)
-        block = columns[:, start:stop].toarray()
-        residual = (block - expected) / np.maximum(scale, 1e-12)
-        np.clip(residual, -limit, limit, out=residual)
-        variances[start:stop] = residual.var(axis=0)
-    return variances
-
-
-def pearson_residual_block(joint: Any, genes: np.ndarray, theta: float) -> np.ndarray:
-    """Dense analytic Pearson residuals for the chosen genes."""
-    totals = np.asarray(joint.sum(axis=1), dtype=np.float64).ravel()
-    gene_totals = np.asarray(joint.sum(axis=0), dtype=np.float64).ravel()
-    share = gene_totals / float(gene_totals.sum())
-    limit = np.sqrt(joint.shape[0])
-    block = joint.tocsc()[:, genes].toarray()
-    expected = np.outer(totals, share[genes])
-    scale = np.sqrt(expected + expected * expected / theta)
-    residual = (block - expected) / np.maximum(scale, 1e-12)
-    np.clip(residual, -limit, limit, out=residual)
-    return residual.astype(np.float32)
-
-
-def unit_rows(matrix: np.ndarray) -> np.ndarray:
-    """L2-normalise each row, leaving any all-zero row alone.
-
-    Cosine distance on these rows is the squared Euclidean distance on them:
-    for unit vectors ``||a - b||^2 = 2 - 2 cos(a, b)``. Normalising the joint
-    representation therefore turns the existing cost, median scaling and null
-    calibration into the cosine version without touching any of them, and makes
-    explicit that "use cosine" means "discard each cell's magnitude and nothing
-    else".
-
-    Applied to the representation before the cost is built and before the
-    median scale is estimated, so the scale is measured on the same geometry
-    the gate sees.
-
-    It lives here rather than in either caller because the depth screen and the
-    production pair runner must apply the identical operation for the screen's
-    conclusion to carry over, and two copies of four lines drift.
-
-    The floating dtype is preserved rather than promoted to float64. The screen
-    hands this float32 PCA coordinates, and the configuration choice recorded in
-    SEQUENCING_DEPTH_RESOLUTION.md was measured that way; promoting here would
-    make those runs non-reproducible for no gain, since the norm of a 30-vector
-    is nowhere near float32's limits.
-    """
-    values = np.asarray(matrix)
-    if not np.issubdtype(values.dtype, np.floating):
-        values = values.astype(np.float64)
-    norm = np.linalg.norm(values, axis=1, keepdims=True)
-    return values / np.where(norm > 0.0, norm, 1.0)
+    if representation != "log_cpm":
+        return representation, None
+    if "log-normalized" in kind or "log normalized" in kind:
+        return "precomputed", "logcpm"
+    if "normalized" in kind and "raw" not in kind:
+        return "log1p", None
+    return "log_cpm", None
 
 
 def prepare_joint_representation(
     source: Any, target: Any, *, n_hvg: int, n_pcs: int, seed: int,
     representation: str = "log_cpm", rank_top_n: int = 512,
     minimum_detection_rate: float = 0.0, residual_theta: float = 100.0,
+    cost: str = "squared_euclidean",
 ):
-    source_keys, target_keys = gene_keys(source), gene_keys(target)
-    source_first: dict[str, int] = {}
-    target_first: dict[str, int] = {}
-    for index, key in enumerate(source_keys):
-        source_first.setdefault(str(key), index)
-    for index, key in enumerate(target_keys):
-        target_first.setdefault(str(key), index)
-    common = sorted(set(source_first) & set(target_first))
-    if len(common) < 2:
-        raise ValueError("Fewer than two common genes")
-    source_index = [source_first[key] for key in common]
-    target_index = [target_first[key] for key in common]
-    source_x = sparse.csr_matrix(expression_matrix(source)[:, source_index], dtype=np.float64)
-    target_x = sparse.csr_matrix(expression_matrix(target)[:, target_index], dtype=np.float64)
-    source_kind, target_kind = expression_kind(source), expression_kind(target)
-    def normalize(matrix, kind):
-        if "log-normalized" in kind or "log normalized" in kind:
-            return matrix, "stored log-normalized expression used without retransformation"
-        if "normalized" in kind and "raw" not in kind:
-            if matrix.data.size and np.min(matrix.data) < 0:
-                return matrix, "stored normalized expression contains negative values; used as provided"
-            matrix.data = np.log1p(matrix.data)
-            return matrix, "stored normalized expression -> log1p"
-        totals = np.asarray(matrix.sum(axis=1)).ravel()
-        scaled = sparse.diags(1e4 / np.maximum(totals, 1.0)) @ matrix
-        scaled.data = np.log1p(scaled.data)
-        return scaled, "raw counts -> library size 1e4 -> log1p"
+    """Joint representation of one pair, from two AnnData objects.
+
+    The AnnData adapter over :class:`confidenceot.Preprocessing`: it resolves
+    gene keys and the stored expression kind, and everything from the gene
+    intersection onwards is the library's. The transform, the depth
+    equalisation and the cost geometry had been written out separately here and
+    in ``scripts/validate_depth_null_specificity.py``, which meant the screen's
+    conclusions were measurements of a configuration the production runner
+    assembled by hand. ``tests/test_preprocessing.py`` pins the move: the cost
+    matrix, its scale and the generator state are unchanged for all eight
+    measured configurations.
+
+    ``cost='cosine'`` L2-normalises the coordinates before returning them, so a
+    caller cannot reach the cosine configuration by remembering to do it
+    afterwards and miss it.
+
+    One behaviour change: the two sides must now declare the same expression
+    kind for *every* representation. The rank and residual paths already
+    refused a mismatch; ``log_cpm`` used to transform each side by its own
+    declared kind, which puts the two sides of one joint PCA on different
+    scales. That was permissive where it should not have been.
+    """
     if representation not in REPRESENTATIONS:
         raise ValueError(
-            f"Unknown representation {representation!r}; expected one of {REPRESENTATIONS}"
+            f"Unknown representation {representation!r}; expected one of "
+            f"{REPRESENTATIONS}"
         )
-
-    # A gene detected in very few cells carries mostly its own zero pattern,
-    # and that pattern is what depth writes into the data. Filtering on
-    # detection is orthogonal to the transform and composes with any of them.
-    detection_note = "no detection-rate filter"
-    if minimum_detection_rate > 0.0:
-        counted = sparse.vstack([source_x, target_x], format="csr")
-        detected = np.asarray((counted > 0).sum(axis=0)).ravel() / counted.shape[0]
-        keep = detected >= minimum_detection_rate
-        if int(keep.sum()) < 2:
-            raise ValueError(
-                f"Detection rate >= {minimum_detection_rate} leaves "
-                f"{int(keep.sum())} genes"
-            )
-        source_x = source_x[:, keep]
-        target_x = target_x[:, keep]
-        common = [gene for gene, flag in zip(common, keep) if flag]
-        detection_note = (
-            f"genes detected in >= {minimum_detection_rate:.3f} of cells; "
-            f"{int(keep.sum())} of {len(keep)} kept"
+    source_kind, target_kind = expression_kind(source), expression_kind(target)
+    if source_kind != target_kind:
+        raise ValueError(
+            f"{representation} needs both sides on one scale; found "
+            f"{source_kind!r} and {target_kind!r}"
         )
-
-    if representation == "pearson_residuals":
-        if source_kind != target_kind:
-            raise ValueError(
-                "pearson_residuals needs both sides on one scale; found "
-                f"{source_kind!r} and {target_kind!r}"
-            )
-        counts = sparse.vstack([source_x, target_x], format="csr")
-        variances = pearson_residual_gene_variance(counts, residual_theta)
-        selected = np.argsort(-variances, kind="stable")[: min(n_hvg, len(common))]
-        dense = pearson_residual_block(counts, selected, residual_theta)
-        source_transform = target_transform = (
-            f"joint analytic Pearson residuals, theta={residual_theta:g}, "
-            "genes ranked by residual variance"
-        )
-    elif representation in ("rank_value", "rank_no_median"):
-        # Stacked before any per-side transformation, so the gene medians and
-        # the ranking see one corpus. A per-side transform here would defeat
-        # the joint median.
-        if source_kind != target_kind:
-            raise ValueError(
-                f"{representation} needs both sides on one scale; found "
-                f"{source_kind!r} and {target_kind!r}"
-            )
-        use_median = representation == "rank_value"
-        joint = rank_value_encode(
-            sparse.vstack([source_x, target_x], format="csr"),
-            rank_top_n, use_gene_median=use_median,
-        )
-        mean = np.asarray(joint.mean(axis=0)).ravel()
-        mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
-        selected = np.argsort(-(mean2 - mean * mean), kind="stable")[
-            : min(n_hvg, len(common))
-        ]
-        dense = joint[:, selected].toarray().astype(np.float32)
-        source_transform = target_transform = (
-            f"joint rank encoding, top {rank_top_n} genes per cell, "
-            + ("expression divided by each gene's nonzero median over both sides"
-               if use_median else
-               "expression ranked directly, without the gene-median division")
-        )
-    else:
-        source_x, source_transform = normalize(source_x, source_kind)
-        target_x, target_transform = normalize(target_x, target_kind)
-        joint = sparse.vstack([source_x, target_x], format="csr")
-        mean = np.asarray(joint.mean(axis=0)).ravel()
-        mean2 = np.asarray(joint.multiply(joint).mean(axis=0)).ravel()
-        selected = np.argsort(-(mean2 - mean * mean), kind="stable")[
-            : min(n_hvg, len(common))
-        ]
-        dense = joint[:, selected].toarray().astype(np.float32)
-    dense -= dense.mean(axis=0)
-    std = dense.std(axis=0)
-    dense /= np.where(std > 1e-8, std, 1.0)
-    from sklearn.decomposition import PCA
-    components = min(n_pcs, dense.shape[0] - 1, dense.shape[1])
-    coordinates = PCA(n_components=components, random_state=seed).fit_transform(dense)
-    preprocessing = {
+    normalisation, label_stem = _library_normalisation(representation, source_kind)
+    configuration = Preprocessing(
+        normalisation=normalisation,
+        rank_top_n=rank_top_n,
+        residual_theta=residual_theta,
+        minimum_detection_rate=minimum_detection_rate,
+        n_hvg=n_hvg,
+        n_pcs=n_pcs,
+        cost=cost,
+        label_stem=label_stem,
+    )
+    prepared = configuration.representation(
+        expression_matrix(source), expression_matrix(target), seed=seed,
+        source_genes=gene_keys(source), target_genes=gene_keys(target),
+    )
+    # The keys the existing run records carry, kept so a new run.json can still
+    # be read beside an old one, plus everything the configuration object knows.
+    provenance = {
         "source_expression_kind": source_kind,
         "target_expression_kind": target_kind,
-        "source_transform": source_transform,
-        "target_transform": target_transform,
+        "source_transform": prepared.provenance["transform"],
+        "target_transform": prepared.provenance["transform"],
         "representation": representation,
-        "rank_top_n": rank_top_n if "rank" in representation else None,
-        "residual_theta": residual_theta if representation == "pearson_residuals" else None,
-        "detection_filter": detection_note,
-        "joint_hvg": (
-            "top variance of the rank encoding" if representation == "rank_value"
-            else "top variance after side-specific declared-expression transformation"
-        ),
-        "joint_pca": "centered and gene-scaled PCA",
+        **prepared.provenance,
     }
-    return coordinates[: source.n_obs], coordinates[source.n_obs :], [common[index] for index in selected], preprocessing
+    return prepared.source, prepared.target, prepared.selected_genes, provenance
 
 
 def json_ready(value: Any) -> Any:

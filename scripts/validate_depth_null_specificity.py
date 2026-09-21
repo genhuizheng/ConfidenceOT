@@ -2,10 +2,18 @@
 
 This script is deliberately independent of the Splatter scaling benchmark.  It
 builds its own counts so that the ground truth is a construction rather than a
-simulator parameter, then runs the exact production path used by the cancer
-workflow: ``raw counts -> normalisation -> joint HVG -> gene scaling -> joint
-PCA -> squared Euclidean cost -> median scaling -> null calibration -> M4-E``.
-``--normalization`` and ``--calibration-null`` select the two steps under test.
+simulator parameter, then runs the production path through the same object the
+cancer workflow uses, :class:`confidenceot.Preprocessing`: ``raw counts ->
+optional read equalisation -> normalisation -> joint HVG -> gene scaling ->
+joint PCA -> optional L2 normalisation -> squared Euclidean cost -> median
+scaling -> null calibration -> M4-E``.
+
+Running one object rather than a parallel copy of those steps is the point.
+Until it was shared, this file and ``cancer_metastasis/02_run_pair.py`` each
+wrote out the transform, the cosine step and the median scale, which meant this
+screen measured configurations that the production runner only approximated.
+``tests/test_preprocessing.py`` pins the move against values captured from the
+old path.
 
 Two separate questions are measured, because they have different consequences.
 
@@ -42,6 +50,7 @@ forces it".  Running both modes is the point of the script.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -53,12 +62,9 @@ from scipy.stats import rankdata, spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cancer_metastasis.common import (  # noqa: E402
-    prepare_joint_representation,
-    unit_rows,
-)
 from confidenceot import (  # noqa: E402
     ConfidenceOT,
+    Preprocessing,
     calibrate_confidence_cost,
     rotation_null_costs,
     within_side_null_costs,
@@ -83,38 +89,55 @@ OBSERVED_ARMS = {
 }
 
 
-def squared_euclidean(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    value = (
-        np.sum(left * left, axis=1)[:, None]
-        + np.sum(right * right, axis=1)[None, :]
-        - 2.0 * left @ right.T
-    )
-    return np.maximum(value, 0.0)
+def arm_offset(arm: str) -> int:
+    """A per-arm seed offset that is the same in every process.
 
+    ``abs(hash(arm)) % 10_000`` was used here, and Python randomises string
+    hashing per process unless ``PYTHONHASHSEED`` is set, so every invocation
+    of this script drew a different seed for the same arm.  Two runs of one
+    configuration were therefore never the same run, which is not a small
+    matter for a script whose output is a table of small differences between
+    configurations.
 
-def equalise_reads(
-    rng: np.random.Generator, counts: np.ndarray, target: int,
-) -> np.ndarray:
-    """Subsample every cell's reads to one shared total.
-
-    The same operation as ``cancer_metastasis/27_downsample_counts.py`` and as
-    ``scanpy.pp.downsample_counts``: exact multivariate hypergeometric sampling
-    of reads without replacement. Cells already at or below the target are left
-    untouched, exactly as the production script leaves them, so the residual
-    depth gradient the simulation sees is the same one the real runs see.
-
-    This step was missing from the simulation entirely, which is why its
-    gene-ranking arm measured ranking *alone*. On real prostate data ranking
-    alone leaves the gate at AUC 0.060 while ranking plus this step reaches
-    0.493, so the arm the figure showed was never the production pipeline.
+    This does not recover the seeds of runs already made -- those are gone.
+    What it fixes is that a rerun now reproduces, and that a difference between
+    two arms is a difference between the arms.
     """
-    equalised = np.array(counts, dtype=np.int64, copy=True)
-    totals = equalised.sum(axis=1)
-    for index in np.flatnonzero(totals > target):
-        equalised[index] = rng.multivariate_hypergeometric(
-            equalised[index], int(target)
+    return int(hashlib.sha256(arm.encode("utf-8")).hexdigest()[:8], 16) % 10_000
+
+
+def preprocessing_for(args: argparse.Namespace):
+    """Build the one configuration object every arm of this screen runs.
+
+    The screen's whole output is a table indexed by configuration, so the
+    configuration has to be the same object the production runner uses --
+    otherwise the table describes a pipeline that only exists here.  That was
+    the case until this was moved: the transform, the equalisation, the cosine
+    step and the median scale were written out separately in this file and in
+    ``cancer_metastasis/02_run_pair.py``.
+
+    ``--equalise-depth`` matters more than its one line suggests.  Its arm was
+    missing from the simulation entirely at first, so the gene-ranking arm
+    measured ranking *alone*: on real prostate data ranking alone leaves the
+    gate at AUC 0.060 while ranking plus equalisation reaches 0.493, and the
+    figure was showing a pipeline nobody had run.
+    """
+    if args.external_representation:
+        return Preprocessing(
+            normalisation="precomputed",
+            label_stem=args.external_representation,
+            equalise_depth=bool(args.equalise_depth),
+            equalise_quantile=args.equalise_quantile,
+            n_hvg=args.n_hvg, n_pcs=args.n_pcs, cost=args.cost,
         )
-    return equalised
+    return Preprocessing(
+        normalisation=args.representation,
+        rank_top_n=args.rank_top_n,
+        minimum_detection_rate=args.minimum_detection_rate,
+        equalise_depth=bool(args.equalise_depth),
+        equalise_quantile=args.equalise_quantile,
+        n_hvg=args.n_hvg, n_pcs=args.n_pcs, cost=args.cost,
+    )
 
 
 SCTRANSFORM_R = r"""
@@ -229,44 +252,6 @@ def external_normalised(
     raise ValueError(f"Unknown external representation {method!r}")
 
 
-def external_joint_pca(
-    source_counts: np.ndarray, target_counts: np.ndarray, method: str, *,
-    n_hvg: int, n_pcs: int, seed: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Mirror `prepare_joint_representation`'s tail on external residuals.
-
-    Same steps in the same order as the production path -- stack both sides,
-    take the top-variance genes, centre, scale per gene, joint PCA -- so the
-    only thing that differs between an external arm and ours is the transform.
-    """
-    from sklearn.decomposition import PCA
-
-    joint = np.vstack([source_counts, target_counts])
-    dense = external_normalised(joint, method, seed=seed)
-    # Only the cell count has to match. SCTransform drops genes detected in too
-    # few cells, so its residual matrix is narrower than the input, and the
-    # next step selects genes by variance anyway.
-    if dense.shape[0] != joint.shape[0]:
-        raise RuntimeError(
-            f"{method} returned {dense.shape[0]} cells, expected "
-            f"{joint.shape[0]}"
-        )
-    if dense.shape[1] < 2:
-        raise RuntimeError(f"{method} left {dense.shape[1]} genes")
-    if dense.shape[1] != joint.shape[1]:
-        print(f"    {method} kept {dense.shape[1]} of {joint.shape[1]} genes")
-    variances = dense.var(axis=0)
-    selected = np.argsort(-variances, kind="stable")[: min(n_hvg, dense.shape[1])]
-    dense = np.array(dense[:, selected], dtype=np.float32)
-    dense -= dense.mean(axis=0)
-    std = dense.std(axis=0)
-    dense /= np.where(std > 1e-8, std, 1.0)
-    components = min(n_pcs, dense.shape[0] - 1, dense.shape[1])
-    coordinates = PCA(n_components=components,
-                      random_state=seed).fit_transform(dense)
-    return coordinates[: len(source_counts)], coordinates[len(source_counts):]
-
-
 def rank_auc(values: np.ndarray, positive: np.ndarray) -> float:
     """Mann--Whitney AUC with ``positive`` as the positive class."""
     numeric = np.asarray(values, dtype=np.float64)
@@ -348,16 +333,6 @@ def simulate_counts(
     return counts, np.asarray(counts.sum(axis=1), dtype=np.float64), perturbed
 
 
-def as_anndata(counts: np.ndarray, prefix: str):
-    import anndata as ad
-
-    return ad.AnnData(
-        X=counts.astype(np.float32),
-        obs=pd.DataFrame(index=[f"{prefix}{i:05d}" for i in range(counts.shape[0])]),
-        var=pd.DataFrame(index=[f"gene{j:05d}" for j in range(counts.shape[1])]),
-    )
-
-
 def load_depth_pool(path: Path | None, cap: int | None = None) -> np.ndarray | None:
     """Read observed per-cell depths from a stored cell_confidence.csv.
 
@@ -425,7 +400,7 @@ def run_replicate(
     arm: str, settings: dict, replicate: int, args: argparse.Namespace,
     depth_pool: np.ndarray | None = None,
 ) -> dict[str, object]:
-    seed = args.seed + 7919 * replicate + abs(hash(arm)) % 10_000
+    seed = args.seed + 7919 * replicate + arm_offset(arm)
     rng = np.random.default_rng(seed)
     if args.splatter_arms:
         # Depth was applied by splatter's lib.scale rather than by the
@@ -474,41 +449,55 @@ def run_replicate(
     # diagnostics test against stays the pre-equalisation depth, because that
     # is the covariate the gate must not track -- the same reason
     # 27_downsample_counts.py emits predownsample_depth.csv.gz.
-    if args.equalise_depth:
-        pooled = np.concatenate([source_counts.sum(axis=1),
-                                 target_counts.sum(axis=1)])
-        target_depth = int(np.quantile(pooled, args.equalise_quantile))
-        source_counts = equalise_reads(rng, source_counts, target_depth)
-        target_counts = equalise_reads(rng, target_counts, target_depth)
-
+    configuration = preprocessing_for(args)
     if args.external_representation:
-        source_pca, target_pca = external_joint_pca(
-            source_counts, target_counts, args.external_representation,
-            n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
+        # The transform runs in its own package, then re-enters the shared
+        # chain as a precomputed representation. The alternative -- an R and a
+        # scanpy dependency inside confidenceot -- would put two heavy optional
+        # packages behind every import of the solver.
+        #
+        # Equalisation first, and drawn from the same generator in the same
+        # order as every other arm, so an external arm and one of ours differ
+        # in the transform and in nothing else.
+        source_counts, target_counts, equalisation = configuration.equalise(
+            source_counts, target_counts, rng=rng
         )
+        joint = external_normalised(
+            np.vstack([source_counts, target_counts]),
+            args.external_representation, seed=seed,
+        )
+        expected_cells = len(source_counts) + len(target_counts)
+        if joint.shape[0] != expected_cells:
+            raise RuntimeError(
+                f"{args.external_representation} returned {joint.shape[0]} "
+                f"cells, expected {expected_cells}"
+            )
+        if joint.shape[1] < 2:
+            raise RuntimeError(
+                f"{args.external_representation} left {joint.shape[1]} genes"
+            )
+        if joint.shape[1] != source_counts.shape[1]:
+            # SCTransform drops genes detected in too few cells, so a narrower
+            # residual matrix is expected rather than wrong.
+            print(f"    {args.external_representation} kept {joint.shape[1]} "
+                  f"of {source_counts.shape[1]} genes")
+        representation = configuration.representation(
+            joint[: len(source_counts)], joint[len(source_counts):],
+            seed=seed, extra_provenance=equalisation,
+        )
+        prepared = configuration.cost_from_representation(representation, rng=rng)
         hvg = []
     else:
-        source = as_anndata(source_counts, "s")
-        target = as_anndata(target_counts, "t")
-        source_pca, target_pca, hvg, _ = prepare_joint_representation(
-            source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs, seed=seed,
-            representation=args.representation, rank_top_n=args.rank_top_n,
-            minimum_detection_rate=args.minimum_detection_rate,
+        prepared = configuration.cost_matrix(
+            source_counts, target_counts, seed=seed, rng=rng,
+            source_genes=[f"gene{j:05d}" for j in range(source_counts.shape[1])],
+            target_genes=[f"gene{j:05d}" for j in range(target_counts.shape[1])],
         )
-    if args.cost == "cosine":
-        source_pca, target_pca = unit_rows(source_pca), unit_rows(target_pca)
-
-    pairs = min(1_000_000, len(source_pca) * len(target_pca))
-    sampled = np.sum(
-        (
-            source_pca[rng.integers(len(source_pca), size=pairs)]
-            - target_pca[rng.integers(len(target_pca), size=pairs)]
-        ) ** 2,
-        axis=1,
-    )
-    positive = sampled[sampled > 0]
-    scale = float(np.median(positive)) if positive.size else 1.0
-    cost = squared_euclidean(source_pca, target_pca) / scale
+        hvg = list(prepared.representation.selected_genes)
+    source_pca = prepared.representation.source
+    target_pca = prepared.representation.target
+    scale = prepared.scale
+    cost = prepared.cost
 
     calibration_status = "fixed_user_supplied"
     calibration_valid = False
