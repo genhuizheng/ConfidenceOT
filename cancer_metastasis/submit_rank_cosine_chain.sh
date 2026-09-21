@@ -184,15 +184,30 @@ else
       source_manifest=${found[0]}
       echo "Found: $source_manifest" >&2
     elif (( ${#found[@]} > 1 )); then
-      echo "Several candidates. Rows and content hash are printed so an" >&2
-      echo "identical pair can be told from a real choice; re-run with" >&2
-      echo "SOURCE_MANIFEST=<one of these>:" >&2
+      # Several roots holding the *same* manifest is a duplicate, not a
+      # decision: the roots differ in the OT configuration they were run
+      # under, which this chain sets itself, and the manifest is only the pair
+      # list. So compare contents and stop only when they genuinely differ.
+      digests=()
       for candidate in "${found[@]}"; do
-        rows=$(( $(wc -l < "$candidate") - 1 ))
-        digest=$(md5sum "$candidate" | cut -c1-12)
-        printf '  %s  rows=%s  md5=%s\n' "$candidate" "$rows" "$digest" >&2
+        digests+=("$(md5sum "$candidate" | cut -c1-12)")
       done
-      exit 2
+      unique=$(printf '%s\n' "${digests[@]}" | sort -u | wc -l)
+      if (( unique == 1 )); then
+        source_manifest=${found[0]}
+        echo "Found ${#found[@]} copies of one manifest (md5 ${digests[0]}," \
+             "$(( $(wc -l < "$source_manifest") - 1 )) pairs); using" >&2
+        echo "$source_manifest" >&2
+      else
+        echo "Several candidates, and they differ. Pick one with" >&2
+        echo "SOURCE_MANIFEST=<path>:" >&2
+        for index in "${!found[@]}"; do
+          rows=$(( $(wc -l < "${found[index]}") - 1 ))
+          printf '  %s  rows=%s  md5=%s\n' "${found[index]}" "$rows" \
+            "${digests[index]}" >&2
+        done
+        exit 2
+      fi
     else
       echo "No manifest for $accession under $result." >&2
       echo "Build it first, or pass SOURCE_MANIFEST=<path>." >&2
