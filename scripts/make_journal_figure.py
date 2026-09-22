@@ -275,11 +275,11 @@ def panel_f1(axes, f1: pd.DataFrame, batch: str, title: str, legend: bool) -> No
 
 
 GROUPS = ["Traditional OT", "Vanilla UOT", "ConfidenceOT", "Partial OT"]
-# Why Partial OT has only one size, stated under the bars it belongs to
-# rather than left to the caption. The comparator is the exact augmented
-# Hungarian assignment, so 5,000 and 10,000 are out of reach by construction,
-# not missing runs -- the benchmark's own audit records all 20 of its expected
-# cases as complete.
+# What the note under Partial OT's bars says. It used to explain that the
+# exact augmented-Hungarian comparator could not reach 5,000 or 10,000 at all.
+# It can: the 2026-09-21 audit records `partial_ot_sizes: [1000, 5000, 10000]`
+# and 60 of 60 cases complete. What remains true is the cost, so the note is
+# now about the exponent and not about feasibility.
 GROUP_NOTE = {"Partial OT": "exact, $\\mathcal{O}(N^{3})$"}
 
 
@@ -385,12 +385,21 @@ def panel_runtime(axes, runtime: pd.DataFrame) -> None:
                      .groupby("n_cells").single_fit_seconds_mean.mean())
         axes.plot(SIZES, curve.reindex(SIZES).values, marker=marker,
                   color=colour, label=name, clip_on=False, zorder=3)
+    # Partial OT as a curve across whatever sizes it reached, not one point
+    # labelled "N=1000 only". That label was true of the earlier benchmark,
+    # whose audit recorded `partial_ot_larger_sizes_status: "N/A: the
+    # historical exact augmented-Hungarian comparator is O(N^3)"`. The
+    # 2026-09-21 run has it at every size, 60 of 60 cases, so what this panel
+    # now shows for it is a slope -- which is the cost claim being made.
     partial = (runtime[runtime.group == "Partial OT"]
                .groupby("n_cells").single_fit_seconds_mean.mean())
-    if 1000 in partial.index:
-        axes.plot([1000], [partial.loc[1000]], marker="D", color=C_PART,
-                  ls="none", label="Partial OT ($N=1000$ only)", clip_on=False,
-                  zorder=3)
+    reached = [size for size in SIZES if size in partial.index]
+    if reached:
+        label = ("Partial OT" if len(reached) == len(SIZES)
+                 else f"Partial OT ($N \\leq {max(reached)}$)")
+        axes.plot(reached, partial.reindex(reached).values, marker="D",
+                  color=C_PART, ls="-" if len(reached) > 1 else "none",
+                  label=label, clip_on=False, zorder=3)
 
     reference = np.array(SIZES, float)
     axes.plot(reference, 0.22 * (reference / 1000.0) ** 2, ls=":", lw=0.9,
