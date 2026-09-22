@@ -182,10 +182,19 @@ def main() -> None:
           "0.6\nhere means rank + equalisation + cosine did not take depth out "
           "of the leading\naxes; a value near 0.1 means it did and the UMAP "
           "reading was wrong.")
-    print("\nThe equalised-depth column is the control. It should be near "
-          "zero, because\nevery cell was subsampled to one total; if it is "
-          "not, the equalisation did not\ndo what it claims and nothing else "
-          "in this table can be read.")
+    print("\nThe equalised-depth column is the control, and it is expected to "
+          "be small\nrather than zero. `--target-quantile 0.10` puts the "
+          "target at the 10th\npercentile, so by construction the shallowest "
+          "tenth of cells are already at or\nbelow it and are left untouched. "
+          "Ninety percent then tie at exactly the target\nwhile ten percent "
+          "spread below, which a principal component separating that\ntail "
+          "will correlate with. Values around 0.2 to 0.45 are that tail, not a "
+          "broken\nequalisation.")
+    print("\nWhat it does say is that the equalisation covers 90% of cells and "
+          "not 100%,\nand the tenth it misses is the shallowest tenth -- the "
+          "cells whose depth\nmatters most. Raising the quantile, or dropping "
+          "cells below the target, would\nclose it at the cost of discarding "
+          "more reads or more cells.")
 
     high = pairs.nlargest(min(12, len(pairs)),
                           "max_abs_rho_predownsample_depth")

@@ -158,12 +158,23 @@ def draw(frame: pd.DataFrame, dataset: str, pair_id: str, out: Path,
         for spine in axis.spines.values():
             spine.set_color("#d8d8d2")
 
-    axes[0].scatter(primary.x, primary.y, s=size, c=PRIMARY, linewidths=0,
-                    label=f"primary ({len(primary):,})")
-    axes[0].scatter(metastasis.x, metastasis.y, s=size, c=METASTASIS,
-                    linewidths=0, label=f"metastasis ({len(metastasis):,})")
+    # Interleaved, not one side over the other. Drawing primary then
+    # metastasis put 9,976 metastatic cells on top of 6,382 primary ones on
+    # GSE225857 s0920, so panel (a) showed a solid metastatic cloud and could
+    # not answer the one question it exists for -- whether the two sides
+    # overlap.
+    order = np.random.default_rng(0).permutation(len(frame))
+    shuffled = frame.iloc[order]
+    axes[0].scatter(shuffled.x, shuffled.y, s=size, linewidths=0,
+                    c=[PRIMARY if side == "primary" else METASTASIS
+                       for side in shuffled.side])
     axes[0].set_title("(a) both sides", loc="left", fontsize=11)
-    axes[0].legend(loc="best", frameon=False, fontsize=8, markerscale=3)
+    axes[0].legend(handles=[
+        Line2D([], [], marker="o", linestyle="", color=PRIMARY,
+               label=f"primary ({len(primary):,})", markersize=5),
+        Line2D([], [], marker="o", linestyle="", color=METASTASIS,
+               label=f"metastasis ({len(metastasis):,})", markersize=5),
+    ], loc="best", frameon=False, fontsize=8)
 
     axes[1].scatter(metastasis.x, metastasis.y, s=size, c=BACKDROP,
                     linewidths=0)
@@ -293,6 +304,12 @@ def main() -> None:
                         help="restrict to these pair ids; default is all")
     parser.add_argument("--no-contact-sheet", action="store_true")
     parser.add_argument(
+        "--no-frames", action="store_true",
+        help="Skip writing each pair's embedding to frames/<dataset>/"
+             "<pair>.csv.gz. Those files are what let a figure be "
+             "redrawn without recomputing the UMAP, so skipping them "
+             "means any change of layout costs the whole run again.")
+    parser.add_argument(
         "--in-process", action="store_true",
         help="Embed in this process instead of a child per pair. Faster "
              "by a few seconds per pair and liable to run out of threads "
@@ -390,6 +407,17 @@ def main() -> None:
                     frame = frame.rename(
                         columns={"predownsample_total_counts": "depth"})
                 out = args.output_dir / label / f"{pair_id}.png"
+                if not args.no_frames:
+                    # The coordinates, before anything is drawn. The first run
+                    # of this spent fifty-one minutes and produced only PNGs,
+                    # so every later figure -- a different layout, a subset, a
+                    # supplementary plate -- would have had to recompute all
+                    # 127 embeddings. They are small next to the compute that
+                    # made them.
+                    frames_out = (args.output_dir / "frames" / label
+                                  / f"{pair_id}.csv.gz")
+                    frames_out.parent.mkdir(parents=True, exist_ok=True)
+                    frame.to_csv(frames_out, index=False, compression="gzip")
                 measured = draw(frame, label, pair_id, out, args.configuration)
             except Exception as error:  # noqa: BLE001 - reported, not hidden
                 failures.append({"dataset": label, "pair_id": pair_id,
