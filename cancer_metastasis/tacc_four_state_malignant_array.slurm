@@ -46,7 +46,17 @@ fi
 # that can disagree. Prostate carries three malignant labels and colorectal
 # eleven; the older single-valued variable put the other ten in the
 # nonmalignant background. The singular name still works for existing callers.
+# Same choice as the OT array, and it must match it: a gate built on the
+# uniform call and a background built from cell_type would be two definitions
+# of malignant inside one patient's pseudobulk.
+if [[ -n "${CONFIDENCEOT_MALIGNANT_COLUMN:-}" ]]; then
+  extra+=(--malignant-column "$CONFIDENCEOT_MALIGNANT_COLUMN")
+fi
 annotation_spec=${CONFIDENCEOT_MALIGNANT_ANNOTATIONS:-${CONFIDENCEOT_MALIGNANT_ANNOTATION:-}}
+if [[ -n "${CONFIDENCEOT_MALIGNANT_COLUMN:-}" && -n "$annotation_spec" ]]; then
+  echo "set CONFIDENCEOT_MALIGNANT_COLUMN or CONFIDENCEOT_MALIGNANT_ANNOTATIONS, not both" >&2
+  exit 2
+fi
 if [[ -n "$annotation_spec" ]]; then
   IFS='|' read -r -a malignant_annotations <<< "$annotation_spec"
   for annotation in "${malignant_annotations[@]}"; do

@@ -56,6 +56,34 @@ def labels(data) -> np.ndarray:
     return np.repeat("unannotated", data.n_obs)
 
 
+def malignant_mask(data, column: str, value: str, undetermined: str):
+    """Cells the uniform call names malignant, and what it declined to name.
+
+    The alternative to a per-deposit list of the deposit's own ``cell_type``
+    strings -- one label for ovarian, three for prostate, eleven for colorectal.
+    Those lists confound the malignancy method with the cancer type in exactly
+    the comparison this project makes, and a deposit whose files carry no
+    ``cell_type`` column silently selects nothing at all.
+
+    ``undetermined`` is returned separately and never folded. It means the
+    method assessed the cell and declined: no CNV cluster separated from the
+    diploid reference, or the sample failed its control. Across the collection
+    there are 233,314 such cells, the same order as the malignant set, so
+    treating them as non-malignant moves a quarter of a million cells into the
+    source distribution without saying so.
+    """
+    import numpy as np
+
+    if column not in data.obs:
+        raise KeyError(
+            f"obs has no {column!r} column; its columns are "
+            f"{sorted(data.obs.columns)[:12]}. A file from a source that "
+            f"predates the uniform call has to use --include-annotation."
+        )
+    values = data.obs[column].astype(str).to_numpy()
+    return np.asarray(values == value), int((values == undetermined).sum())
+
+
 def prior_result_directory(root: Path, pair_id: str, budget_tag: str) -> Path:
     path = root / pair_id / "scope_malignant" / budget_tag
     if not (path / "SUCCESS").is_file():
@@ -174,6 +202,15 @@ def main() -> None:
     parser.add_argument("--analysis-scope", choices=("all", "malignant"), default="all")
     parser.add_argument("--include-annotation", action="append", default=[],
                         help="Cell-type value retained in malignant scope; may be repeated")
+    parser.add_argument("--malignant-column", default=None, metavar="COLUMN",
+                        help="Select the malignant compartment by this obs "
+                             "column equalling --malignant-value, instead of "
+                             "by --include-annotation. One rule for every "
+                             "deposit; requires files carrying the uniform "
+                             "call. Cells equal to --undetermined-value are "
+                             "dropped and counted, never folded either way.")
+    parser.add_argument("--malignant-value", default="malignant")
+    parser.add_argument("--undetermined-value", default="undetermined")
     parser.add_argument("--minimum-scope-cells", type=int, default=20)
     parser.add_argument("--cell-qc", action="store_true",
                         help="Apply label-blind cell QC before representation learning and OT")
@@ -377,13 +414,32 @@ def main() -> None:
     source = load_exact_side(paths_for("source"), str(row["source_sample"]))
     target = load_exact_side(paths_for("target"), str(row["target_sample"]))
     source_exact_n, target_exact_n = source.n_obs, target.n_obs
+    undetermined_n = {"source": 0, "target": 0}
     if args.analysis_scope == "malignant":
-        if not args.include_annotation:
-            raise ValueError("malignant scope requires at least one --include-annotation value")
-        source_label = labels(source)
-        target_label = labels(target)
-        source = source[np.isin(source_label, args.include_annotation)].copy()
-        target = target[np.isin(target_label, args.include_annotation)].copy()
+        if args.malignant_column:
+            if args.include_annotation:
+                # Silently preferring one would make the run's own record of
+                # which rule it used depend on argument order.
+                raise ValueError(
+                    "--malignant-column and --include-annotation select the "
+                    "malignant compartment two different ways; pass one")
+            source_mask, undetermined_n["source"] = malignant_mask(
+                source, args.malignant_column, args.malignant_value,
+                args.undetermined_value)
+            target_mask, undetermined_n["target"] = malignant_mask(
+                target, args.malignant_column, args.malignant_value,
+                args.undetermined_value)
+            source = source[source_mask].copy()
+            target = target[target_mask].copy()
+        else:
+            if not args.include_annotation:
+                raise ValueError(
+                    "malignant scope requires --include-annotation or "
+                    "--malignant-column")
+            source_label = labels(source)
+            target_label = labels(target)
+            source = source[np.isin(source_label, args.include_annotation)].copy()
+            target = target[np.isin(target_label, args.include_annotation)].copy()
     source_scope_n, target_scope_n = source.n_obs, target.n_obs
     qc_tables = []
     if args.cell_qc:
@@ -582,6 +638,15 @@ def main() -> None:
             "source_exact_n": source_exact_n, "target_exact_n": target_exact_n,
             "analysis_scope": args.analysis_scope,
             "included_annotations": "|".join(args.include_annotation),
+            # Which rule chose the compartment, recorded because a run whose
+            # malignant set came from the deposit's own labels and one whose
+            # came from the uniform call are not the same experiment, and
+            # nothing downstream can tell them apart from the cell counts.
+            "malignant_selector": (
+                f"{args.malignant_column}=={args.malignant_value}"
+                if args.malignant_column else "cell_type in included_annotations"),
+            "source_undetermined_n": undetermined_n["source"],
+            "target_undetermined_n": undetermined_n["target"],
             "source_scope_n": source_scope_n, "target_scope_n": target_scope_n,
             "cell_qc_applied": args.cell_qc,
             "source_qc_pass_n": source_qc_pass_n,

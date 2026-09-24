@@ -177,9 +177,21 @@ if [[ -n "${CONFIDENCEOT_MINIMUM_DETECTION_RATE:-}" ]]; then
   qc_args+=(--minimum-detection-rate "$CONFIDENCEOT_MINIMUM_DETECTION_RATE")
 fi
 
-if [[ "$analysis_scope" == "malignant" ]]; then
+# CONFIDENCEOT_MALIGNANT_COLUMN selects the compartment by the collection's
+# uniform inferCNV call instead of by this deposit's own cell_type strings.
+# One rule for every deposit, which is the comparison the collection exists to
+# make; the annotation list stays for files that predate it, such as the
+# prostate h5ads, whose malignant compartment is therefore defined differently
+# in kind from the others and has to be said so in Methods.
+malignant_column=${CONFIDENCEOT_MALIGNANT_COLUMN:-}
+if [[ "$analysis_scope" == "malignant" && -n "$malignant_column" ]]; then
+  scope_args+=(--malignant-column "$malignant_column")
+  if [[ -n "${CONFIDENCEOT_MALIGNANT_VALUE:-}" ]]; then
+    scope_args+=(--malignant-value "$CONFIDENCEOT_MALIGNANT_VALUE")
+  fi
+elif [[ "$analysis_scope" == "malignant" ]]; then
   if [[ -z "$annotation_spec" ]]; then
-    echo "CONFIDENCEOT_INCLUDE_ANNOTATIONS is required for malignant scope" >&2
+    echo "set CONFIDENCEOT_INCLUDE_ANNOTATIONS or CONFIDENCEOT_MALIGNANT_COLUMN for malignant scope" >&2
     exit 2
   fi
   IFS='|' read -r -a annotations <<< "$annotation_spec"

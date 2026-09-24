@@ -148,6 +148,15 @@ def parse_args() -> argparse.Namespace:
     # single-valued form silently routed the other ten into the nonmalignant
     # background state. It does not touch the retained/rejected contrast,
     # which takes its cells from the gate rather than from these labels.
+    parser.add_argument("--malignant-column", default=None, metavar="COLUMN",
+                        help="Define the non-malignant background by this obs "
+                             "column instead of by --malignant-annotation. "
+                             "The background becomes the cells the uniform "
+                             "call names non-malignant STRICTLY: cells it "
+                             "declined to call are dropped and counted, not "
+                             "folded into the background.")
+    parser.add_argument("--non-malignant-value", default="non_malignant")
+    parser.add_argument("--undetermined-value", default="undetermined")
     parser.add_argument("--malignant-annotation", action="append",
                         default=None, dest="malignant_annotations",
                         metavar="LABEL",
@@ -162,7 +171,11 @@ def parse_args() -> argparse.Namespace:
     # Resolved here rather than as an argparse default: `action="append"` on a
     # non-empty default appends to it instead of replacing it, so one
     # --malignant-annotation would yield the ovarian label plus the new one.
-    if not args.malignant_annotations:
+    if args.malignant_column and args.malignant_annotations:
+        raise ValueError(
+            "--malignant-column and --malignant-annotation define the "
+            "background two different ways; pass one")
+    if not args.malignant_annotations and not args.malignant_column:
         args.malignant_annotations = [MALIGNANT]
     if args.sensitivity_root is not None and args.robustness_csv is None:
         # analysis_groups reads the winner columns out of the robustness table,
@@ -660,6 +673,7 @@ def main() -> None:
         )
     }
     cell_n = {state: 0 for state in counts}
+    undetermined_total = 0
     used_for_ot: set[str] = set()
     for side, paths_by_sample, cells, prefix in (
         ("primary", source_paths, source_cells, "primary"),
@@ -684,8 +698,24 @@ def main() -> None:
                 state = f"{prefix}_{status}"
                 add_vector(counts[state], genes, values)
                 cell_n[state] += len(indices)
-            background = np.flatnonzero(
-                np.isin(annotations, args.malignant_annotations, invert=True))
+            if args.malignant_column:
+                if args.malignant_column not in data.obs:
+                    raise KeyError(
+                        f"obs has no {args.malignant_column!r} column in "
+                        f"{sample!r}; use --malignant-annotation for files "
+                        f"that predate the uniform call")
+                call = data.obs[args.malignant_column].astype(str).to_numpy()
+                # Strictly equal, not "anything that is not malignant": the
+                # undetermined cells were assessed and declined, and folding
+                # them into the background would put a quarter of a million
+                # cells across the collection into a state they were never
+                # called into.
+                background = np.flatnonzero(call == args.non_malignant_value)
+                undetermined_total += int(
+                    (call == args.undetermined_value).sum())
+            else:
+                background = np.flatnonzero(
+                    np.isin(annotations, args.malignant_annotations, invert=True))
             values = np.asarray(matrix[background].sum(axis=0)).ravel()
             state = f"{prefix}_nonmalignant"
             add_vector(counts[state], genes, values)
@@ -809,6 +839,11 @@ def main() -> None:
         "excluded_pairs": excluded_pairs,
         "exact_winner_robust_only": not args.include_exact_winner_unstable,
         "state_cell_n": cell_n,
+        "malignant_selector": (
+            f"{args.malignant_column}=={args.non_malignant_value} for background"
+            if args.malignant_column
+            else "cell_type not in malignant_annotations for background"),
+        "undetermined_dropped_n": undetermined_total,
         "source_consensus_definition": (
             "counted once; same gate across every selected metastatic partner"
         ),
