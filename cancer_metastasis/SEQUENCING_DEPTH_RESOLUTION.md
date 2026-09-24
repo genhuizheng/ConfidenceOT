@@ -25,16 +25,21 @@ rank + DS + cosine leaves the leading axis correlated with detected genes at
 shows. That is not a residual the treatment failed to reach; it is a covariate
 the treatment does not touch once the totals are equalised.
 
-**And whether read equalisation belongs in the pipeline at all is open, not
-settled** (9b, 9f). Every arm of every screen run so far treats depth as pure
-nuisance, so no measurement here can charge equalisation for anything it
-removes -- the same objection this document raises against regress-out, which
-it failed to apply to equalisation for a week. On real data depth is partly
-biological, and the stage is applied at the file level, so the differential
-expression and the scoring pay for it too. Three arms therefore go to the real
-data together -- with equalisation, with equalisation plus regress-out, and
-without equalisation -- and the comparison between them is what decides it.
-No differential expression from any of them until it does.
+**Read equalisation was measured where it could not lose, and then measured
+where it could** (9b, 9f). Every arm of every earlier screen treats depth as
+pure nuisance, so none of them could charge equalisation for anything it
+removes -- the same objection this document raises against regress-out, and it
+went unapplied to equalisation for a week. The arm that fixes this gives the
+planted subpopulation twice the depth of everything else, so the cue
+equalisation deletes is perfectly correlated with the right answer. It still
+loses: 0.927 without equalisation against 0.949 with it, and a control
+rejection rate of 0.034 against 0.023. **The stage is justified for the
+representation and the gate.** What is not settled is applying it at the file
+level, where the differential expression and the scoring pay for it too and
+nothing here measures the cost. Three arms still go to the real data --
+with equalisation, with equalisation plus regress-out, and without -- because
+whether this transfers is a separate question from whether it holds in
+simulation. No differential expression from any of them until it does.
 
 ---
 
@@ -730,9 +735,10 @@ records the stage's own defect: `--target-quantile 0.10` leaves the shallowest
 tenth untouched by construction, so it covers 90% of cells and misses the ones
 whose depth matters most.
 
-So the position is that this screen cannot decide it. `rank256_cos` goes to
-the real data as a third arm rather than being ruled out by a simulator that
-cannot charge it for anything it removes.
+So the screen as it stood could not decide it. 9f built the arm that can,
+and the answer came back against dropping the stage: where depth carries
+signal, removing it still helps. What remains unpriced is not the stage but
+*where it is applied* -- see the end of 9f.
 
 ### 9c. The shipped configuration does not handle detection breadth
 
@@ -867,9 +873,64 @@ data is deeper because it was sequenced better, the recall this arm credits to
 depth is spurious there. The simulation gives the magnitude of what is at
 stake, not the decision.
 
-Until these return, 9a's attribution stands and 9b's verdict does not. We know
-which covariate each treatment removes. We do not yet know what any of them
-costs.
+#### What it returned, 2026-09-23
+
+Three replicates, twelve configurations, ranges in brackets.
+
+| configuration | `f1_depth_informative` | control rejection |
+|---|---|---|
+| `rank256_cos` | 0.927 (0.908-0.940) | 0.034 (0.028-0.044) |
+| `rank256_ds_cos` | **0.949** (0.938-0.960) | **0.023** (0.020-0.026) |
+| `logcpm_cos` | 0.868 (0.844-0.897) | 0.045 (0.039-0.049) |
+| `logcpm_ds_cos` | **0.952** (0.946-0.962) | **0.020** (0.015-0.023) |
+
+**The arm was built to give the no-equalisation case its best chance, and the
+no-equalisation case lost it.** Depth here is 2x higher in exactly the cells
+that should be rejected, perfectly correlated with the right answer, and
+equalisation deletes that cue -- and equalisation still wins, on both columns,
+in every configuration. The mechanism is not subtle: the damage depth does by
+organising the representation, 0.969 on the leading axis, outweighs its value
+as a cue even when its value as a cue is made as large as this construction
+allows.
+
+How firm each half is. On power the rank comparison is marginal: 0.908-0.940
+against 0.938-0.960 overlap by 0.002, so the direction is consistent across
+all three replicates but the ranges effectively touch. On log CPM the same
+comparison is clean, 0.844-0.897 against 0.946-0.962, a gap of 0.049. On the
+control the rank comparison separates, 0.028-0.044 against 0.020-0.026, so
+equalisation is unambiguously the more specific of the two. Read together:
+equalisation is clearly better on specificity and not worse on power, and the
+hypothesis that it destroys biological signal is not supported by the arm
+built to detect exactly that.
+
+Two more readings from the same table. Without the cosine cost equalisation
+makes no difference at all here, 0.847 against 0.850, so the interaction is
+with the cost and not with the encoding. And `logcpm` alone collapses to 0.146
+(0.089-0.182), which is what a depth spread of 0.6 plus a deep subpopulation
+does to an untreated representation.
+
+Detected-gene regress-out costs nothing on this arm either: 0.951
+(0.942-0.958) with a control at 0.022, indistinguishable from the full model.
+
+#### What this still does not price
+
+The arm measures the OT gate. It does not measure what read equalisation costs
+the differential expression, because there is no differential expression in
+the simulation at all -- and `27_downsample_counts.py` rewrites the h5ads, so
+the pseudobulk, the DEG and the UCell scoring read the reduced counts too. The
+result above justifies equalising **for the representation and the gate**. It
+says nothing about equalising **at the file level**, which is a separate
+decision currently made for consistency: one matrix, so no stage can disagree
+with another about which counts it used.
+
+That consistency argument is still a real one, and now it has a price tag on
+one side only. The design it points at -- equalised counts for the OT,
+original counts for everything downstream -- has not been tested and is not
+claimed here.
+
+So 9a's attribution stands, and 9b now has an answer for the gate and none for
+the file-level question. We know which covariate each treatment removes, and
+we know what removing depth costs the gate, which is nothing.
 
 ### 9g. A defect found while wiring this, which would have been invisible
 
