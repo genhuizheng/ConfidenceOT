@@ -793,6 +793,15 @@ detected-gene count out removes it along with the artefact.
 So regress-out is an arm to run on real data and compare, not a default. That
 is the PI's "do not assume it is correct", and this round does not settle it.
 
+**Decided 2026-09-23.** The shipped configuration stays `rank256_ds_cos`, and
+regress-out becomes the sensitivity arm reported beside it rather than the
+default. The cost of that choice is that the shipped configuration leaves the
+detected-gene axis at 0.422 on head and neck and 0.645 across datasets, which
+is a fair objection to anything drawn from it; the sensitivity arm is the
+answer to that objection. A conclusion holding under both says the covariate
+was not driving it. See section 2f of
+`EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md`.
+
 ### 9e. What goes to the real data, and what will be read
 
 Two arms across all four datasets, sharing one equalised count matrix and

@@ -26,8 +26,8 @@ by the label `confidenceot.Preprocessing` prints and parses back.
 
 | arm | label | what it adds | why it exists |
 |---|---|---|---|
-| baseline | `rank256_ds_cos` | rank 256, read equalisation, cosine | the configuration run on 2026-09-21, section 8 of the resolution document |
-| breadth | `rank256_rg-genes_ds_cos` | + detected-gene regress-out | 2b below: the baseline does not act on detection breadth at all |
+| **primary** | `rank256_ds_cos` | rank 256, read equalisation, cosine | the shipped configuration, see 2f |
+| **sensitivity** | `rank256_rg-genes_ds_cos` | + detected-gene regress-out | 2b: the primary does not act on detection breadth. Reported beside the primary, not instead of it |
 | no-equalisation | `rank256_cos` | − read equalisation | 2c below. **Demoted after 2c and 2e**: see the note under section 4 |
 
 The baseline is not re-run. Its 2026-09-21 outputs are the comparison.
@@ -229,6 +229,47 @@ So the order is fixed:
 A pair that fails step 2 is not carried into step 3 with a caveat attached. It
 is excluded, and the count of exclusions is reported, because a depth-confounded
 gate read at full depth is the exact failure this whole round exists to avoid.
+
+### 2f. The shipped configuration: `rank256_ds_cos`, with regress-out as sensitivity
+
+Taken 2026-09-23, after 7a returned. **The primary analysis uses
+`rank256_ds_cos` on equalised counts with the expression stages on raw counts
+(2e). Detected-gene regress-out is not adopted as the default.**
+
+The reason is not caution for its own sake. Regress-out removes a covariate
+that is **partly biological on real data**. The calibration round established
+this: a purely technical detection breadth, simulated at wider-than-real
+spread, reaches an axis correlation of only 0.229, far short of the 0.645
+observed. Read equalisation preserves each cell's proportions, so a fivefold
+spread in detected genes at a fixed 3,119 counts means the underlying profiles
+differ in how many genes they express at all. That is transcriptome
+complexity, and it is biology.
+
+So part of the improvement regress-out shows is the removal of real signal.
+Section 5.1's standard -- a setting must not be chosen because it produces a
+more interesting result -- applies just as directly to choosing a setting
+because it produces a cleaner covariate statistic. 7a shows the regression
+reaches its target covariate on real data. It does not show that removing the
+covariate is right, and nothing available can show that.
+
+**What this choice costs, stated rather than hidden.** The shipped
+configuration leaves the leading axis correlated with detected genes at 0.422
+on head and neck and 0.645 across datasets. Any differential expression drawn
+from it is open to exactly that objection, and the objection is a fair one.
+
+**The answer to it is the sensitivity arm, which is what the four
+`rank256_rg-genes_ds_cos` runs now are.** Not a candidate default -- a direct
+response to a known limitation:
+
+| | configuration |
+|---|---|
+| primary | `rank256_ds_cos` gate on equalised counts, expression on raw counts |
+| sensitivity | the same gate with detected genes regressed out of the components |
+
+If a conclusion holds under both, the covariate was not driving it, which is
+stronger evidence than either arm produces alone. If it does not hold, the
+conclusion was never publishable. The arms therefore run to completion and are
+reported together; neither is dropped once the other is read.
 
 ---
 
