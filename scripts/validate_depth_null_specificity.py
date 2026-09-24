@@ -85,20 +85,41 @@ ARMS = {
     # are the arms the depth arms cannot substitute for: in every other arm
     # here, and in splatter, breadth is a function of depth, so "fixed the
     # depth" and "fixed the breadth" are one statement.
-    "homogeneous_breadth_mild": {"depth_sigma": 0.0, "perturbed_fraction": 0.0,
-                                 "breadth_fraction": 0.5,
-                                 "breadth_ratio": 0.50},
-    "homogeneous_breadth_strong": {"depth_sigma": 0.0,
-                                   "perturbed_fraction": 0.0,
-                                   "breadth_fraction": 0.5,
-                                   "breadth_ratio": 0.20},
-    # The same breadth split with the planted subpopulation still present, so
+    # Two of them, because two different mechanisms produce a low gene count
+    # and only one of them is the real data's. Calibrated at 1,500 genes,
+    # depth 6,000 and a rank cut of 128, which is where the crossover sits:
+    #
+    #   ratio 0.10 -> narrow cells detect 131 genes, just above the cut, so
+    #                 every cell fills it and what differs between a narrow
+    #                 and a broad cell is *which* genes their top set is drawn
+    #                 from. Representation axis rho 0.301.
+    #   ratio 0.05 -> narrow cells detect 69, below the cut, so their vectors
+    #                 are supported on fewer coordinates. rho 0.774.
+    #
+    # GSE180661 sits at 0.645 with every cell filling the cut -- its shallowest
+    # detects 282 against a cut of 256 -- so its mechanism is composition and
+    # its magnitude is only reachable here through the other one. Keeping both
+    # arms named for their mechanism is what stops a score on `short` being
+    # read as an answer about the real data.
+    #
+    # It also means this round is weaker evidence than it looks: at the real
+    # data's mechanism the simulation tops out near 0.30 against its 0.645.
+    "homogeneous_breadth_composition": {"depth_sigma": 0.0,
+                                        "perturbed_fraction": 0.0,
+                                        "breadth_fraction": 0.5,
+                                        "breadth_ratio": 0.10},
+    "homogeneous_breadth_short": {"depth_sigma": 0.0,
+                                  "perturbed_fraction": 0.0,
+                                  "breadth_fraction": 0.5,
+                                  "breadth_ratio": 0.05},
+    # The composition split with the planted subpopulation still present, so
     # power can be read in the regime where the correction is working. A
     # correction that removes breadth by removing the cells' differences would
     # pass the two arms above and fail this one.
-    "perturbed_breadth_strong": {"depth_sigma": 0.0, "perturbed_fraction": 0.2,
-                                 "breadth_fraction": 0.5,
-                                 "breadth_ratio": 0.20},
+    "perturbed_breadth_composition": {"depth_sigma": 0.0,
+                                      "perturbed_fraction": 0.2,
+                                      "breadth_fraction": 0.5,
+                                      "breadth_ratio": 0.10},
 }
 
 # Enabled only by --depth-source: the same two questions asked at the depth
@@ -702,6 +723,13 @@ def run_replicate(
             float(np.median(source_detected[retained])) if retained.any()
             else float("nan")),
         **axis_alignment,
+        # Which mechanism is live in this arm. Compare the spread against the
+        # rank cut: cells below it are encoded on fewer coordinates, which is
+        # a different artefact from the composition of a top set they can all
+        # fill, and the real data has only the second.
+        "source_detected_p10": float(np.percentile(source_detected, 10)),
+        "source_detected_p90": float(np.percentile(source_detected, 90)),
+        "source_detected_min": float(source_detected.min()),
         "median_detected_genes_rejected": (
             float(np.median(source_detected[~retained])) if (~retained).any()
             else float("nan")),
