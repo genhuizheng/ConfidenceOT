@@ -342,15 +342,23 @@ reads the original `pair_manifest_*_eligible.csv`. The array index maps to a
 manifest row, so if the two files differ in row count or row order, index 0 is
 a different pair in the two arms and nothing reports it.
 
-One dataset already looks suspect. The colorectal source manifest was resolved
-by search to a file with **5 pairs**, while `OT_ARRAY` for colorectal is
-hardwired to `0-3`. Either the equalised manifest also has 5 and one pair has
-never been run in either arm, or it has 4 and the indices do not correspond.
+**Resolved 2026-09-23, and the first version of this section was wrong about
+the mechanism.** An array task is not a pair: each task iterates several pairs
+from the manifest. Ovarian's eight-task array produces 94 per-pair `SUCCESS`
+markers, and colorectal's four-task array covers all five of its pairs, which
+is what the baseline's five markers show. So `OT_ARRAY=0-3` against a five-pair
+manifest was never the defect it looked like, and the index does not map to a
+manifest row at all.
 
-Required before reading anything: confirm for all four datasets that the two
-manifests list the same pairs in the same order, comparing pair identity and
-not just count. If any dataset fails, its no-equalisation chain is cancelled
-and the arm rebuilt against a manifest that aligns.
+The underlying concern survives in a weaker form. The two arms still read
+different manifests, so they must still list the same pairs -- but the check is
+now direct, and better than comparing manifests: **compare the per-pair output
+directory names across the arms**, which is what was actually run rather than
+what was listed. Counts must match too, at 94, 24, 5 and 4 for ovarian,
+prostate, colorectal and headneck.
+
+Headneck cleared this on completion: four markers in the regress-out arm
+against four in the baseline.
 
 ### 5b. Cell-set identity
 
@@ -372,7 +380,22 @@ interpreted if an earlier one fails.
 ### 6a. The axis — the breadth arm's own test
 
 `max_abs_spearman_pc_detected_genes`, per pair, from
-`25_diagnose_gate_covariates.py`.
+**`tools/audit_depth_axis.py`**.
+
+**The chain does not produce this.** J4 runs
+`25_diagnose_gate_covariates.py`, which scores the *gate* against covariates,
+and `26_diagnose_pairing_quality.py`. Neither computes the representation's
+leading axis, so the primary readout -- the one every later readout is
+conditioned on -- needs a separate invocation against the stored joint PCA
+coordinates that `CONFIDENCEOT_SAVE_PAIRING_EDGES=1` writes:
+
+    python cancer_metastasis/tools/audit_depth_axis.py \
+      --dataset <name>=<ot_root> --dataset <name>=<other_ot_root> \
+      --predownsample-depth <equalised>/predownsample_depth.csv.gz \
+      --out <axis_comparison.csv>
+
+Recorded here because a diagnostics job that reports `COMPLETED` invites the
+assumption that the diagnostics are complete, and for 6a they are not.
 
 | | |
 |---|---|
