@@ -289,6 +289,8 @@ def main() -> None:
                         help="Return immediately when the pair output already contains SUCCESS")
     args = parser.parse_args()
     args.equalise_depth_upstream = False
+    args.regress_out = ()
+    args.regress_on_ranks = True
     if args.preprocessing is not None:
         named = [name for name, value in (("--representation", args.representation),
                                           ("--rank-top-n", args.rank_top_n),
@@ -319,6 +321,8 @@ def main() -> None:
         args.rank_top_n = configuration.rank_top_n
         args.cost = configuration.cost
         args.equalise_depth_upstream = configuration.equalise_depth
+        args.regress_out = configuration.regress_out
+        args.regress_on_ranks = configuration.regress_on_ranks
     if args.representation is None:
         args.representation = "log_cpm"
     if args.rank_top_n is None:
@@ -441,7 +445,23 @@ def main() -> None:
         representation=args.representation, rank_top_n=args.rank_top_n,
         minimum_detection_rate=args.minimum_detection_rate, cost=args.cost,
         equalise_depth=args.equalise_depth_upstream,
+        regress_out=args.regress_out, regress_on_ranks=args.regress_on_ranks,
     )
+    # The label is what the output directory is named after and what every
+    # later stage reads the run as. Unpacking a configuration into separate
+    # arguments means a field nobody forwards is dropped in silence, and the
+    # run then sits in a directory claiming a treatment it never applied --
+    # which is how `regress_out` was nearly submitted. Compare the name the
+    # representation actually built against the name that was asked for, so
+    # any future field fails loudly instead.
+    if args.preprocessing is not None:
+        built = preprocessing.get("label")
+        if built != args.preprocessing:
+            raise SystemExit(
+                f"--preprocessing {args.preprocessing!r} but the "
+                f"representation built {built!r}. A field of the named "
+                f"configuration is not reaching prepare_joint_representation."
+            )
     rng = np.random.default_rng(args.seed + args.index * 104729)
     scale = median_pair_scale(source_pca, target_pca, rng=rng)
     cost = squared_euclidean(source_pca, target_pca) / scale

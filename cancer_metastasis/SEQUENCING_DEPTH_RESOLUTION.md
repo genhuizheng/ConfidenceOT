@@ -17,6 +17,18 @@ named hid that by averaging effects in both directions, and all four datasets
 sit at or above the hardest rung the screen ever measured. No differential
 expression from these runs.
 
+**And the configuration does not act on detection breadth at all** (section
+9). The 2026-09-23 ablation separated the two covariates for the first time,
+by holding total counts fixed while varying the detected-gene count. There,
+rank + DS + cosine leaves the leading axis correlated with detected genes at
+0.729, against 0.085 on the depth arms -- and 0.645 is what the real data
+shows. That is not a residual the treatment failed to reach; it is a
+covariate the treatment does not touch once the totals are equalised. A
+detected-gene regress-out arm removes it to 0.011 in simulation, and is
+submitted alongside the existing run as a comparison, not a replacement:
+breadth on real data is partly biological, which is exactly why it cannot
+be a default.
+
 ---
 
 ## 1. The problem, on real data
@@ -623,3 +635,171 @@ required and which now has a measured reason rather than a precautionary one.
 4. The retention rate needs its own treatment, separate from depth. A gate
    keeping 71% of primary cells is making a different error from one that
    tracks depth, and no configuration tested so far addresses it.
+
+---
+
+## 9. The preprocessing ablation, 2026-09-23
+
+Everything above tested treatments one or two at a time, against arms where
+depth and detection breadth move together. This round tests all three
+treatments as a full factorial, through one evaluation pipeline, and adds the
+arm that separates the two covariates. It changes what the shipped
+configuration is understood to do.
+
+### The design
+
+Twelve configurations: the 2x2x2 of rank encoding, read equalisation (DS) and
+the cosine cost, plus four extra arms -- a detection-rate floor at 10% and at
+25% on the full model, and detected-gene regress-out on the full model and on
+`logcpm_cos`. Identical pipeline throughout: 1,500 cells per side, 4,000
+genes, 2,000 HVG, 30 PCs, 3 replicates, 11 arms.
+`benchmark_results/ablation_20260923/screen_ablation.csv`.
+
+The new arms are `*_breadth_composition`: total counts held at 3,119 for every
+cell while the detected-gene count varies, p10 to p90 of 296 to 1,111. This is
+the arm the whole round exists for. Every earlier arm -- and splatter, which
+reaches depth through `lib.loc`/`lib.scale` -- makes breadth a function of
+depth, so "the depth is fixed" and "the breadth is fixed" were one statement
+and the three treatments could not be attributed. 3,119 counts against a rank
+cut of 256 is where the real data sits, not a round number.
+
+### 9a. The three treatments do not overlap, and there is no interaction
+
+Each controls a different column, and none touches another's:
+
+| treatment | column it controls | without | with |
+|---|---|---:|---:|
+| rank encoding | leading axis vs detected genes | 0.890-0.907 | 0.084-0.085 |
+| read equalisation | leading axis vs total counts | 0.933-0.974 | 0.072-0.200 |
+| cosine cost | F1 at sd(log depth) 0.9 | 0.249-0.803 | 0.684-0.934 |
+
+The absence of interaction is as clean as the effects. Adding DS leaves the
+detected-gene axis unchanged to three decimals (0.9067 both with and without,
+0.8896 both with and without on the cosine side); adding rank leaves the
+total-count axis at 0.933-0.974 either way. The two nuisance axes are
+separately addressed by separate operations, which is why the full model is
+the full model and not a redundancy.
+
+`f1_deep` is what makes the cosine column readable, and it did not exist
+before this round. At zero depth spread log CPM scores 0.880 and looks
+competitive; spread the depth and it falls to 0.249. The earlier figure
+measured power only at zero spread and could not see that.
+
+### 9b. Is downsampling needed? Yes -- and the gate metric says no
+
+The question the PI asked directly, `rank256_cos` against `rank256_ds_cos`:
+
+| | rank + cos | rank + DS + cos |
+|---|---:|---:|
+| gate deviation vs total counts | **0.014** | 0.057 |
+| leading axis vs total counts | 0.969 | **0.073** |
+| F1 at sd(log depth) 0.9 | 0.837 | **0.934** |
+
+Dropping DS *improves* the gate's depth deviation, and passes the
+prespecified `|auc - 0.5| <= 0.10` of section 7 comfortably. On that number
+alone the stage should go.
+
+It should not go, and the reason is that this is the same one-number summary
+that section 8 caught hiding per-pair structure on real data. Two other
+columns disagree with it: without DS the representation's depth axis is
+entirely intact at 0.969, and power at high depth spread falls by 0.097. The
+four datasets sit at sd(log depth) 0.68-0.92, which is exactly the regime
+where that 0.097 applies. A gate that reads clean on a representation still
+organised by depth is a gate whose threshold happens to cut across the axis,
+not one that is free of it.
+
+### 9c. The shipped configuration does not handle detection breadth
+
+On the fixed-count breadth arm, `rank256_ds_cos` leaves the leading axis
+correlated with the detected-gene count at **0.729** (replicates 0.724, 0.730,
+0.732). The same configuration reaches 0.085 on the depth arms. The treatment
+that removes the detected-gene axis when breadth rides on depth does not
+remove it when breadth moves on its own.
+
+Power on the matching perturbed arm falls with it: 0.648 against 0.963 on the
+clean arm.
+
+Two checks that the arm is measuring what it claims. `rank256_cos` returns
+values identical to `rank256_ds_cos` on it, to three decimals, in every
+replicate -- correct, because at a fixed 3,119 counts equalisation has nothing
+to equalise, so the arm is isolating breadth rather than re-testing depth. And
+the detection-rate floor, whose whole rationale was to make a deep and a
+shallow cell rank the same genes, barely moves it: 0.701 at 10%, 0.697 at 25%,
+against 0.729. Restricting the gene pool before the transform is not what the
+artefact responds to.
+
+Detected-gene regress-out is: **0.011** (0.007, 0.012, 0.013). Sixty-fold
+lower, non-overlapping across replicates, and it costs nothing measurable in
+power -- 0.678 against 0.648 on the perturbed breadth arm, but those ranges
+overlap heavily (0.636-0.713 against 0.600-0.694), so the honest statement is
+"not detectably worse", not "better". `f1_deep` is unchanged at 0.934 and
+`f1_clean` falls 0.015.
+
+This is what connects to the real data. Section 8 measured rho 0.645 between
+the leading axes and the detected-gene count on the four datasets, higher than
+the 0.60 the old configuration reached against total depth. The ablation now
+says that is not a residual the configuration failed to reach -- it is a
+covariate the configuration does not act on at all once the totals are
+equalised.
+
+### 9d. Which is still not permission to use regress-out
+
+The simulation makes narrow cells by dropping detected genes at random, so
+breadth carries no biology in it by construction. "No cost in power" on that
+arm is guaranteed by the construction, not measured against anything, and a
+result that cannot come out the other way is not evidence.
+
+There is also positive evidence the other way. The continuous breadth arm was
+calibrated against the real spread and reaches only about 0.10 axis
+correlation at realistic spread, and 0.229 at wider-than-real spread -- far
+short of the observed 0.645. Read equalisation preserves each cell's
+proportions, so a 282-to-1,400 detected-gene spread at exactly 3,119 counts
+means the underlying profiles differ in how many genes they express at all.
+Cells differ in transcriptome complexity, and that is biology. Regressing the
+detected-gene count out removes it along with the artefact.
+
+So regress-out is an arm to run on real data and compare, not a default. That
+is the PI's "do not assume it is correct", and this round does not settle it.
+
+### 9e. What goes to the real data, and what will be read
+
+Two arms across all four datasets, sharing one equalised count matrix and
+differing in exactly one field of the configuration:
+
+- `rank256_ds_cos` -- already run 2026-09-21, section 8
+- `rank256_rg-genes_ds_cos` -- new
+
+Prespecified reading, written before the runs return:
+
+1. **The axis.** `max_abs_spearman_pc_detected_genes` should fall from the
+   observed 0.645 towards the simulation's 0.011. If it does not fall, the
+   regression is not reaching the real covariate and nothing else in the
+   comparison is interpretable.
+2. **The gate.** Per-pair `|auc_predownsample_total_counts - 0.5|`, read as
+   the per-pair distribution and not pooled -- section 8's second defect. The
+   informative outcome is which way these two move together. If the axis falls
+   and the per-pair gate deviations do not, breadth was not what was driving
+   the gate, and the remaining effect is something neither arm addresses.
+3. **Retention.** Section 8 flagged retention rates as a separate defect from
+   depth, and no configuration tested so far addresses it. If retention is
+   unchanged, that stays open and should not be read as a failure of this arm.
+
+Not an acceptance test on its own. Regress-out passing 1 and 2 would say it
+removes the covariate, not that removing the covariate was right -- 9d is why.
+Still **no differential expression from either arm.**
+
+### 9f. A defect found while wiring this, which would have been invisible
+
+`--preprocessing` parsed the whole configuration and then unpacked four of its
+fields into separate arguments. `regress_out` was not one of the four, and
+`prepare_joint_representation` did not accept it. A run submitted as
+`rank256_rg-genes_ds_cos` would have parsed without complaint, named its
+output directory after the regress-out arm, recorded the comparison as run,
+and applied the base configuration -- with no error anywhere and no way to
+tell afterwards except by noticing the two arms agreed too well.
+
+Fixed by forwarding it, and then by removing the class of failure: the runner
+now compares the label the representation actually built against the label it
+was asked for, and stops if they differ. Any future field that fails to reach
+the representation fails loudly instead of silently producing the wrong arm
+under the right name.

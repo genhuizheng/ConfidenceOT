@@ -13,6 +13,7 @@ provenance are re-exported below so existing imports keep working.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -334,6 +335,7 @@ def prepare_joint_representation(
     representation: str = "log_cpm", rank_top_n: int = 512,
     minimum_detection_rate: float = 0.0, residual_theta: float = 100.0,
     cost: str = "squared_euclidean", equalise_depth: bool = False,
+    regress_out: Sequence[str] = (), regress_on_ranks: bool = True,
     label_stem: str | None = None,
 ):
     """Joint representation of one pair, from two AnnData objects.
@@ -351,6 +353,13 @@ def prepare_joint_representation(
     ``cost='cosine'`` L2-normalises the coordinates before returning them, so a
     caller cannot reach the cosine configuration by remembering to do it
     afterwards and miss it.
+
+    ``regress_out``, unlike ``equalise_depth``, *is* applied here: the
+    covariate is read off the matrix this call is given, which downstream of
+    ``27_downsample_counts.py`` means the equalised counts. That is the
+    intended reading. Equalisation makes the total near constant by
+    construction and leaves the detected-gene count alone, so detection
+    breadth is the quantity still there to remove.
 
     ``equalise_depth`` is **recorded, not applied**. Read equalisation happens
     upstream in ``27_downsample_counts.py``, at the file level, so that the OT,
@@ -387,6 +396,8 @@ def prepare_joint_representation(
         n_hvg=n_hvg,
         n_pcs=n_pcs,
         cost=cost,
+        regress_out=tuple(regress_out),
+        regress_on_ranks=regress_on_ranks,
         label_stem=label_stem or resolved_stem,
     )
     prepared = configuration.representation(
