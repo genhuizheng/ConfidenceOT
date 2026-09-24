@@ -165,7 +165,7 @@ def panel_validation(axes) -> None:
               "depth spread, sd(log depth) 0 to 0.9 -- panels (a) to (d), (f) left",
               fontsize=6.2, color=C_COUNTS, ha="left")
     axes.text(0.55, 0.34,
-              "detection breadth at fixed total counts -- panel (f), hollow squares",
+              "detection breadth at fixed total counts -- panel (f), open triangles",
               fontsize=6.2, color=C_GENES, ha="left")
     axes.text(7.5, 0.70, "applied to one side only it would be a batch",
               fontsize=5.8, color="#77776f", ha="left")
@@ -181,6 +181,8 @@ def panel_validation(axes) -> None:
     axes.plot([0.35, 11.65], [0.02, 0.02], color="#d8d8d2", linewidth=0.8)
     axes.text(0.35, -0.29, "what this stands in for:", fontsize=6.4,
               color="#3c3c38", ha="left", fontweight="semibold")
+    axes.text(3.05, -0.29, "a filter, not a test of metastatic competence",
+              fontsize=5.8, color="#77776f", ha="left", style="italic")
     axes.text(0.55, -0.63,
               "source = one patient's primary tumour   target = that patient's "
               "matched metastasis",
@@ -189,100 +191,130 @@ def panel_validation(axes) -> None:
               "retained = primary cells closer to the metastasis than to the "
               "primary's own spread",
               fontsize=6.2, color=C_POWER, ha="left")
-    axes.text(7.9, -0.94,
-              "a filter, not a test of metastatic competence",
-              fontsize=5.8, color="#77776f", ha="left", style="italic")
+
 
     axes.set_title("(e)  How the ground truth is built",
                    loc="left", fontsize=8.4, fontweight="semibold", pad=4)
 
 
-def panel_ablation(axes, ablation: pd.DataFrame, order: list[str],
+def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
                    title: str) -> None:
-    """The factorial, with the metric that belongs to each factor beside it.
+    """The factorial as three columns sharing one y axis, one metric per column.
 
-    Four columns rather than one, because a single score would hide that the
-    factors do different jobs: a configuration can clear the depth axis and
-    leave the gene axis untouched, and only showing both makes that visible.
-    ``f1_deep`` is with them because specificity without power is free -- log
-    CPM keeps its specificity ranking while its F1 falls from 0.88 to 0.25 once
-    depth is spread.
+    The previous version put all four numbers on a single x axis, which was a
+    design error rather than a data problem: the correlation columns are better
+    when low and the F1 column is better when high, so one axis asked the reader
+    to reverse the direction of "good" halfway across a row. It also joined the
+    two breadth points with a hairline, and in a row that also carried an F1
+    diamond that line read as a trajectory through metrics rather than as one
+    metric under two regimes.
 
-    The fourth column is the one the round exists for. ``axis_vs_genes`` is
-    measured where detection breadth rides on depth, and the full model clears
-    it at 0.085. ``axis_vs_genes_split`` is the same correlation where total
-    counts are held at 3,119 and breadth varies on its own, and there the full
-    model sits at 0.730. Plotting only the first would show three solved
-    problems and hide that the configuration does not act on breadth at all
-    once the totals are equalised -- which is what the real data's 0.645 is.
-    The two are drawn as a filled and a hollow square of the same colour,
-    because they are one quantity under two regimes rather than two quantities.
+    Three columns fix both. Each column carries one family with one direction,
+    stated in its own subtitle, and the configuration order on y is identical
+    across all three so a row can be read straight across. What the reader
+    should be able to see without the text: rank collapses the middle column,
+    downsampling collapses the left one, the cosine cost lifts the right one,
+    and the bottom row is all three at once.
+
+    The fixed-count breadth measurement sits in the middle column but as its own
+    marker and its own row offset, never merged into the ordinary series,
+    because it comes from a different simulation regime -- total counts held at
+    3,119 while breadth varies -- and the full model behaves oppositely in the
+    two: 0.085 where breadth rides on depth, 0.730 where it does not.
     """
     present = [name for name in order if name in ablation.index]
     y_positions = np.arange(len(present))[::-1]
-    axes.set_ylim(-0.85, len(present) - 0.15)
-    axes.set_yticks(y_positions)
-    axes.set_yticklabels([PRETTY.get(name, name) for name in present],
-                         fontsize=6.8)
-    axes.set_xlim(0, 1.0)
-    axes.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
-    axes.tick_params(axis="x", labelsize=6.8)
-    axes.grid(axis="x", color="#e6e6e0", linewidth=0.6)
-    axes.set_axisbelow(True)
-    for spine in ("top", "right", "left"):
-        axes.spines[spine].set_visible(False)
+    columns = spec.subgridspec(1, 3, wspace=0.16)
+    axes_list = [figure.add_subplot(columns[0, index]) for index in range(3)]
 
-    # Three sub-levels within each row. The series collide at real values --
-    # rank+DS puts the count and gene axes both near 0.08, and rank puts the
-    # fixed-count square within 0.008 of the power diamond -- so without the
-    # offset two different measurements render as one marker.
-    OFFSET_COUNTS, OFFSET_GENES, OFFSET_POWER = 0.17, 0.0, -0.21
+    for index, axes in enumerate(axes_list):
+        axes.set_ylim(-0.7, len(present) - 0.3)
+        axes.set_yticks(y_positions)
+        if index == 0:
+            axes.set_yticklabels([PRETTY.get(name, name) for name in present],
+                                 fontsize=6.8)
+        else:
+            axes.set_yticklabels([])
+        axes.set_xlim(0, 1.0)
+        axes.set_xticks([0, 0.5, 1.0])
+        axes.set_xticklabels(["0", "0.5", "1"])
+        axes.tick_params(axis="x", labelsize=6.6)
+        axes.tick_params(axis="y", length=0)
+        axes.grid(axis="x", color="#e6e6e0", linewidth=0.6)
+        axes.set_axisbelow(True)
+        for spine in ("top", "right", "left"):
+            axes.spines[spine].set_visible(False)
+        for y in y_positions:
+            axes.axhline(y, color="#f1f1ec", linewidth=0.7, zorder=0)
+
+    depth, breadth, power = axes_list
+
     for y, name in zip(y_positions, present):
         row = ablation.loc[name]
-        axes.axhline(y, color="#eeeee8", linewidth=0.7, zorder=0)
-        axes.plot([row.axis_vs_counts], [y + OFFSET_COUNTS], marker="o",
-                  markersize=5, color=C_COUNTS, linestyle="none", zorder=4)
-        axes.plot([row.axis_vs_genes], [y + OFFSET_GENES], marker="s",
-                  markersize=4.6, color=C_GENES, linestyle="none", zorder=4)
-        if "axis_vs_genes_split" in row.index and row.axis_vs_genes_split == row.axis_vs_genes_split:
-            # Hollow, and joined to its filled twin by a hairline, so the eye
-            # reads the gap as one measurement moving between two regimes.
-            axes.plot([row.axis_vs_genes, row.axis_vs_genes_split],
-                      [y + OFFSET_GENES] * 2, color=C_GENES, linewidth=0.7,
-                      alpha=0.45, zorder=3)
-            axes.plot([row.axis_vs_genes_split], [y + OFFSET_GENES],
-                      marker="s", markersize=4.6, markerfacecolor="white",
-                      markeredgecolor=C_GENES, markeredgewidth=1.0,
-                      linestyle="none", zorder=4)
-        axes.plot([row.f1_deep], [y + OFFSET_POWER], marker="D",
-                  markersize=4.2, color=C_POWER, linestyle="none", zorder=4)
+        depth.plot([row.axis_vs_counts], [y], marker="o", markersize=5.2,
+                   color=C_COUNTS, linestyle="none", zorder=4)
+        breadth.plot([row.axis_vs_genes], [y + 0.17], marker="s",
+                     markersize=4.8, color=C_GENES, linestyle="none", zorder=4)
+        split = row.get("axis_vs_genes_split", float("nan"))
+        if split == split:
+            breadth.plot([split], [y - 0.17], marker="^", markersize=5.0,
+                         markerfacecolor="white", markeredgecolor=C_GENES,
+                         markeredgewidth=1.1, linestyle="none", zorder=4)
+        power.plot([row.f1_deep], [y], marker="D", markersize=4.6,
+                   color=C_POWER, linestyle="none", zorder=4)
 
-    axes.set_xlabel("circles and squares: leading-axis correlation with the "
-                    "covariate (lower is better)\ndiamonds: F1 at sd(log "
-                    "depth) 0.9 (higher is better)", fontsize=6.6)
-    # Short labels and a small face: the first version ran "power at high
-    # depth spread" off the right edge of the panel.
-    axes.legend(handles=[
-        Line2D([], [], marker="o", linestyle="", color=C_COUNTS,
-               label="axis vs counts", markersize=4.6),
+    for axes, heading, subtitle, colour in (
+            (depth, "depth bias",
+             "axis vs total counts\nlower is better", C_COUNTS),
+            (breadth, "breadth bias",
+             "axis vs detected genes\nlower is better", C_GENES),
+            (power, "power under depth spread",
+             "F1 at sd(log depth) 0.9\nhigher is better", C_POWER)):
+        axes.set_title(heading, fontsize=7.2, color=colour,
+                       fontweight="semibold", pad=3)
+        axes.set_xlabel(subtitle, fontsize=6.3, linespacing=1.35)
+
+    # The two regimes are named inside their own column rather than in a shared
+    # legend, because the distinction is what that column is about and a reader
+    # checking it should not have to look elsewhere.
+    breadth.legend(handles=[
         Line2D([], [], marker="s", linestyle="", color=C_GENES,
-               label="axis vs genes", markersize=4.2),
-        Line2D([], [], marker="s", linestyle="", markerfacecolor="white",
-               markeredgecolor=C_GENES, markeredgewidth=1.0, color=C_GENES,
-               label="same, at fixed counts", markersize=4.2),
-        Line2D([], [], marker="D", linestyle="", color=C_POWER,
-               label="power, deep", markersize=3.8),
-    ], loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=4, frameon=False,
-        fontsize=6.0, handletextpad=0.3, columnspacing=0.8)
-    axes.set_title(title, loc="left", fontsize=8.4, fontweight="semibold",
-                   pad=22)
+               label="breadth rides on depth", markersize=4.4),
+        Line2D([], [], marker="^", linestyle="", markerfacecolor="white",
+               markeredgecolor=C_GENES, markeredgewidth=1.1, color=C_GENES,
+               label="fixed counts, breadth free", markersize=4.6),
+    ], loc="lower center", bbox_to_anchor=(0.5, 1.10), ncol=1, frameon=False,
+        fontsize=5.9, handletextpad=0.3, labelspacing=0.25)
+
+    depth.text(0.0, 1.30, title, transform=depth.transAxes, fontsize=8.4,
+               fontweight="semibold", va="bottom")
+
+
+def _figure_drawer(function):
+    """Mark a drawer as wanting the Figure rather than a single Axes."""
+    function.wants_figure = True
+    return function
+
+
+def panel_ablation_standalone(figure, ablation, order, title) -> None:
+    """The three columns on their own figure, for the separate-panel export."""
+    spec = figure.add_gridspec(1, 1)[0, 0]
+    panel_ablation(figure, spec, ablation, order, title)
 
 
 def save_panel(name: str, out: Path, draw, size: tuple[float, float]) -> None:
+    """Draw one panel alone.
+
+    ``draw`` takes an Axes for the single-axes panels and a Figure for the ones
+    that build their own sub-layout; the two are told apart by an attribute the
+    multi-axes drawers set, rather than by guessing from the panel name.
+    """
     with mpl.rc_context(STYLE):
         figure = plt.figure(figsize=size)
-        axes = figure.add_subplot(111)
-        draw(axes)
+        if getattr(draw, "wants_figure", False):
+            draw(figure)
+        else:
+            draw(figure.add_subplot(111))
         figure.tight_layout()
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"{name}.{suffix}", dpi=400)
@@ -315,13 +347,14 @@ def main() -> None:
         "panel_d_runtime": (lambda ax: panel_runtime(ax, runtime), (3.4, 2.7)),
         "panel_e_validation": (panel_validation, (6.9, 3.1)),
         "panel_f_ablation": (
-            lambda ax: panel_ablation(ax, ablation, ABLATION,
-                                      "(f)  Preprocessing ablation"),
-            (5.0, 3.1)),
+            _figure_drawer(lambda fig: panel_ablation_standalone(
+                fig, ablation, ABLATION, "(f)  Preprocessing ablation")),
+            (6.4, 3.3)),
         "supplementary_ablation_all": (
-            lambda ax: panel_ablation(ax, ablation, ABLATION + EXTRA,
-                                      "Supplementary: every configuration"),
-            (5.6, 4.1)),
+            _figure_drawer(lambda fig: panel_ablation_standalone(
+                fig, ablation, ABLATION + EXTRA,
+                "Supplementary: every configuration")),
+            (6.8, 4.4)),
     }
 
     print("individual panels:")
@@ -344,7 +377,7 @@ def main() -> None:
         panel_specificity(figure.add_subplot(grid[1, 0]), rejection)
         panel_runtime(figure.add_subplot(grid[1, 1]), runtime)
         panel_validation(figure.add_subplot(grid[2, :]))
-        panel_ablation(figure.add_subplot(grid[3, :]), ablation, ABLATION,
+        panel_ablation(figure, grid[3, :], ablation, ABLATION,
                        "(f)  Preprocessing ablation")
         for suffix in ("png", "pdf"):
             figure.savefig(args.out / f"figure2.{suffix}", dpi=400)
