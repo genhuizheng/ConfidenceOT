@@ -79,6 +79,13 @@ ARMS = {
     "homogeneous_depth_cv_high": {"depth_sigma": 0.9, "perturbed_fraction": 0.0},
     # Positive control: a real source-only subpopulation at uniform depth.
     "perturbed_depth_cv0": {"depth_sigma": 0.0, "perturbed_fraction": 0.2},
+    # Power at the top of the depth ladder, which nothing measured before. The
+    # figure showed specificity across four rungs and power only at the bottom
+    # one, so a method that holds its specificity while losing its power to
+    # depth spread would have looked clean. That this happens is not
+    # hypothetical: on the breadth arms the full model's F1 falls from 0.960 to
+    # 0.651 once the nuisance is present.
+    "perturbed_depth_cv_high": {"depth_sigma": 0.9, "perturbed_fraction": 0.2},
     # Detection breadth at a fixed total depth. Depth is constant in these
     # arms, so a method that only equalises totals has nothing left to do and
     # whatever effect remains is the low-gene-number effect on its own. They
@@ -107,11 +114,13 @@ ARMS = {
     "homogeneous_breadth_composition": {"depth_sigma": 0.0,
                                         "perturbed_fraction": 0.0,
                                         "breadth_fraction": 0.5,
-                                        "breadth_ratio": 0.10},
+                                        "breadth_ratio": 0.12,
+                                        "median_depth": 3119.0},
     "homogeneous_breadth_short": {"depth_sigma": 0.0,
                                   "perturbed_fraction": 0.0,
                                   "breadth_fraction": 0.5,
-                                  "breadth_ratio": 0.05},
+                                  "breadth_ratio": 0.04,
+                                  "median_depth": 3119.0},
     # The composition split with the planted subpopulation still present, so
     # power can be read in the regime where the correction is working. A
     # correction that removes breadth by removing the cells' differences would
@@ -119,7 +128,8 @@ ARMS = {
     "perturbed_breadth_composition": {"depth_sigma": 0.0,
                                       "perturbed_fraction": 0.2,
                                       "breadth_fraction": 0.5,
-                                      "breadth_ratio": 0.10},
+                                      "breadth_ratio": 0.12,
+                                      "median_depth": 3119.0},
 }
 
 # Enabled only by --depth-source: the same two questions asked at the depth
@@ -509,7 +519,17 @@ def run_replicate(
         gene_mean = rng.lognormal(mean=0.0, sigma=1.6, size=args.n_genes)
         gene_mean /= gene_mean.sum()
         shared = dict(
-            gene_mean=gene_mean, median_depth=args.median_depth,
+            gene_mean=gene_mean,
+            # Per-arm override, because the breadth arms have to sit at the
+            # depth the real data sits at. Detection breadth is a sampling
+            # effect: with enough reads every cell's ranking is well estimated
+            # however wide its gene pool, and the effect vanishes. Measured at
+            # a rank cut of 128 and 1,500 genes, the representation axis goes
+            # 0.26 at depth 6,000 to 0.12 at depth 20,000 while the breadth
+            # gap widens -- so an arm run at the screen's default 10,000 would
+            # be measuring the regime where the problem does not exist.
+            # GSE180661 sits at 3,119 counts after equalisation.
+            median_depth=settings.get("median_depth", args.median_depth),
             dispersion=args.dispersion,
             perturbation_log2=args.perturbation_log2,
             depth_pool=depth_pool if arm.endswith("_observed") else None,

@@ -32,11 +32,27 @@ SHORT = {"homogeneous_depth_cv0": "cv0", "homogeneous_depth_cv_low": "low",
 # untreated, equalised, equalised with the cosine cost. This is deliberately
 # not the array's submission order, which has to stay append-only because the
 # earlier indices have already run.
-ORDER = ["logcpm", "logcpm_ds", "logcpm_cos",
-         "rank256", "rank256_ds", "rank256_ds_cos",
-         "pearson", "pearson_ds", "pearson_ds_cos",
-         "scanpy_pearson", "scanpy_pearson_ds",
-         "sct", "sct_ds", "sct_ds_cos"]
+# The 2x2x2 ablation first, in factorial order, because that is the comparison
+# the table exists to make: rank on or off, downsampling on or off, cosine on
+# or off. Then the transforms that are not part of it, then the two ways of
+# attacking detection breadth.
+ABLATION = ["logcpm", "rank256", "logcpm_ds", "logcpm_cos",
+            "rank256_ds", "rank256_cos", "logcpm_ds_cos", "rank256_ds_cos"]
+ORDER = ABLATION + [
+    "pearson", "pearson_ds", "pearson_ds_cos",
+    "scanpy_pearson", "scanpy_pearson_ds",
+    "sct", "sct_ds", "sct_ds_cos",
+    "rank256_ds_cos_dr10", "rank256_ds_cos_dr25",
+    "rank256_rg-genes_ds_cos", "logcpm_rg-genes_cos",
+]
+# Which factor each ablation cell carries, so the table can be read as an
+# ablation rather than as a list of names.
+FACTORS = {"logcpm": ("-", "-", "-"), "rank256": ("rank", "-", "-"),
+           "logcpm_ds": ("-", "DS", "-"), "logcpm_cos": ("-", "-", "cos"),
+           "rank256_ds": ("rank", "DS", "-"),
+           "rank256_cos": ("rank", "-", "cos"),
+           "logcpm_ds_cos": ("-", "DS", "cos"),
+           "rank256_ds_cos": ("rank", "DS", "cos")}
 
 # The screen job appends a suffix to a label when a run means something other
 # than the default, so two runs cannot overwrite each other. Parsing them back
@@ -63,6 +79,64 @@ def split_variant(label: str) -> tuple[str, str]:
                     pieces.append(token)
             return candidate, ", ".join(pieces)
     return label, ""
+
+
+def ablation_table(arms: pd.DataFrame) -> pd.DataFrame:
+    """The 2x2x2 ablation with the four metric families side by side.
+
+    One row per configuration, and the columns are the four questions the
+    comparison exists to answer:
+
+    * power, read at both ends of the depth ladder rather than only the bottom.
+      A method can hold its specificity and lose its power to the nuisance, and
+      measuring power only at zero depth spread would not show it.
+    * the gate against total counts, on the depth arms.
+    * the gate against detected genes, on the breadth arms, where total counts
+      are fixed by construction so nothing else can be producing it.
+    * the representation's leading axis against both covariates. That is what
+      the real data is measured on, and it stays readable where the gate
+      rejects too little for an AUC to mean anything.
+
+    ``reject_breadth`` is beside them because a gate that rejects nothing
+    scores perfectly on every AUC column while answering none of it.
+    """
+    def pick(arm: str, column: str) -> pd.Series:
+        if column not in arms.columns:
+            return pd.Series(dtype=float)
+        return arms[arms.arm.eq(arm)].set_index("configuration")[column]
+
+    index = sorted(set(arms.configuration), key=sort_key_for_ablation)
+    table = pd.DataFrame(index=pd.Index(index, name="configuration"))
+    base = [split_variant(name)[0] for name in index]
+    for position, factor in enumerate(("rank", "downsample", "cosine")):
+        table[factor] = [FACTORS.get(name, ("?", "?", "?"))[position]
+                         for name in base]
+
+    table["f1_clean"] = pick("perturbed_depth_cv0", "perturbed_f1")
+    table["f1_deep"] = pick("perturbed_depth_cv_high", "perturbed_f1")
+    table["f1_breadth"] = pick("perturbed_breadth_composition", "perturbed_f1")
+
+    depth_arms = ["homogeneous_depth_cv_low", "homogeneous_depth_cv_mid",
+                  "homogeneous_depth_cv_high"]
+    table["gate_vs_counts"] = pd.concat(
+        [(pick(arm, "auc_total_counts") - 0.5).abs() for arm in depth_arms],
+        axis=1).max(axis=1)
+    table["gate_vs_genes"] = (
+        pick("homogeneous_breadth_composition", "auc_detected_genes") - 0.5
+    ).abs()
+    table["axis_vs_counts"] = pd.concat(
+        [pick(arm, "max_abs_rho_pc_total_counts") for arm in depth_arms],
+        axis=1).max(axis=1)
+    table["axis_vs_genes"] = pick("homogeneous_breadth_composition",
+                                  "max_abs_rho_pc_detected_genes")
+    table["reject_breadth"] = pick("homogeneous_breadth_composition",
+                                   "source_rejection_rate")
+    return table.reset_index()
+
+
+def sort_key_for_ablation(label: str):
+    base, variant = split_variant(label)
+    return (variant, ORDER.index(base) if base in ORDER else len(ORDER), label)
 
 
 def main() -> None:
@@ -204,8 +278,24 @@ def main() -> None:
     if missing:
         print("\nnot present yet: " + ", ".join(missing))
     effect.to_csv(out / "screen_depth_effect.csv")
+
+    ablation = ablation_table(arms)
+    print("\n\nAblation: rank / downsampling / cosine, and the four metric "
+          "families\n")
+    print(ablation.round(3).to_string(index=False))
+    print("\nf1_clean is power at zero depth spread, f1_deep at sd(log depth) "
+          "0.9, f1_breadth\nwith detection breadth varying at fixed total "
+          "counts. gate_* are |AUC - 0.5| for\nthe gate; axis_* are the "
+          "representation's leading axis, which is what the real\ndata is "
+          "measured on and what stays readable when the gate rejects too "
+          "little\nto score.")
+    print("\nreject_breadth catches the trivial pass: a gate that rejects "
+          "nothing scores\nperfectly on every AUC column and has answered "
+          "nothing.")
+    ablation.to_csv(out / "screen_ablation.csv", index=False)
     print(f"\nwrote {out / 'screen_all_arms.csv'}")
     print(f"wrote {out / 'screen_depth_effect.csv'}")
+    print(f"wrote {out / 'screen_ablation.csv'}")
 
 
 if __name__ == "__main__":
