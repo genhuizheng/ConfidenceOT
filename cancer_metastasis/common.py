@@ -313,6 +313,42 @@ REPRESENTATIONS = ("log_cpm", "rank_value", "rank_no_median",
                    "pearson_residuals")
 
 
+def normalize_expression(
+    matrix: Any, kind: str, target_sum: float = 10_000.0
+) -> tuple[Any, str]:
+    """Per-cell normalisation for a rank test, with the transform recorded.
+
+    Moved here from ``11_run_robust_target_deg.py`` so that the per-patient
+    differential expression of method B and the target-side analysis of method
+    11 cannot drift apart. This project has already paid for one duplicated
+    transform: the depth screen spent a week measuring a configuration the
+    production runner assembled separately by hand. ``11_`` keeps its own copy
+    for now because its results are complete and reproducing them must not
+    depend on an edit here; ``tests/test_cancer_normalize_expression.py`` pins
+    the two together.
+
+    The returned string is the provenance the caller records. It is not
+    cosmetic: a stored matrix that is already normalised must not be normalised
+    again, and the only way to know afterwards which branch ran is to write it
+    down.
+    """
+    matrix = sparse.csr_matrix(matrix).astype(np.float64).tocsr(copy=True)
+    label = str(kind).lower()
+    if "log-normalized" in label or "log normalized" in label:
+        return matrix, "stored_log_normalized_expression"
+    if "normalized" in label and "raw" not in label:
+        if matrix.data.size and matrix.data.min() < 0:
+            return matrix, "stored_normalized_expression_used_as_provided"
+        matrix.data = np.log1p(matrix.data)
+        return matrix, "stored_normalized_expression_then_log1p"
+    library = np.asarray(matrix.sum(axis=1)).ravel()
+    if np.any(library <= 0):
+        raise ValueError("A selected malignant cell has zero expression library size")
+    matrix = matrix.multiply((target_sum / library)[:, None]).tocsr()
+    matrix.data = np.log1p(matrix.data)
+    return matrix, f"raw_counts_library_normalized_to_{target_sum:g}_then_log1p"
+
+
 def _library_normalisation(representation: str, kind: str) -> tuple[str, str | None]:
     """Map a representation and a stored expression kind onto the library's.
 
