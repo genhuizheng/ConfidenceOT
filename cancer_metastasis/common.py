@@ -349,6 +349,83 @@ def normalize_expression(
     return matrix, f"raw_counts_library_normalized_to_{target_sum:g}_then_log1p"
 
 
+def bh_adjust(values: Any) -> Any:
+    """Benjamini-Hochberg adjustment, delegated to statsmodels.
+
+    statsmodels is imported inside the call so that importing ``common`` does
+    not require it; only the meta-analysis path does.
+    """
+    from statsmodels.stats.multitest import multipletests
+
+    values = np.asarray(values, dtype=float)
+    result = np.full(values.shape, np.nan)
+    valid = np.isfinite(values)
+    if not valid.any():
+        return result
+    result[valid] = multipletests(values[valid], method="fdr_bh")[1]
+    return result
+
+
+def meta_table(patient_effects: pd.DataFrame, minimum_patients: int,
+               interpretation: str) -> pd.DataFrame:
+    """Patient-level Wilcoxon meta-analysis over per-patient effect sizes.
+
+    Moved here from ``12_meta_analyze_robust_target_deg.py`` so the primary
+    contrast's combination step and the target-side one cannot drift apart;
+    ``12_`` keeps its copy because its results are complete, and
+    ``tests/test_cancer_meta_table.py`` pins the two together. The only
+    difference is that ``interpretation`` is a parameter here rather than a
+    constant, since the string names which contrast the numbers came from and
+    two callers cannot share one.
+
+    The inference unit is the patient, not the cell. A gene is asked to move in
+    the same direction across patients, which is a weaker claim than any
+    single patient's p-value and a much harder one to get by accident:
+    ``direction_consistency`` is the fraction of patients agreeing with the
+    median's sign, and it is reported beside the FDR rather than folded into
+    it, because a gene significant on a large effect in three patients and a
+    gene consistent across twenty are different findings.
+    """
+    from scipy import stats
+
+    rows = []
+    for gene, table in patient_effects.groupby("gene", sort=False):
+        values = table["log2_fold_change"].to_numpy(dtype=float)
+        values = values[np.isfinite(values)]
+        patient_n = len(values)
+        p_value = np.nan
+        if patient_n >= minimum_patients and np.any(values != 0):
+            try:
+                p_value = float(stats.wilcoxon(values, zero_method="wilcox").pvalue)
+            except ValueError:
+                p_value = 1.0
+        median = float(np.median(values)) if patient_n else np.nan
+        sign = np.sign(median)
+        consistency = float(np.mean(np.sign(values) == sign)) if sign != 0 else 0.0
+        rows.append({
+            "gene": gene,
+            "patient_n": patient_n,
+            "median_patient_log2_fold_change": median,
+            "mean_patient_log2_fold_change": float(np.mean(values)) if patient_n else np.nan,
+            "direction_consistency": consistency,
+            "patient_level_wilcoxon_p_value": p_value,
+        })
+    result = pd.DataFrame(rows)
+    result["fdr"] = bh_adjust(result["patient_level_wilcoxon_p_value"].to_numpy())
+    signed_significance = -np.log10(np.maximum(result["fdr"], 1e-300))
+    result["gsea_rank_score"] = (
+        result["median_patient_log2_fold_change"]
+        * signed_significance
+        * result["direction_consistency"]
+    )
+    result["inference_unit"] = "patient"
+    result["interpretation"] = interpretation
+    return result.sort_values(
+        ["fdr", "direction_consistency", "median_patient_log2_fold_change"],
+        ascending=[True, False, False], kind="stable",
+    )
+
+
 def _library_normalisation(representation: str, kind: str) -> tuple[str, str | None]:
     """Map a representation and a stored expression kind onto the library's.
 
