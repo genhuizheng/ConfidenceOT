@@ -39,10 +39,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("gate_root", type=Path)
     parser.add_argument("output_csv", type=Path)
     parser.add_argument("--scope", default="scope_malignant")
-    parser.add_argument("--minimum-retained-fraction", type=float, default=0.0,
-                        help="Refuse if fewer than this fraction of manifest "
-                             "rows survive; a large loss is a wrong gate root "
-                             "rather than a few failed pairs")
     return parser.parse_args()
 
 
@@ -72,19 +68,19 @@ def main() -> None:
     dropped = manifest.loc[~keep, "pair_id"].astype(str).tolist()
     trimmed = manifest[keep].copy()
     if trimmed.empty:
+        # The only refusal. There is deliberately no threshold on *how much*
+        # is dropped: a manifest built over the whole converted root spans
+        # datasets, so a gate root for one accession legitimately matches a
+        # small minority of its rows, and any threshold would have to be tuned
+        # per dataset to avoid refusing correct runs. The report below says
+        # exactly what was dropped and which patients lost pairs, which is a
+        # better guard than a number nobody can set right.
         raise RuntimeError(
-            f"No manifest row matched a gated pair. The manifest and the gate "
-            f"root describe different data."
+            f"No manifest row matched a gated pair under {args.gate_root}. "
+            f"The manifest and the gate root describe different data; check "
+            f"the manifest's dataset_id column against the accession in the "
+            f"gate root's name."
         )
-    fraction = len(trimmed) / len(manifest)
-    if fraction < args.minimum_retained_fraction:
-        raise RuntimeError(
-            f"Only {len(trimmed)}/{len(manifest)} rows survived "
-            f"({fraction:.2f}), below --minimum-retained-fraction "
-            f"{args.minimum_retained_fraction}. That is a wrong gate root, not "
-            f"a few failed pairs."
-        )
-
     # pair_index is positional and the array worker strides over rows, so it is
     # renumbered rather than left with gaps that would no longer match.
     if "pair_index" in trimmed.columns:
@@ -107,6 +103,7 @@ def main() -> None:
             if kept != int(count):
                 patients_affected[patient] = {"manifest_pairs": int(count),
                                               "gated_pairs": kept}
+    fraction = len(trimmed) / len(manifest)
     report = {
         "manifest_csv": str(args.manifest_csv),
         "gate_root": str(args.gate_root),
@@ -115,6 +112,7 @@ def main() -> None:
         "gated_pairs_found": int(len(present)),
         "rows_kept": int(len(trimmed)),
         "rows_dropped": int(len(dropped)),
+        "retained_fraction": round(fraction, 4),
         "dropped_pair_ids": dropped,
         "patients_losing_pairs": patients_affected,
         "patients_losing_every_pair": sorted(
