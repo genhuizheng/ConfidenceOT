@@ -774,6 +774,42 @@ says that is not a residual the configuration failed to reach -- it is a
 covariate the configuration does not act on at all once the totals are
 equalised.
 
+#### Why this measurement is not a panel in Figure 2, decided 2026-09-24
+
+It was a fourth column of the ablation panel and was removed. The number is
+not in doubt; what a column cannot carry is the condition attached to it.
+
+In this simulation each narrow cell is silenced on a **different random** gene
+set, deliberately, so that "narrow" is not a subpopulation sharing a profile.
+Two narrow cells there are therefore *not* alike, and a leading axis that
+tracks how narrow a cell is groups unlike cells together. In that construction
+the axis is an artefact and lower is better, which is what makes the arm a
+valid test of the treatments.
+
+Real data is plausibly the opposite case. Two cells detecting few genes at the
+same total count are likely detecting *similar* few genes, because they share a
+state, and an axis that separates them from broad cells would then be the
+representation working rather than failing. Read equalisation preserves each
+cell's proportions, so a 282-to-1,400 detected-gene spread at exactly 3,119
+counts means the profiles differ in how many genes they express at all -- which
+is transcriptome complexity, and biology.
+
+So the honest statement is conditional: **if** the real 0.645 is an artefact of
+this form, no configuration in the factorial removes it. Prose can carry that
+"if". A figure column headed *lower is better* cannot -- it asserts the
+simulation's case for the real data, which is exactly the inference 9d refuses
+to make about regress-out.
+
+The regress-out row left the main panel with the column, since its
+distinguishing result was in it. Both stay in the supplementary table, where
+they are numbers rather than a direction.
+
+**Do not restore the column** without first settling which case the real data
+is in. Nothing measured so far settles it, and the arm that would -- a
+construction where detection breadth carries biology, so that removing it has
+a cost -- does not exist, for the same reason section 9f's depth arm did not
+until it was built.
+
 ### 9d. Which is still not permission to use regress-out
 
 The simulation makes narrow cells by dropping detected genes at random, so

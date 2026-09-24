@@ -51,13 +51,12 @@ from make_journal_figure import (  # noqa: E402
 # nothing, then one factor at a time, then the pairs, then all three.
 ABLATION = ["logcpm", "rank256", "logcpm_ds", "logcpm_cos",
             "rank256_ds", "rank256_cos", "logcpm_ds_cos", "rank256_ds_cos"]
-# Outside the factorial and in the main panel anyway. The isolated-breadth
-# column does not collapse for any of the eight above, and a column where
-# nothing works reads as "unsolved" when the truth is "unsolved by anything in
-# this design, and solved by one thing outside it at a cost this simulation
-# cannot price". That arm is the one now running on real data, so leaving it in
-# the supplement would hide the reason the real-data comparison exists.
-BEYOND_FACTORIAL = ["rank256_rg-genes_ds_cos"]
+# Empty on purpose. The regress-out arm was briefly in the main panel to give
+# the isolated-breadth column a configuration that moved it; that column is
+# gone (see panel_ablation), and without it the arm's distinguishing result is
+# not on display, so it belongs in the supplement with the other
+# non-factorial configurations rather than as an unexplained ninth row.
+BEYOND_FACTORIAL: list[str] = []
 EXTRA = ["rank256_ds_cos_dr10", "rank256_ds_cos_dr25",
          "rank256_rg-genes_ds_cos", "logcpm_rg-genes_cos"]
 # Full names rather than a column of filled/open circles beside the axis. The
@@ -172,7 +171,7 @@ def panel_validation(axes) -> None:
               "depth spread, sd(log depth) 0 to 0.9 -- panels (a) to (d), (f) left",
               fontsize=6.2, color=C_COUNTS, ha="left")
     axes.text(0.55, 0.34,
-              "detection breadth at fixed total counts -- panel (f), open triangles",
+              "detection breadth at fixed total counts -- reported in the text, not (f)",
               fontsize=6.2, color=C_GENES, ha="left")
     axes.text(7.5, 0.70, "applied to one side only it would be a batch",
               fontsize=5.8, color="#77776f", ha="left")
@@ -206,27 +205,33 @@ def panel_validation(axes) -> None:
 
 def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
                    title: str) -> None:
-    """The factorial as four columns sharing one y axis, one measurement each.
+    """The factorial as three columns sharing one y axis, one measurement each.
 
-    An earlier version put all four numbers on a single x axis, which asked the
+    An earlier version put every number on a single x axis, which asked the
     reader to reverse the direction of "good" halfway across a row: the
-    correlations are better low and the F1 is better high. Three columns fixed
-    that but left the middle one carrying two different simulation regimes,
-    separated only by a row offset -- a marker convention doing the work a
-    column should do, and the one place a reader had to be told which of two
-    points in the same column meant what.
-
-    Four columns, one measurement each, no offsets and no in-column legend.
-    Columns two and three are the same quantity: the leading axis against the
-    detected-gene count, first where breadth rides on depth and then where
-    total counts are held at 3,119 and breadth varies on its own. They are
-    side by side because the full model behaves oppositely in the two, 0.085
-    against 0.730, and that reversal is the round's main negative result.
+    correlations are better low and the F1 is better high. One column per
+    measurement, each with its direction stated, fixes that, and the
+    configuration order on y is identical across all three so a row reads
+    straight across.
 
     What the reader should see without reading anything: downsampling collapses
-    column one, rank collapses column two, nothing collapses column three, the
-    cosine cost lifts column four, and the bottom row is all three treatments
-    at once.
+    the depth column, rank collapses the breadth column, the cosine cost lifts
+    the power column, and the bottom row is all three treatments at once.
+
+    **A fourth column was here and was removed, deliberately.** It showed the
+    same detected-gene axis measured where total counts are held at 3,119 and
+    breadth varies on its own, where no configuration in the factorial gets
+    below 0.726 against 0.085 in the depth-coupled regime. The measurement is
+    real and stays in section 9c of SEQUENCING_DEPTH_RESOLUTION.md; what it
+    cannot support is a column axis labelled "lower is better". In the
+    simulation each narrow cell is silenced on a *different random* gene set, so
+    narrow cells are not alike and an axis tracking breadth there is an
+    artefact. On real data two cells detecting few genes plausibly detect
+    *similar* few genes, because they share a state, and the same correlation
+    would then be the representation working rather than failing. Prose can
+    carry that conditional; a column cannot, and putting it in a figure asserts
+    a direction the evidence does not establish. Do not add it back without
+    resolving which case the real data is in.
     """
     present = [name for name in order if name in ablation.index]
     y_positions = np.arange(len(present))[::-1]
@@ -238,8 +243,8 @@ def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
     if separated:
         first = present.index(separated[0])
         rule_y = float(y_positions[first]) + 0.5
-    columns = spec.subgridspec(1, 4, wspace=0.14)
-    axes_list = [figure.add_subplot(columns[0, index]) for index in range(4)]
+    columns = spec.subgridspec(1, 3, wspace=0.15)
+    axes_list = [figure.add_subplot(columns[0, index]) for index in range(3)]
 
     for index, axes in enumerate(axes_list):
         axes.set_ylim(-0.7, len(present) - 0.3)
@@ -267,12 +272,8 @@ def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
         (0, "axis_vs_counts", "depth bias",
          "axis vs total counts\nlower is better", C_COUNTS, "o", True),
         (1, "axis_vs_genes", "breadth bias",
-         "axis vs detected genes\nbreadth rides on depth\nlower is better",
-         C_GENES, "s", True),
-        (2, "axis_vs_genes_split", "breadth, isolated",
-         "the same axis\nat fixed total counts\nlower is better",
-         C_GENES, "^", False),
-        (3, "f1_deep", "power, deep",
+         "axis vs detected genes\nlower is better", C_GENES, "s", True),
+        (2, "f1_deep", "power, deep",
          "F1 at sd(log depth) 0.9\nhigher is better", C_POWER, "D", True),
     )
 
@@ -362,15 +363,13 @@ def main() -> None:
         "panel_e_validation": (panel_validation, (6.9, 3.1)),
         "panel_f_ablation": (
             _figure_drawer(lambda fig: panel_ablation_standalone(
-                fig, ablation, ABLATION + BEYOND_FACTORIAL,
-                "(f)  Preprocessing ablation")),
-            (7.8, 3.4)),
+                fig, ablation, ABLATION, "(f)  Preprocessing ablation")),
+            (6.4, 3.3)),
         "supplementary_ablation_all": (
             _figure_drawer(lambda fig: panel_ablation_standalone(
-                fig, ablation, ABLATION + BEYOND_FACTORIAL + [
-                    name for name in EXTRA if name not in BEYOND_FACTORIAL],
+                fig, ablation, ABLATION + EXTRA,
                 "Supplementary: every configuration")),
-            (8.2, 4.6)),
+            (6.8, 4.5)),
     }
 
     print("individual panels:")
@@ -393,8 +392,7 @@ def main() -> None:
         panel_specificity(figure.add_subplot(grid[1, 0]), rejection)
         panel_runtime(figure.add_subplot(grid[1, 1]), runtime)
         panel_validation(figure.add_subplot(grid[2, :]))
-        panel_ablation(figure, grid[3, :], ablation,
-                       ABLATION + BEYOND_FACTORIAL,
+        panel_ablation(figure, grid[3, :], ablation, ABLATION,
                        "(f)  Preprocessing ablation")
         for suffix in ("png", "pdf"):
             figure.savefig(args.out / f"figure2.{suffix}", dpi=400)
