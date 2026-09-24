@@ -28,7 +28,7 @@ by the label `confidenceot.Preprocessing` prints and parses back.
 |---|---|---|---|
 | baseline | `rank256_ds_cos` | rank 256, read equalisation, cosine | the configuration run on 2026-09-21, section 8 of the resolution document |
 | breadth | `rank256_rg-genes_ds_cos` | + detected-gene regress-out | 2b below: the baseline does not act on detection breadth at all |
-| no-equalisation | `rank256_cos` | − read equalisation | 2c below: the stage was argued for on evidence that could not price it |
+| no-equalisation | `rank256_cos` | − read equalisation | 2c below. **Demoted after 2c and 2e**: see the note under section 4 |
 
 The baseline is not re-run. Its 2026-09-21 outputs are the comparison.
 
@@ -183,13 +183,52 @@ is with the cost rather than with the encoding.
   regress-out's zero cost there is guaranteed rather than measured.
 - **What equalisation costs the differential expression.** There is no
   differential expression in the simulation, and `27_downsample_counts.py`
-  rewrites the h5ads, so the pseudobulk, the DEG and the UCell scoring read the
-  reduced counts too. 2c justifies equalising **for the representation and the
-  gate**. It says nothing about equalising **at the file level**, which is a
-  separate decision currently made on a consistency argument: one matrix, so no
-  stage can disagree with another about which counts it used.
-- **The design neither arm tests**: equalised counts for the OT, original
-  counts for everything downstream.
+  rewrites the h5ads, so the pseudobulk, the DEG and the UCell scoring would
+  read the reduced counts too. 2c justifies equalising **for the
+  representation and the gate** and says nothing about the file-level
+  application. **Section 2e settles that by design rather than by
+  measurement.**
+
+### 2e. The decision: equalised counts for the gate, raw counts for the DEG
+
+Taken 2026-09-23. Read equalisation stays, because 2b and 2c establish what it
+does and the arm built to make it lose did not. The one cost the simulation
+could not price -- what downsampling does to the differential expression --
+is removed rather than measured: **the expression stages read the original
+count matrices.**
+
+No code change is needed.
+`21_prepare_four_state_malignant_pseudobulk.py` already takes `manifest_csv`
+and `gate_root` as separate arguments, and joins gate labels to cells by
+`observation_id` against `obs_names`, raising `KeyError` on any identifier it
+cannot find. So the original manifest with an equalised-counts gate root is a
+supported invocation that fails loudly if the two ever stop lining up, rather
+than a new path that has to be trusted.
+
+It is also more correct in one respect that has nothing to do with depth. The
+equalised h5ads hold only the analysed subset, so the `*_nonmalignant` state
+is empty in them; the original matrices carry the other cell types and that
+state means something again.
+
+**The precondition, and it is not optional.** A gate computed on equalised
+counts is only safe to combine with raw-count expression if the gate itself is
+depth-neutral. Otherwise raw counts *amplify* a residual depth preference
+instead of neutralising it -- and the residual is real: the retained and
+rejected groups differed in depth by 1.32x, 1.97x and 3.07x in the
+pre-equalisation runs, and section 8 of the resolution document found a third
+of ovarian pairs and half of prostate pairs still over the bound after it.
+
+So the order is fixed:
+
+1. gate on equalised counts
+2. `25_diagnose_gate_covariates.py`, per pair, against each cell's **original**
+   depth
+3. raw-count expression **only for the pairs that clear**
+   `|auc_predownsample_total_counts - 0.5| <= 0.10`
+
+A pair that fails step 2 is not carried into step 3 with a caveat attached. It
+is excluded, and the count of exclusions is reported, because a depth-confounded
+gate read at full depth is the exact failure this whole round exists to avoid.
 
 ---
 
@@ -270,10 +309,26 @@ four-task array reaches 39, and its diagnostic lands on exactly 40, which is
 why that one dataset went through. Headneck's audit would have been 41.
 
 The three outstanding chains need 26 slots between them: ovarian 10, prostate
-10, headneck 6. They are to be submitted one dataset at a time as the arrays
-drain, smallest first, checking headroom with `squeue -u $USER -h -r | wc -l`
--- `-r` expands array tasks into separate rows, which is how the limit counts
-them.
+10, headneck 6. If they are submitted at all, it is one dataset at a time as
+the arrays drain, smallest first, checking headroom with
+`squeue -u $USER -h -r | wc -l` -- `-r` expands array tasks into separate rows,
+which is how the limit counts them.
+
+### Why `rank256_cos` is demoted rather than completed
+
+It was submitted for two reasons and has lost both. The measurable one --
+whether equalisation destroys signal -- was answered in 2c, in the arm built
+to let it lose. The practical one -- differential expression at full depth --
+is answered by 2e, which gets it without dropping the stage.
+
+What is left is 6c, a descriptive agreement statistic that selects no arm,
+because real data has no ground truth to score either configuration against.
+That is not worth 26 job slots while the breadth arm is still running.
+
+Colorectal is already submitted and costs nothing more, so it runs and stands
+as a single-dataset check. The two orphan audits are cancelled. The other
+three chains are submitted only if colorectal shows the two arms disagreeing
+far more than the simulation suggests they should.
 
 ---
 

@@ -925,8 +925,16 @@ with another about which counts it used.
 
 That consistency argument is still a real one, and now it has a price tag on
 one side only. The design it points at -- equalised counts for the OT,
-original counts for everything downstream -- has not been tested and is not
-claimed here.
+original counts for everything downstream -- **was taken on 2026-09-23**, and
+it removes the unpriced cost instead of waiting for a measurement of it.
+
+It needs no new code: `21_prepare_four_state_malignant_pseudobulk.py` already
+takes the manifest and the gate root as separate arguments and joins cells by
+identifier, raising on anything it cannot find. Its precondition is that the
+gate be depth-neutral before raw counts are read against it, since otherwise
+full depth amplifies a residual preference rather than neutralising it. The
+order, and the per-pair exclusion rule that goes with it, is section 2e of
+`EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md`.
 
 So 9a's attribution stands, and 9b now has an answer for the gate and none for
 the file-level question. We know which covariate each treatment removes, and
