@@ -487,12 +487,37 @@ were being retired. The ones that remain are 6a, which conditions everything
 after it, 6b, which sets the per-pair exclusion rule the differential
 expression depends on, and 6d, which is one number.
 
-Also dropped for the same reason: the cross-patient mismatched manifest, whose
-null is confounded by patient, batch and copy number alike and so cannot fail
-informatively; the same-patient primary-versus-primary control, which can only
-state the limit more precisely than the partial Spearman of 0.79 already does;
-and the subcluster-uniformity test, which was demoted to affecting how a result
-is described rather than whether it can be drawn.
+Also dropped for the same reason: the same-patient primary-versus-primary
+control, which can only state the limit more precisely than the partial
+Spearman of 0.79 already does, and the subcluster-uniformity test, which was
+demoted to affecting how a result is described rather than whether it can be
+drawn.
+
+**The cross-patient mismatched manifest was dropped with them and should not
+have been.** It was judged as a significance test -- do matched and mismatched
+pairs separate -- which is trivially yes and proves nothing, and that judgement
+was right about the wrong question. Its use is to calibrate a scale, not to
+test a hypothesis.
+
+Nobody knows what retention fraction is correct. Section 8 lists retention as a
+defect separate from depth that no configuration tested so far addresses, and a
+gate keeping 71% of primary cells has no reference to be read against. The
+mismatched pairing supplies one, because its true answer is near-total
+rejection: if mismatched pairs still retain 40%, then most of a matched pair's
+retained set is a floor made of "cells of this cancer resemble cells of this
+cancer", and every downstream contrast is diluted by that much. If they fall to
+5%, the matched retention is mostly pairing information.
+
+That floor is quantitative, and the partial Spearman of 0.79 does not give it.
+0.79 says retention tracks similarity; it does not say whether retention goes
+to zero as similarity does, or plateaus.
+
+Scope it as a calibration rather than a survey: a dozen or so mismatched pairs
+from one dataset give the distribution. No code changes --
+`01_build_pair_manifest.py` emits the same columns, so shuffling which
+metastasis accompanies which primary is a manifest edit and the rest of the
+pipeline runs unmodified. Random pairing and per-patient retention are the same
+measurement under different names.
 
 ### 6d. Retention, reported and not used to choose
 
