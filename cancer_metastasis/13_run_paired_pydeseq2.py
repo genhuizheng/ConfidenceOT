@@ -35,6 +35,7 @@ def threshold_tag(value: float) -> str:
 def load_patient_pseudobulk(
     group_root: Path,
     minimum_cells_per_status: int,
+    exclude_patients: frozenset[str] = frozenset(),
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     count_tables = []
     metadata_tables = []
@@ -62,6 +63,19 @@ def load_patient_pseudobulk(
     )
     metadata = pd.concat(metadata_tables, ignore_index=True).set_index("sample_id")
     metadata = metadata.loc[counts.index]
+    # Applied after the concat rather than while reading, so it holds whichever
+    # layout supplied the pseudobulks: 21_ writes one directory per patient,
+    # 11_ writes one per group, and a filter on the directory name would be
+    # right for the first and wrong for the second.
+    if exclude_patients:
+        keep = ~metadata["patient_id"].astype(str).isin(exclude_patients)
+        dropped = sorted(set(metadata.loc[~keep, "patient_id"].astype(str)))
+        metadata = metadata[keep]
+        counts = counts.loc[metadata.index]
+        if counts.empty:
+            raise RuntimeError(
+                f"Excluding {sorted(exclude_patients)} left no samples")
+        print(f"excluded patients: {dropped}", flush=True)
     required = {"contrast", "comparison_status"}
     missing = required.difference(metadata.columns)
     if missing:
@@ -165,6 +179,13 @@ def main() -> None:
     parser.add_argument("group_output_root", type=Path)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--minimum-cells-per-patient-status", type=int, default=20)
+    parser.add_argument(
+        "--exclude-patient", action="append", default=None,
+        dest="exclude_patients", metavar="PATIENT_ID",
+        help="Drop this patient before fitting; repeatable. Used by "
+             "34_leave_one_patient_out.py to refit the design without each "
+             "patient in turn, which is the literal form of the differential "
+             "expression prespecification's third disqualifier.")
     parser.add_argument("--minimum-total-count", type=int, default=10)
     parser.add_argument("--n-cpus", type=int, default=16)
     parser.add_argument("--maximum-fdr", type=float, default=0.05)
@@ -178,7 +199,8 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     counts, metadata, ot_genes = load_patient_pseudobulk(
-        args.group_output_root, args.minimum_cells_per_patient_status
+        args.group_output_root, args.minimum_cells_per_patient_status,
+        frozenset(args.exclude_patients or ())
     )
     keep = counts.sum(axis=0).ge(args.minimum_total_count)
     counts = counts.loc[:, keep]
