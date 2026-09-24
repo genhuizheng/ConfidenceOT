@@ -93,14 +93,58 @@ that cost instead of waiting on a measurement of it. It needs no new code:
 root as separate arguments and joins cells by identifier, raising on anything
 it cannot find. Section 2e of `EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md`.
 
-**The precondition that remains.** A gate computed on equalised counts is only
-safe to read raw counts against if the gate is itself depth-neutral; otherwise
-full depth amplifies a residual preference rather than neutralising it. That
-concern is real -- section 8 measured a third of ovarian and half of prostate
-pairs over the depth bound -- and it is discharged at the result level by
-Disqualifier 1 rather than by excluding pairs at the input. If Disqualifier 1
-fires, the per-pair depth statistics are where to look, and a depth-filtered
-re-fit is then a diagnostic and labelled post-hoc.
+### Inclusion is closed, 2026-09-24
+
+**There is no pair-level inclusion criterion. Every pair with a computable gate
+enters the pseudobulk.**
+
+The following are **diagnostics**. They are computed, reported and available for
+interpretation. None of them filters a pair in or out:
+
+- `auc_predownsample_total_counts` -- the gate against each cell's original depth
+- `auc_n_genes_by_counts` -- the gate against detected genes, the covariate the
+  preprocessing does not act on
+- the per-pair estimability of either, i.e. whether that pair has enough
+  rejected cells for the standard error to resolve the quantity at all
+
+This is recorded as closed because it was re-opened twice in one day: a depth
+exclusion was added, withdrawn, and a detected-gene exclusion was then
+proposed. Each version was data-dependent selection layered onto an already
+prespecified analysis -- choosing which pairs to analyse using a statistic
+computed from the analysis itself -- and each would have been decided by
+whoever looked at the numbers last. The prespecified design does not have a
+pair-level filter, and adding one now is not a refinement of it.
+
+**Where the concern is discharged instead: at the patient level, after the
+fit.** The depth concern is real; section 8 measured a third of ovarian and half
+of prostate pairs over the depth bound. It is answered by asking whether the
+result depends on particular patients, which is a question about the result
+rather than a pre-emptive edit to its input:
+
+1. **Leave-one-patient-out refit.** Drop each patient in turn and refit. A gene
+   whose significance survives every leave-one-out fit does not rest on one
+   patient. This is the literal form of Disqualifier 3 and **is not implemented
+   anywhere in the repository** -- `31_audit_deg_disqualifiers.py` computes a
+   per-patient sign-agreement proxy from CPM and its own docstring says it
+   cannot replace the refit. It is new code.
+2. **Patient-level meta-analysis.** Compute the contrast within each patient,
+   then combine across patients with a minimum-patients requirement, so every
+   gene carries the number of patients supporting it as a reported quantity
+   rather than as something recovered afterwards.
+   `12_meta_analyze_robust_target_deg.py` already implements this pattern for
+   another contrast; `meta_table(patient_effects, minimum_patients)` is the
+   reusable part.
+
+Between them these subsume what a depth filter was meant to protect against. A
+systematic depth artefact spread across a third of patients is exactly what the
+original three disqualifiers could miss -- Disqualifier 3 catches single-patient
+dominance, not a shared artefact -- and it is what a leave-one-out profile and a
+patient-support count make visible.
+
+**For context, not for filtering.** Of the pairs with a readable statistic, 61
+of 92 ovarian, 12 of 24 prostate, 1 of 5 colorectal and 3 of 4 head and neck
+clear `|auc_predownsample_total_counts - 0.5| <= 0.10`. Those numbers are
+reported beside the result. They do not select it.
 
 **One number in Disqualifier 1 is stale.** The
 `auc_predownsample_total_counts` of 0.587 quoted there was measured on the
