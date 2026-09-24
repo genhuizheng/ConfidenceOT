@@ -54,6 +54,35 @@ in **Thresholds**, **Disqualifiers** or **What a positive result is** changes.
 |---|---|---|
 | Gate | `ot_downsampled_free_20260914` | `ot_<accession>_rank256_ds_cos_20260921` |
 | Depth | both sides subsampled to 3,119 counts | **gate** on equalised counts; **expression on raw counts** |
+| Minimum cells | 20 per patient per status | **10** per patient per status |
+| Pair exclusion | *(added 2026-09-24, then withdrawn)* | none; all pairs enter |
+
+**Why the cell floor moves to 10.** Retention runs from 0.37 to 0.95 across
+pairs, so a high-retention patient has very few rejected cells: 200 primary
+cells at 95% retention leaves 10. A floor of 20 drops exactly those patients,
+and they are the ones the patient count depends on -- `31_audit_deg_disqualifiers.py`
+raises below 6 patients, and disqualifier 3 is the check that decides whether a
+result is reported. Lowering the floor is the *include-more* direction, which
+is the less suspicious one, but it is a change to a prespecified parameter and
+so is recorded here before any result exists.
+
+What it costs: a pseudobulk summed over 10 cells is noisier than one over 20.
+DESeq2 estimates dispersion per gene and is built for that, and the floor
+applies per patient per status rather than to the fit as a whole, so the effect
+is on the weight a marginal patient carries rather than on the validity of the
+model. `13_run_paired_pydeseq2.py` is the only place this threshold acts:
+`21_prepare_four_state_malignant_pseudobulk.py` emits a contrast whenever both
+states are non-empty, so nothing upstream needs changing.
+
+**Why there is no pair exclusion.** A depth-based per-pair exclusion was added
+to this amendment on 2026-09-24 and withdrawn the same day. It was
+data-dependent selection layered on an already prespecified analysis, and the
+three result-level disqualifiers below already test the same failure directly
+on the gene list, which is closer to the claim. All pairs enter the pseudobulk.
+The per-pair gate statistics remain available in
+`gate_covariate_pair_statistics.csv` and are reported as context: of the pairs
+with a readable statistic, 61 of 92 ovarian, 12 of 24 prostate, 1 of 5
+colorectal and 3 of 4 head and neck clear `|auc - 0.5| <= 0.10`.
 
 **Why the expression stage reads raw counts.** The equalisation stage is
 justified for the representation and the gate and was never priced for what it
@@ -64,15 +93,14 @@ that cost instead of waiting on a measurement of it. It needs no new code:
 root as separate arguments and joins cells by identifier, raising on anything
 it cannot find. Section 2e of `EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md`.
 
-**The precondition, which is a new exclusion rule.** A gate computed on
-equalised counts is only safe to read raw counts against if the gate is itself
-depth-neutral; otherwise full depth amplifies a residual preference rather than
-neutralising it. A pair enters the pseudobulk **only** if it clears
-`|auc_predownsample_total_counts - 0.5| <= 0.10`. Pairs that fail are excluded
-and counted, not carried with a caveat. GSE181919 is evaluated pooled rather
-than per pair, per the amendment recorded in section 4b of
-`SEQUENCING_DEPTH_RESOLUTION.md` on 2026-09-21, because three of its four pairs
-sit one to two standard errors from the threshold.
+**The precondition that remains.** A gate computed on equalised counts is only
+safe to read raw counts against if the gate is itself depth-neutral; otherwise
+full depth amplifies a residual preference rather than neutralising it. That
+concern is real -- section 8 measured a third of ovarian and half of prostate
+pairs over the depth bound -- and it is discharged at the result level by
+Disqualifier 1 rather than by excluding pairs at the input. If Disqualifier 1
+fires, the per-pair depth statistics are where to look, and a depth-filtered
+re-fit is then a diagnostic and labelled post-hoc.
 
 **One number in Disqualifier 1 is stale.** The
 `auc_predownsample_total_counts` of 0.587 quoted there was measured on the
