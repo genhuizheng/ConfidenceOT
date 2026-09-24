@@ -40,8 +40,20 @@ fi
 # The label is dataset-specific, and the default is GSE180661's. Left wrong on
 # another dataset the same-compartment background becomes every cell in the
 # file, which is dropped from the contrasts but still reported as a count.
-if [[ -n "${CONFIDENCEOT_MALIGNANT_ANNOTATION:-}" ]]; then
-  extra+=(--malignant-annotation "$CONFIDENCEOT_MALIGNANT_ANNOTATION")
+# CONFIDENCEOT_MALIGNANT_ANNOTATIONS takes a pipe-delimited list, the same
+# spelling tacc_full_array.slurm uses for CONFIDENCEOT_INCLUDE_ANNOTATIONS, so
+# the OT and the pseudobulk can be given one list rather than two spellings
+# that can disagree. Prostate carries three malignant labels and colorectal
+# eleven; the older single-valued variable put the other ten in the
+# nonmalignant background. The singular name still works for existing callers.
+annotation_spec=${CONFIDENCEOT_MALIGNANT_ANNOTATIONS:-${CONFIDENCEOT_MALIGNANT_ANNOTATION:-}}
+if [[ -n "$annotation_spec" ]]; then
+  IFS='|' read -r -a malignant_annotations <<< "$annotation_spec"
+  for annotation in "${malignant_annotations[@]}"; do
+    if [[ -n "$annotation" ]]; then
+      extra+=(--malignant-annotation "$annotation")
+    fi
+  done
 fi
 
 # Two submissions were lost earlier to a path variable arriving empty, so the

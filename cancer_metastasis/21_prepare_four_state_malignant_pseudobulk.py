@@ -143,13 +143,27 @@ def parse_args() -> argparse.Namespace:
         help=f"Contrast to emit; repeatable. Defaults to "
              f"{DEFAULT_CONTRASTS[0]} alone.",
     )
-    parser.add_argument("--malignant-annotation", default=MALIGNANT)
+    # Repeatable, because a dataset can label its malignant cells with more
+    # than one value: prostate carries three and colorectal eleven, and the
+    # single-valued form silently routed the other ten into the nonmalignant
+    # background state. It does not touch the retained/rejected contrast,
+    # which takes its cells from the gate rather than from these labels.
+    parser.add_argument("--malignant-annotation", action="append",
+                        default=None, dest="malignant_annotations",
+                        metavar="LABEL",
+                        help="Repeat once per malignant label; defaults to "
+                             f"{MALIGNANT!r}")
     parser.add_argument("--include-exact-winner-unstable", action="store_true")
     parser.add_argument(
         "--allow-invalid-calibration", action="store_true",
         help="Keep pairs whose M4-E calibration did not converge",
     )
     args = parser.parse_args()
+    # Resolved here rather than as an argparse default: `action="append"` on a
+    # non-empty default appends to it instead of replacing it, so one
+    # --malignant-annotation would yield the ovarian label plus the new one.
+    if not args.malignant_annotations:
+        args.malignant_annotations = [MALIGNANT]
     if args.sensitivity_root is not None and args.robustness_csv is None:
         # analysis_groups reads the winner columns out of the robustness table,
         # and the cap-robust rule was only ever defined alongside them.
@@ -670,7 +684,8 @@ def main() -> None:
                 state = f"{prefix}_{status}"
                 add_vector(counts[state], genes, values)
                 cell_n[state] += len(indices)
-            background = np.flatnonzero(annotations != args.malignant_annotation)
+            background = np.flatnonzero(
+                np.isin(annotations, args.malignant_annotations, invert=True))
             values = np.asarray(matrix[background].sum(axis=0)).ravel()
             state = f"{prefix}_nonmalignant"
             add_vector(counts[state], genes, values)
