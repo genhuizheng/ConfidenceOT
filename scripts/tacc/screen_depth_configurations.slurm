@@ -147,6 +147,11 @@ flags=${entry#*|}
 replicates=${CONFIDENCEOT_REPLICATES:-3}
 splatter_arms=${CONFIDENCEOT_SPLATTER_ARMS:-}
 n_cells=${CONFIDENCEOT_N_CELLS:-1500}
+# A subset of arms, for a question the stored table cannot answer
+# without re-running everything. The arms are seeded independently of
+# each other, so a subset run is directly comparable to the full one.
+arms=${CONFIDENCEOT_ARMS:-}
+arm_tag=${CONFIDENCEOT_ARM_TAG:-}
 suffix=""
 if (( replicates != 3 )); then
   suffix="${suffix}_r${replicates}"
@@ -162,6 +167,19 @@ fi
 if (( n_cells != 1500 )); then
   suffix="${suffix}_n${n_cells}"
 fi
+if [[ -n "$arms" ]]; then
+  # Required, not defaulted. A partial run writes the same
+  # depth_null_arm_summary.csv as a full one, so without a distinct
+  # output root it would replace a complete table with a shorter one
+  # in place, and nothing downstream would be able to tell.
+  if [[ -z "$arm_tag" ]]; then
+    echo "CONFIDENCEOT_ARMS is set, so CONFIDENCEOT_ARM_TAG must name" >&2
+    echo "the subset. Without it this run would overwrite the full" >&2
+    echo "table with a partial one at the same path." >&2
+    exit 2
+  fi
+  suffix="${suffix}_${arm_tag}"
+fi
 out="$root/${label}${suffix}"
 
 # Passed as an array so an empty value contributes no argument at all.
@@ -169,12 +187,17 @@ extra=()
 if [[ -n "$splatter_arms" ]]; then
   extra+=(--splatter-arms "$splatter_arms")
 fi
+# Unquoted on purpose: the variable holds a space-separated list.
+for arm in $arms; do
+  extra+=(--arm "$arm")
+done
 
 echo "=================================================="
 echo "configuration $task  $label"
 echo "flags   $flags"
 echo "cells   $n_cells"
 echo "counts  ${splatter_arms:-internal construction}"
+echo "arms    ${arms:-all}"
 echo "output  $out"
 echo "started $(date --iso-8601=seconds)"
 

@@ -838,8 +838,37 @@ that could justify the stage on more than convenience. The same construction
 with detection breadth would do the same for regress-out and for the rank
 encoding.
 
-Until that arm exists, 9a's attribution stands and 9b's verdict does not. We
-know which covariate each treatment removes. We do not know what any of them
+It now exists, as `perturbed_depth_informative`: sd(log depth) 0.6
+underneath, and the planted 20% drawn twice as deep as everything else, on the
+source side only. Its control is `homogeneous_depth_informative`, where the
+same 20% of source cells are twice as deep and express identically, so the
+correct answer there is to reject nothing.
+
+The pair has to be read together, and the reading is prespecified:
+
+| `f1_depth_informative`, no DS vs DS | control rejection, no DS | what it means |
+|---|---|---|
+| roughly equal | low | equalisation costs nothing; keep it |
+| **higher without DS** | **low** | equalisation destroys a real cue; that is its price |
+| higher without DS | high | the gain is rejection of deep cells, not a cue; DS justified |
+| lower without DS | any | depth was noise even here; DS justified twice over |
+
+Row three is the one that matters, and it is why the control is not optional.
+A configuration can gain recall on the informative arm purely by rejecting
+deep cells and being right by coincidence, since the deep cells are the
+planted ones. Without the control that is indistinguishable from using a
+biological cue, and it is exactly the failure the whole screen exists to
+detect.
+
+What this still cannot settle: whether real depth differences between cell
+states are biological or technical. The arm assumes they are biological, which
+is why its answer is a price rather than a verdict. If a subpopulation in real
+data is deeper because it was sequenced better, the recall this arm credits to
+depth is spurious there. The simulation gives the magnitude of what is at
+stake, not the decision.
+
+Until these return, 9a's attribution stands and 9b's verdict does not. We know
+which covariate each treatment removes. We do not yet know what any of them
 costs.
 
 ### 9g. A defect found while wiring this, which would have been invisible

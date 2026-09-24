@@ -117,6 +117,16 @@ def ablation_table(arms: pd.DataFrame) -> pd.DataFrame:
     # The realistic arm, not the bimodal one: a method that handles a clean
     # 50/50 split need not handle the weak monotone gradient the real data has.
     table["f1_breadth"] = pick("perturbed_breadth_observed", "perturbed_f1")
+    # What equalisation costs, and whether the cost is legitimate. These two
+    # are read together or not at all: f1_depth_informative rises whenever the
+    # method leans on depth, and reject_depth_informative says whether that
+    # lean is a cue or an artefact. A configuration that gains recall on the
+    # first while the second climbs has not used depth, it has rejected deep
+    # cells and been right by accident.
+    table["f1_depth_informative"] = pick("perturbed_depth_informative",
+                                         "perturbed_f1")
+    table["reject_depth_informative"] = pick("homogeneous_depth_informative",
+                                             "source_rejection_rate")
     table["f1_breadth_split"] = pick("perturbed_breadth_composition",
                                      "perturbed_f1")
 
@@ -247,7 +257,16 @@ def main() -> None:
         per_replicate["short"] = per_replicate.arm.map(long_to_short)
         spread = []
         for configuration in effect.index:
-            arm = effect.loc[configuration, worst_columns].idxmax()
+            # A run restricted to a subset of arms with CONFIDENCEOT_ARMS has
+            # none of the homogeneous depth arms this column is computed over,
+            # so there is no worst arm to name. Report that rather than fail
+            # the whole collection: the subset run is collected for the columns
+            # it does carry.
+            candidates = effect.loc[configuration, worst_columns].dropna()
+            if candidates.empty:
+                spread.append("")
+                continue
+            arm = candidates.idxmax()
             points = per_replicate[per_replicate.configuration.eq(configuration)
                                    & per_replicate.short.eq(arm)].depth_effect
             spread.append(f"{points.min():.3f}-{points.max():.3f}"

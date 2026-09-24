@@ -148,6 +148,32 @@ ARMS = {
     # cells differ in transcriptome complexity. Which bears directly on
     # regressing the covariate out: what is being removed is not purely
     # technical.
+    # The arm that prices read equalisation, and the only one in this file
+    # where depth carries signal. Everywhere else depth is drawn independently
+    # of cell identity, so downsampling reads cannot destroy anything and the
+    # stage is measured somewhere it cannot lose -- which is the objection this
+    # screen makes against regressing a covariate out, never having applied it
+    # to equalisation. Here the planted subpopulation is 2x deeper as well as
+    # differently expressed, which is the realistic case: a cell state that
+    # changes transcription changes RNA content. Recall lost between the arm
+    # without equalisation and the arm with it is what the stage costs.
+    #
+    # sd(log depth) 0.6 underneath it, so the shift sits inside a spread rather
+    # than being the only depth structure present.
+    "perturbed_depth_informative": {"depth_sigma": 0.6,
+                                    "perturbed_fraction": 0.2,
+                                    "depth_shift_log2": 1.0},
+    # Its control, and the reason the arm above cannot be read alone. The same
+    # 20% of source cells are 2x deeper, on the source side only, and express
+    # identically to everything else -- so the correct answer is "reject
+    # nothing" and every rejection is the depth artefact the screen exists to
+    # remove. The pair separates "the method used a biological depth cue" from
+    # "the method rejects deep cells": only the first survives the control.
+    "homogeneous_depth_informative": {"depth_sigma": 0.6,
+                                      "perturbed_fraction": 0.0,
+                                      "depth_shift_log2": 1.0,
+                                      "depth_shift_on": "random",
+                                      "depth_shift_fraction": 0.2},
     "homogeneous_breadth_observed": {"depth_sigma": 0.0,
                                      "perturbed_fraction": 0.0,
                                      "breadth_sigma": 0.30,
@@ -372,6 +398,9 @@ def simulate_counts(
     breadth_fraction: float = 0.0,
     breadth_ratio: float = 0.25,
     breadth_sigma: float = 0.0,
+    depth_shift_log2: float = 0.0,
+    depth_shift_on: str = "perturbed",
+    depth_shift_fraction: float = 0.2,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return integer counts, realised depth, and the perturbed-cell mask.
 
@@ -462,6 +491,27 @@ def simulate_counts(
         depth = np.full(n_cells, float(median_depth))
     else:
         depth = median_depth * rng.lognormal(0.0, depth_sigma, size=n_cells)
+    if depth_shift_log2 != 0.0:
+        # Applied after the depth vector is drawn, so the shifted cells keep
+        # the arm's underlying spread and differ from the rest by a factor
+        # rather than replacing the distribution.
+        if depth_shift_on == "perturbed":
+            # Coupled: the subpopulation that differs in expression also
+            # differs in RNA content. Depth is then a partially redundant cue
+            # to the right answer, and equalisation removes it.
+            deeper = perturbed
+        elif depth_shift_on == "random":
+            # Decoupled: a subset that differs in depth and nothing else. The
+            # correct answer for these cells is to keep them.
+            deeper = np.zeros(n_cells, dtype=bool)
+            deeper[rng.choice(n_cells,
+                              int(round(depth_shift_fraction * n_cells)),
+                              replace=False)] = True
+        else:
+            raise ValueError(
+                f"depth_shift_on must be 'perturbed' or 'random', "
+                f"found {depth_shift_on!r}")
+        depth = depth * np.where(deeper, 2.0 ** depth_shift_log2, 1.0)
     depth = np.maximum(depth.round(), 100.0)
     counts = np.empty((n_cells, n_genes), dtype=np.int64)
     for index in range(n_cells):
@@ -585,10 +635,19 @@ def run_replicate(
             "breadth_ratio": settings.get("breadth_ratio", 0.25),
             "breadth_sigma": settings.get("breadth_sigma", 0.0),
         }
+        # Source only, exactly as the perturbation is. A depth shift given to
+        # both sides would be a batch effect the two sides share, and the deep
+        # source cells would have deep counterparts to be matched against --
+        # which is the case the control is built to exclude.
+        shift = {
+            "depth_shift_log2": settings.get("depth_shift_log2", 0.0),
+            "depth_shift_on": settings.get("depth_shift_on", "perturbed"),
+            "depth_shift_fraction": settings.get("depth_shift_fraction", 0.2),
+        }
         source_counts, source_depth, perturbed = simulate_counts(
             rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
             perturbed_fraction=settings["perturbed_fraction"], **breadth,
-            **shared,
+            **shift, **shared,
         )
         # The target side never carries the perturbed subpopulation, so
         # perturbed source cells are the only genuinely incompatible cells in
