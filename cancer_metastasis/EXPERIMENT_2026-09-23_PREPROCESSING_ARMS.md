@@ -261,6 +261,20 @@ accepted leaves half a chain and no rollback, and when J2 itself is refused
 `set -e` kills the script instead. Recorded so the resubmission is not mistaken
 for a fresh start.
 
+The refusals are arithmetic, not chance. The `gg` queue allows **40 submitted
+jobs per user**, and an array counts as its task count rather than as one job.
+The four complete chains occupy 32 (8 + 8 + 4 + 4 array tasks, plus four
+audits and four diagnostics). The next chain's audit takes it to 33, and
+ovarian's eight-task array would reach 41; the same for prostate. Colorectal's
+four-task array reaches 39, and its diagnostic lands on exactly 40, which is
+why that one dataset went through. Headneck's audit would have been 41.
+
+The three outstanding chains need 26 slots between them: ovarian 10, prostate
+10, headneck 6. They are to be submitted one dataset at a time as the arrays
+drain, smallest first, checking headroom with `squeue -u $USER -h -r | wc -l`
+-- `-r` expands array tasks into separate rows, which is how the limit counts
+them.
+
 ---
 
 ## 5. Open before any result is read
