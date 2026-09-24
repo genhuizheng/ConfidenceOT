@@ -473,18 +473,26 @@ The second row is a real possible outcome and would be the most informative
 one. It must not be reported as a failure of the arm — the arm would have done
 exactly what it claims and shown the claim was about the wrong covariate.
 
-### 6c. Agreement between the equalisation and no-equalisation arms
+### 6c. Withdrawn 2026-09-24
 
-Per pair, the Jaccard index of the retained sets from `rank256_ds_cos` and
-`rank256_cos`, against the chance level for those two retention rates.
+This was the Jaccard agreement between the equalisation and no-equalisation
+arms. It was written down as "descriptive, not a test" whose outcomes "select
+no arm on their own", which is a readout that cannot change what is reported --
+so it does not belong in a prespecified reading, and keeping it would have cost
+the three unsubmitted `rank256_cos` chains 26 job slots to produce.
 
-| | reading |
-|---|---|
-| high agreement | equalisation is not changing which cells are called; its file-level cost buys little and is worth revisiting |
-| low agreement | the stage materially decides the answer, and 2c's simulated verdict is carrying real weight it was never tested for on real data |
+Recorded rather than deleted, because the reason it was withdrawn applies to
+the next check that gets proposed: checks were accumulating faster than they
+were being retired. The ones that remain are 6a, which conditions everything
+after it, 6b, which sets the per-pair exclusion rule the differential
+expression depends on, and 6d, which is one number.
 
-Descriptive, not a test. Neither outcome selects an arm on its own, because the
-simulation cannot say what fraction of a real depth difference is biological.
+Also dropped for the same reason: the cross-patient mismatched manifest, whose
+null is confounded by patient, batch and copy number alike and so cannot fail
+informatively; the same-patient primary-versus-primary control, which can only
+state the limit more precisely than the partial Spearman of 0.79 already does;
+and the subcluster-uniformity test, which was demoted to affecting how a result
+is described rather than whether it can be drawn.
 
 ### 6d. Retention, reported and not used to choose
 

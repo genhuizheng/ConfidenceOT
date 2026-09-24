@@ -42,6 +42,68 @@ scope for this analysis.
 The bounded gate is deliberately not used: it carries a rejection interval we
 chose from prior expectation, and the primary analysis must not.
 
+## Amendment, 2026-09-24, recorded before the differential expression is run
+
+The configuration table above predates the preprocessing round of 2026-09-21
+to 09-23. The gate it names was produced under a configuration since
+superseded, so the table is amended rather than reinterpreted. The original
+rows stay as written; what follows replaces them where they conflict. Nothing
+in **Thresholds**, **Disqualifiers** or **What a positive result is** changes.
+
+| | was | is |
+|---|---|---|
+| Gate | `ot_downsampled_free_20260914` | `ot_<accession>_rank256_ds_cos_20260921` |
+| Depth | both sides subsampled to 3,119 counts | **gate** on equalised counts; **expression on raw counts** |
+
+**Why the expression stage reads raw counts.** The equalisation stage is
+justified for the representation and the gate and was never priced for what it
+costs the differential expression, because the simulation contains no
+differential expression to price it with. Reading the original matrices removes
+that cost instead of waiting on a measurement of it. It needs no new code:
+`21_prepare_four_state_malignant_pseudobulk.py` takes the manifest and the gate
+root as separate arguments and joins cells by identifier, raising on anything
+it cannot find. Section 2e of `EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md`.
+
+**The precondition, which is a new exclusion rule.** A gate computed on
+equalised counts is only safe to read raw counts against if the gate is itself
+depth-neutral; otherwise full depth amplifies a residual preference rather than
+neutralising it. A pair enters the pseudobulk **only** if it clears
+`|auc_predownsample_total_counts - 0.5| <= 0.10`. Pairs that fail are excluded
+and counted, not carried with a caveat. GSE181919 is evaluated pooled rather
+than per pair, per the amendment recorded in section 4b of
+`SEQUENCING_DEPTH_RESOLUTION.md` on 2026-09-21, because three of its four pairs
+sit one to two standard errors from the threshold.
+
+**One number in Disqualifier 1 is stale.** The
+`auc_predownsample_total_counts` of 0.587 quoted there was measured on the
+superseded configuration. The disqualifier stands; the figure to test against
+is what the 2026-09-21 gate reports per pair, which the exclusion rule already
+reads.
+
+**The regress-out gate is held in reserve, not run alongside.** The shipped
+configuration leaves the leading axis correlated with detected genes at 0.422
+on head and neck and 0.645 across datasets, which is a fair objection to any
+list drawn from it. The `rank256_rg-genes_ds_cos` runs exist and are the answer
+to it. They are **not** a mandatory second pass: Disqualifier 2 already tests
+the same failure directly on the gene list, which is cheaper and closer to the
+claim than re-running the pipeline. The reserve gate is brought out **only** if
+a disqualifier fires or a reviewer raises the axis, and then the question is
+whether the conclusion survives it. Running both by default would double every
+downstream stage to answer an objection that may never be raised, and this
+document's own standard is that a check must be able to change what is
+reported.
+
+**What the framing is, restated because it has been re-derived twice.** The
+gate is a geometric filter: primary cells closer to the matched metastasis than
+to their own primary's internal spread. Selecting on similarity is the intended
+mechanism, not a defect -- a cell with metastatic potential should resemble the
+metastasis. What similarity does **not** license is comparing the retained
+*fraction* across patients, because that fraction tracks the two samples'
+pseudobulk correlation at partial Spearman 0.79. The within-pair selection is
+the object of this analysis; the between-pair fraction is a pairing-quality
+readout and is reported as such. Disqualifier 2 is the operational form of that
+distinction and is unchanged.
+
 ## Thresholds
 
 Significant means `FDR < 0.05` **and** `|log2FC| >= 1.0`.
