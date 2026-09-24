@@ -516,6 +516,10 @@ def run_replicate(
     # construction while the detected-gene count is not.
     source_detected = np.asarray((source_counts > 0).sum(axis=1),
                                  dtype=np.float64)
+    target_detected = np.asarray((target_counts > 0).sum(axis=1),
+                                 dtype=np.float64)
+    target_depth_values = np.asarray(target_counts.sum(axis=1),
+                                     dtype=np.float64)
     configuration = preprocessing_for(args)
     if args.external_representation:
         # The transform runs in its own package, then re-enters the shared
@@ -565,6 +569,33 @@ def run_replicate(
     target_pca = prepared.representation.target
     scale = prepared.scale
     cost = prepared.cost
+
+    # How much of the representation's leading axes is the covariate, which is
+    # a different question from how much of the *gate* is, and the one the real
+    # data is measured on: cancer_metastasis/tools/audit_depth_axis.py reports
+    # exactly this, and got 0.645 for detected genes on GSE180661 under the
+    # configuration this screen passed.
+    #
+    # It is also the question that stays answerable when the gate rejects
+    # almost nothing. On the homogeneous breadth arms the rejection rate runs
+    # near 0.005, so an AUC of the gate against anything rests on two or three
+    # cells and is noise; this uses every cell, so a configuration that leaves
+    # the axis intact cannot hide behind a quiet gate.
+    joint_pca = np.vstack([source_pca, target_pca])
+    joint_covariates = {
+        "detected_genes": np.concatenate([source_detected, target_detected]),
+        "total_counts": np.concatenate([source_depth, target_depth_values]),
+    }
+    axis_alignment = {}
+    for name, values in joint_covariates.items():
+        correlations = [abs(rank_correlation(joint_pca[:, k], values))
+                        for k in range(joint_pca.shape[1])]
+        finite = [value for value in correlations if np.isfinite(value)]
+        axis_alignment[f"max_abs_rho_pc_{name}"] = (max(finite) if finite
+                                                    else float("nan"))
+        axis_alignment[f"rho_pc1_{name}"] = (
+            rank_correlation(joint_pca[:, 0], values) if joint_pca.shape[1]
+            else float("nan"))
 
     calibration_status = "fixed_user_supplied"
     calibration_valid = False
@@ -670,6 +701,7 @@ def run_replicate(
         "median_detected_genes_retained": (
             float(np.median(source_detected[retained])) if retained.any()
             else float("nan")),
+        **axis_alignment,
         "median_detected_genes_rejected": (
             float(np.median(source_detected[~retained])) if (~retained).any()
             else float("nan")),
@@ -842,6 +874,7 @@ def main() -> None:
                 f"rejection={record['source_rejection_rate']:.3f} "
                 f"auc_depth={record['auc_total_counts']:.3f} "
                 f"auc_genes={record['auc_detected_genes']:.3f} "
+                f"pc_genes={record['max_abs_rho_pc_detected_genes']:.3f} "
                 f"rho_cost_depth={record['spearman_decision_cost_total_counts']:.3f}",
                 flush=True,
             )

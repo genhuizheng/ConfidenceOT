@@ -112,6 +112,23 @@ configurations=(
   "rank256_ds_cos_dr25|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine --minimum-detection-rate 0.25"
   "rank256_rg-genes_ds_cos|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine --regress-out detected_genes"
   "logcpm_rg-genes_cos|--representation log_cpm --cost cosine --regress-out detected_genes"
+  # The missing corner of the 2x2. The table has rank256, rank256_ds and
+  # rank256_ds_cos but never had rank256_cos, so "does the winner still need
+  # the downsampling?" has never been asked directly -- and the two arms that
+  # bear on it point the other way: rank256 alone beat rank256_ds on splatter
+  # (0.153 against 0.219, equalisation made it worse), and logcpm_cos reaches
+  # 0.083 with no equalisation at all.
+  #
+  # Dropping it would remove a whole pipeline stage and the defect that comes
+  # with it: --target-quantile 0.10 leaves the shallowest tenth of cells
+  # untouched by construction, so the equalisation covers 90% of cells and
+  # misses the ones whose depth matters most.
+  "rank256_cos|--representation rank_value --rank-top-n 256 --cost cosine"
+  # Its mirror, and item 5 of the document's own checklist: with logcpm_cos
+  # already in the table, this separates "equalisation helps the rate" from
+  # "the transform helps the rate", which the design has never been able to
+  # attribute.
+  "logcpm_ds_cos|--representation log_cpm --equalise-depth --cost cosine"
 )
 
 task=${SLURM_ARRAY_TASK_ID:-0}
