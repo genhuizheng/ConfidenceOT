@@ -74,6 +74,7 @@ C_COUNTS = "#b07d2b"
 C_GENES = "#1f6f8b"
 C_POWER = "#2f7d4f"
 C_RULE = "#8c8c86"
+C_PLANT = "#c4553b"
 # Built from a chr() call rather than written as a escape, because this
 # file has been rewritten through shells that ate the backslash-r twice.
 ARROW = "$" + chr(92) + "rightarrow$"
@@ -87,100 +88,91 @@ def load_ablation(root: Path) -> pd.DataFrame:
     return pd.read_csv(path).set_index("configuration")
 
 
-def panel_schematic(axes) -> None:
-    """What each of the three operations removes, with the measured numbers.
+def panel_validation(axes) -> None:
+    """How the ground truth is built, which is what makes the rest readable.
 
-    Drawn rather than plotted, because the point is the correspondence between
-    an operation and an axis, and that correspondence is what the ablation
-    established. The numbers on it are from the ablation, so this is a
-    statement of the result and not an illustration of an intention.
+    Every other panel reports whether a method got the answer right, and
+    nothing in the figure says where the answer comes from. It comes from a
+    construction, not from a simulator parameter: both sides of a pair are
+    independent draws from one population, so in the homogeneous arms no cell
+    has a counterpart it lacks and the correct rejection rate is zero by
+    design. A method that rejects there has failed, and no biological reading
+    can rescue it.
 
-    Geometry in data units, with the clouds kept narrower than the row pitch.
-    The first attempt drew them at a spread wider than the gap between rows,
-    so the three rows overlapped into one smear and the cosine circle fell off
-    the bottom of the axes.
+    The nuisance is drawn once, below both rows, because applying it to one
+    side only would make it a batch effect between samples -- which is a
+    different problem, and one that existing batch correction addresses. Here
+    both sides carry the same spread, and the question is whether a gate asked
+    "which source cells have a counterpart" answers with the nuisance instead.
     """
-    axes.set_xlim(0, 11)
-    axes.set_ylim(0.15, 3.45)
+    axes.set_xlim(0, 12)
+    axes.set_ylim(0.05, 4.5)
     axes.axis("off")
+    rng = np.random.default_rng(5)
 
-    rng = np.random.default_rng(3)
-    n = 80
-    long_spread, short_spread = 0.16, 0.055      # +-3 sigma = 0.96 and 0.33
-    pitch = 1.15                                  # comfortably more than 0.96
+    def cells(x0, y0, n=26, planted=0, spread=0.30):
+        angle = rng.uniform(0, 2 * np.pi, size=n)
+        radius = np.sqrt(rng.uniform(0, 1, size=n)) * spread
+        x, y = x0 + radius * np.cos(angle) * 2.0, y0 + radius * np.sin(angle)
+        keep = np.ones(n, dtype=bool)
+        if planted:
+            keep[rng.choice(n, planted, replace=False)] = False
+        axes.scatter(x[keep], y[keep], s=5.0, c="#9a9a94", linewidths=0,
+                     zorder=3)
+        if planted:
+            axes.scatter(x[~keep], y[~keep], s=12.0, c=C_PLANT, linewidths=0,
+                         zorder=4)
 
-    def cloud(x0, y0, spread_x, spread_y, colour_by=None):
-        x = rng.normal(0.0, spread_x, size=n)
-        y = rng.normal(0.0, spread_y, size=n)
-        if colour_by == "counts":
-            colour = plt.get_cmap("YlOrBr")(0.35 + 0.5 * _unit(x))
-        elif colour_by == "genes":
-            colour = plt.get_cmap("PuBu")(0.35 + 0.5 * _unit(y))
-        else:
-            colour = "#9a9a94"
-        axes.scatter(x0 + x, y0 + y, s=2.4, c=colour, linewidths=0, zorder=3)
-
-    def _unit(values):
-        span = np.ptp(values)
-        return (values - values.min()) / (span if span else 1.0)
-
-    def arrow(y):
+    def arrow(x0, x1, y):
         axes.add_patch(FancyArrowPatch(
-            (4.25, y), (5.45, y), arrowstyle="-|>", mutation_scale=7,
+            (x0, y), (x1, y), arrowstyle="-|>", mutation_scale=7,
             color="#5c5c56", linewidth=0.9, zorder=4))
 
-    def caption(y, title, subtitle, colour, metric, before, after):
-        axes.text(0.0, y + 0.20, title, fontsize=7.4,
-                  fontweight="semibold", color=colour, ha="left", va="center")
-        axes.text(0.0, y - 0.04, subtitle, fontsize=6.2, color="#55554f",
-                  ha="left", va="center")
-        axes.text(7.25, y + 0.16, metric, fontsize=6.2, color="#55554f",
-                  ha="left", va="center")
-        axes.text(7.25, y - 0.14, f"{before}  " + ARROW + f"  {after}",
-                  fontsize=7.6, color=colour, ha="left",
-                  va="center", fontweight="semibold")
+    for x, header in ((1.05, "one population"),
+                      (4.15, "two independent draws"),
+                      (7.75, "correct answer"), (10.5, "measures")):
+        axes.text(x, 4.30, header, fontsize=6.6, color="#3c3c38",
+                  ha="center", fontweight="semibold")
+    # Named once here rather than under every row: the columns do not change
+    # between the rows, and repeating them costs the vertical room that the
+    # composite has least of.
+    axes.text(3.35, 3.98, "source", fontsize=5.8, color="#55554f", ha="center")
+    axes.text(4.95, 3.98, "target", fontsize=5.8, color="#55554f", ha="center")
 
-    top = 2.95
-    # Row 1: the total-count axis, horizontal, collapsed by equalisation.
-    caption(top, "read equalisation", "removes the total-count axis",
-            C_COUNTS, "axis vs total counts", "0.97", "0.07")
-    cloud(3.30, top, long_spread, short_spread, "counts")
-    arrow(top)
-    cloud(6.35, top, short_spread, short_spread)
+    for row, (label, planted, answer, measures) in enumerate((
+            ("homogeneous -- both sides from the same population", 0,
+             "reject nothing", "specificity"),
+            ("perturbed -- red cells added to the source only", 6,
+             "reject exactly those", "power"))):
+        y = 3.20 - row * 1.45
+        cells(1.05, y, spread=0.34)
+        arrow(1.95, 2.75, y)
+        axes.text(4.25, y + 0.45, label, fontsize=6.2, color="#55554f",
+                  ha="center", style="italic")
+        cells(3.35, y, planted=planted)
+        cells(4.95, y)
+        arrow(5.75, 6.55, y)
+        axes.text(7.75, y, answer, fontsize=7.0, color="#3c3c38",
+                  ha="center", va="center")
+        arrow(9.05, 9.75, y)
+        axes.text(10.5, y, measures, fontsize=7.4, color=C_POWER,
+                  ha="center", va="center", fontweight="semibold")
 
-    # Row 2: the detected-gene axis, vertical, collapsed by rank encoding.
-    middle = top - pitch
-    caption(middle, "rank encoding", "removes the detected-gene axis",
-            C_GENES, "axis vs detected genes", "0.91", "0.08")
-    cloud(3.30, middle, short_spread, long_spread, "genes")
-    arrow(middle)
-    cloud(6.35, middle, short_spread, short_spread)
+    axes.plot([0.35, 11.65], [1.25, 1.25], color="#d8d8d2", linewidth=0.8)
+    axes.text(0.35, 0.95, "both sides then carry the same nuisance:",
+              fontsize=6.4, color="#3c3c38", ha="left", fontweight="semibold")
+    axes.text(0.55, 0.58,
+              "depth spread, sd(log depth) 0 to 0.9 -- panels (a) to (d), (f) left",
+              fontsize=6.2, color=C_COUNTS, ha="left")
+    axes.text(0.55, 0.22,
+              "detection breadth at fixed total counts -- panel (f) centre",
+              fontsize=6.2, color=C_GENES, ha="left")
+    axes.text(7.6, 0.58, "one side only would be a batch effect,",
+              fontsize=5.8, color="#77776f", ha="left")
+    axes.text(7.6, 0.22, "which is a different problem",
+              fontsize=5.8, color="#77776f", ha="left")
 
-    # Row 3 is different in kind: cosine removes no axis, it changes what
-    # distance means, so it is drawn as a projection rather than a collapse.
-    bottom = middle - pitch
-    caption(bottom, "cosine cost", "keeps the axes, measures direction",
-            C_POWER, "power, planted 20%", "0.86", "0.96")
-    # A fan centred on this row, not a quarter arc springing from it: the
-    # first version pointed up and to the right, which put it within a hair of
-    # the row above and read as part of that row's cloud.
-    radius = 0.42
-    angles = rng.uniform(-0.62, 0.62, size=24)
-    lengths = rng.uniform(0.45, 1.0, size=24) * radius
-    axes.scatter(3.30 + lengths * np.cos(angles),
-                 bottom + lengths * np.sin(angles),
-                 s=2.4, c="#9a9a94", linewidths=0, zorder=3)
-    for angle in angles[:9]:
-        axes.plot([3.30, 3.30 + radius * np.cos(angle)],
-                  [bottom, bottom + radius * np.sin(angle)],
-                  color=C_POWER, linewidth=0.4, alpha=0.5, zorder=1)
-    arc = np.linspace(-0.66, 0.66, 60)
-    axes.plot(3.30 + radius * np.cos(arc), bottom + radius * np.sin(arc),
-              color=C_POWER, linewidth=0.9, zorder=2)
-    arrow(bottom)
-    cloud(6.35, bottom, short_spread, short_spread)
-
-    axes.set_title("(e)  Each operation removes a different thing",
+    axes.set_title("(e)  How the ground truth is built",
                    loc="left", fontsize=8.4, fontweight="semibold", pad=4)
 
 
@@ -272,7 +264,7 @@ def main() -> None:
         "panel_c_specificity": (
             lambda ax: panel_specificity(ax, rejection), (3.4, 2.7)),
         "panel_d_runtime": (lambda ax: panel_runtime(ax, runtime), (3.4, 2.7)),
-        "panel_e_schematic": (panel_schematic, (6.6, 2.6)),
+        "panel_e_validation": (panel_validation, (6.9, 2.5)),
         "panel_f_ablation": (
             lambda ax: panel_ablation(ax, ablation, ABLATION,
                                       "(f)  Preprocessing ablation"),
@@ -293,7 +285,7 @@ def main() -> None:
         # the panels themselves, because the ratio is of the *row* height and
         # the lower rows are the tall ones.
         grid = figure.add_gridspec(
-            4, 2, height_ratios=[2.4, 2.6, 2.5, 3.2],
+            4, 2, height_ratios=[2.4, 2.6, 3.0, 3.2],
             hspace=0.44, wspace=0.30,
             left=0.16, right=0.98, top=0.97, bottom=0.05)
         panel_f1(figure.add_subplot(grid[0, 0]), f1, "none",
@@ -302,7 +294,7 @@ def main() -> None:
                  "(b)  Mild batch effect", legend=False)
         panel_specificity(figure.add_subplot(grid[1, 0]), rejection)
         panel_runtime(figure.add_subplot(grid[1, 1]), runtime)
-        panel_schematic(figure.add_subplot(grid[2, :]))
+        panel_validation(figure.add_subplot(grid[2, :]))
         panel_ablation(figure.add_subplot(grid[3, :]), ablation, ABLATION,
                        "(f)  Preprocessing ablation")
         for suffix in ("png", "pdf"):
