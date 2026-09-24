@@ -106,7 +106,7 @@ def panel_validation(axes) -> None:
     "which source cells have a counterpart" answers with the nuisance instead.
     """
     axes.set_xlim(0, 12)
-    axes.set_ylim(0.05, 4.5)
+    axes.set_ylim(-1.05, 4.5)
     axes.axis("off")
     rng = np.random.default_rng(5)
 
@@ -144,7 +144,7 @@ def panel_validation(axes) -> None:
              "reject nothing", "specificity"),
             ("perturbed -- red cells added to the source only", 6,
              "reject exactly those", "power"))):
-        y = 3.20 - row * 1.45
+        y = 3.20 - row * 1.35
         cells(1.05, y, spread=0.34)
         arrow(1.95, 2.75, y)
         axes.text(4.25, y + 0.45, label, fontsize=6.2, color="#55554f",
@@ -158,19 +158,40 @@ def panel_validation(axes) -> None:
         axes.text(10.5, y, measures, fontsize=7.4, color=C_POWER,
                   ha="center", va="center", fontweight="semibold")
 
-    axes.plot([0.35, 11.65], [1.25, 1.25], color="#d8d8d2", linewidth=0.8)
-    axes.text(0.35, 0.95, "both sides then carry the same nuisance:",
+    axes.plot([0.35, 11.65], [1.35, 1.35], color="#d8d8d2", linewidth=0.8)
+    axes.text(0.35, 1.06, "both sides then carry the same nuisance:",
               fontsize=6.4, color="#3c3c38", ha="left", fontweight="semibold")
-    axes.text(0.55, 0.58,
+    axes.text(0.55, 0.70,
               "depth spread, sd(log depth) 0 to 0.9 -- panels (a) to (d), (f) left",
               fontsize=6.2, color=C_COUNTS, ha="left")
-    axes.text(0.55, 0.22,
+    axes.text(0.55, 0.34,
               "detection breadth at fixed total counts -- panel (f), hollow squares",
               fontsize=6.2, color=C_GENES, ha="left")
-    axes.text(7.6, 0.58, "one side only would be a batch effect,",
+    axes.text(7.5, 0.70, "applied to one side only it would be a batch",
               fontsize=5.8, color="#77776f", ha="left")
-    axes.text(7.6, 0.22, "which is a different problem",
+    axes.text(7.5, 0.34, "effect, which is a different problem",
               fontsize=5.8, color="#77776f", ha="left")
+
+    # What the two rows above correspond to in the study the method exists for.
+    # Without this the panel explains a construction and leaves the reader to
+    # guess what it stands in for, and the guess that matters is the wrong one:
+    # the gate is a geometric filter against one named lesion, not a test of
+    # whether a cell can metastasise. Saying so here is cheaper than saying it
+    # in a caption nobody reads beside the figure.
+    axes.plot([0.35, 11.65], [0.02, 0.02], color="#d8d8d2", linewidth=0.8)
+    axes.text(0.35, -0.29, "what this stands in for:", fontsize=6.4,
+              color="#3c3c38", ha="left", fontweight="semibold")
+    axes.text(0.55, -0.63,
+              "source = one patient's primary tumour   target = that patient's "
+              "matched metastasis",
+              fontsize=6.2, color="#3c3c38", ha="left")
+    axes.text(0.55, -0.94,
+              "retained = primary cells closer to the metastasis than to the "
+              "primary's own spread",
+              fontsize=6.2, color=C_POWER, ha="left")
+    axes.text(7.9, -0.94,
+              "a filter, not a test of metastatic competence",
+              fontsize=5.8, color="#77776f", ha="left", style="italic")
 
     axes.set_title("(e)  How the ground truth is built",
                    loc="left", fontsize=8.4, fontweight="semibold", pad=4)
@@ -292,7 +313,7 @@ def main() -> None:
         "panel_c_specificity": (
             lambda ax: panel_specificity(ax, rejection), (3.4, 2.7)),
         "panel_d_runtime": (lambda ax: panel_runtime(ax, runtime), (3.4, 2.7)),
-        "panel_e_validation": (panel_validation, (6.9, 2.5)),
+        "panel_e_validation": (panel_validation, (6.9, 3.1)),
         "panel_f_ablation": (
             lambda ax: panel_ablation(ax, ablation, ABLATION,
                                       "(f)  Preprocessing ablation"),
@@ -308,12 +329,12 @@ def main() -> None:
         save_panel(name, args.out, draw, size)
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(7.1, 9.6))
+        figure = plt.figure(figsize=(7.1, 10.2))
         # hspace at 0.70 left a band of white above (e) and (f) as tall as
         # the panels themselves, because the ratio is of the *row* height and
         # the lower rows are the tall ones.
         grid = figure.add_gridspec(
-            4, 2, height_ratios=[2.4, 2.6, 3.0, 3.2],
+            4, 2, height_ratios=[2.4, 2.6, 3.7, 3.2],
             hspace=0.44, wspace=0.30,
             left=0.16, right=0.98, top=0.97, bottom=0.05)
         panel_f1(figure.add_subplot(grid[0, 0]), f1, "none",
