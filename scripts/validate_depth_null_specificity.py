@@ -79,6 +79,26 @@ ARMS = {
     "homogeneous_depth_cv_high": {"depth_sigma": 0.9, "perturbed_fraction": 0.0},
     # Positive control: a real source-only subpopulation at uniform depth.
     "perturbed_depth_cv0": {"depth_sigma": 0.0, "perturbed_fraction": 0.2},
+    # Detection breadth at a fixed total depth. Depth is constant in these
+    # arms, so a method that only equalises totals has nothing left to do and
+    # whatever effect remains is the low-gene-number effect on its own. They
+    # are the arms the depth arms cannot substitute for: in every other arm
+    # here, and in splatter, breadth is a function of depth, so "fixed the
+    # depth" and "fixed the breadth" are one statement.
+    "homogeneous_breadth_mild": {"depth_sigma": 0.0, "perturbed_fraction": 0.0,
+                                 "breadth_fraction": 0.5,
+                                 "breadth_ratio": 0.50},
+    "homogeneous_breadth_strong": {"depth_sigma": 0.0,
+                                   "perturbed_fraction": 0.0,
+                                   "breadth_fraction": 0.5,
+                                   "breadth_ratio": 0.20},
+    # The same breadth split with the planted subpopulation still present, so
+    # power can be read in the regime where the correction is working. A
+    # correction that removes breadth by removing the cells' differences would
+    # pass the two arms above and fail this one.
+    "perturbed_breadth_strong": {"depth_sigma": 0.0, "perturbed_fraction": 0.2,
+                                 "breadth_fraction": 0.5,
+                                 "breadth_ratio": 0.20},
 }
 
 # Enabled only by --depth-source: the same two questions asked at the depth
@@ -129,6 +149,7 @@ def preprocessing_for(args: argparse.Namespace):
             equalise_depth=bool(args.equalise_depth),
             equalise_quantile=args.equalise_quantile,
             n_hvg=args.n_hvg, n_pcs=args.n_pcs, cost=args.cost,
+            regress_out=tuple(args.regress_out),
         )
     return Preprocessing(
         normalisation=args.representation,
@@ -137,6 +158,7 @@ def preprocessing_for(args: argparse.Namespace):
         equalise_depth=bool(args.equalise_depth),
         equalise_quantile=args.equalise_quantile,
         n_hvg=args.n_hvg, n_pcs=args.n_pcs, cost=args.cost,
+        regress_out=tuple(args.regress_out),
     )
 
 
@@ -290,6 +312,8 @@ def simulate_counts(
     dispersion: float,
     perturbed_fraction: float,
     perturbation_log2: float,
+    breadth_fraction: float = 0.0,
+    breadth_ratio: float = 0.25,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return integer counts, realised depth, and the perturbed-cell mask.
 
@@ -303,6 +327,27 @@ def simulate_counts(
     so cells differ biologically only through the optional perturbed
     subpopulation.  Depth is applied afterwards by multinomial sampling, which
     is why depth carries no biological signal by construction.
+
+    ``breadth_fraction`` is what makes the low-gene-number question answerable
+    at all.  Without it, detection breadth is a function of total depth and
+    nothing else -- more reads, more non-zero genes -- so in this simulation
+    "removed the depth effect" and "removed the detection-breadth effect" are
+    the same statement, and no arm can tell a method that does one from a
+    method that does the other.  That is why the screen passed
+    ``rank + equalise + cosine`` while the real data still shows the leading
+    axes tracking detected genes at rho 0.645.
+
+    Set it and that fraction of cells draws from a narrower slice of the gene
+    panel -- ``breadth_ratio`` of it -- at the **same** total depth.  Detection
+    breadth then varies with total counts held fixed, which is the arm a
+    correction aimed at breadth has to clear and a correction aimed at depth
+    cannot.
+
+    Those cells are not marked perturbed.  Narrow and broad cells share one
+    expression profile over the genes they both express, so there is no
+    subpopulation to find: an arm built this way still has "reject nothing" as
+    its correct answer, and any rejection it draws is a specificity failure in
+    the same sense as the depth arms.
     """
     n_genes = int(gene_mean.size)
     rates = rng.gamma(
@@ -314,6 +359,20 @@ def simulate_counts(
         perturbed[rng.choice(n_cells, count, replace=False)] = True
         affected = rng.choice(n_genes, max(1, n_genes // 10), replace=False)
         rates[np.ix_(perturbed, affected)] *= 2.0 ** perturbation_log2
+    if breadth_fraction > 0.0:
+        if not 0.0 < breadth_ratio <= 1.0:
+            raise ValueError("breadth_ratio must lie in (0, 1]")
+        narrow = np.zeros(n_cells, dtype=bool)
+        narrow[rng.choice(n_cells, int(round(breadth_fraction * n_cells)),
+                          replace=False)] = True
+        kept = max(2, int(round(breadth_ratio * n_genes)))
+        for index in np.flatnonzero(narrow):
+            # A different slice per cell, so "narrow" is not itself a
+            # subpopulation sharing a profile -- which it would be if every
+            # narrow cell were silenced on the same genes, and then rejecting
+            # them would be correct.
+            silenced = rng.choice(n_genes, n_genes - kept, replace=False)
+            rates[index, silenced] = 0.0
     rates /= rates.sum(axis=1, keepdims=True)
     if depth_pool is not None:
         # Bootstrap from an observed depth distribution. The synthetic sigmas
@@ -434,21 +493,29 @@ def run_replicate(
             perturbation_log2=args.perturbation_log2,
             depth_pool=depth_pool if arm.endswith("_observed") else None,
         )
+        breadth = {
+            "breadth_fraction": settings.get("breadth_fraction", 0.0),
+            "breadth_ratio": settings.get("breadth_ratio", 0.25),
+        }
         source_counts, source_depth, perturbed = simulate_counts(
             rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
-            perturbed_fraction=settings["perturbed_fraction"], **shared,
+            perturbed_fraction=settings["perturbed_fraction"], **breadth,
+            **shared,
         )
         # The target side never carries the perturbed subpopulation, so
         # perturbed source cells are the only genuinely incompatible cells in
         # any arm.
         target_counts, _, _ = simulate_counts(
             rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],
-            perturbed_fraction=0.0, **shared,
+            perturbed_fraction=0.0, **breadth, **shared,
         )
-    # Read equalisation, before anything else sees the counts. The depth the
-    # diagnostics test against stays the pre-equalisation depth, because that
-    # is the covariate the gate must not track -- the same reason
-    # 27_downsample_counts.py emits predownsample_depth.csv.gz.
+    # Both covariates are read off the counts as simulated, before read
+    # equalisation touches them, for the same reason 27_downsample_counts.py
+    # emits predownsample_depth.csv.gz: these are what the gate must not
+    # track, and after equalisation the total is near constant by
+    # construction while the detected-gene count is not.
+    source_detected = np.asarray((source_counts > 0).sum(axis=1),
+                                 dtype=np.float64)
     configuration = preprocessing_for(args)
     if args.external_representation:
         # The transform runs in its own package, then re-enters the shared
@@ -591,6 +658,21 @@ def run_replicate(
         "spearman_decision_cost_total_counts": rank_correlation(
             decision, source_depth
         ),
+        # And the same question about detection breadth, which is a separate
+        # quantity even though the depth arms cannot separate them. On the
+        # breadth arms the depth is constant, so `auc_total_counts` there is
+        # trivially 0.5 and these two columns carry the whole reading; on the
+        # depth arms they move together and the pair is what shows it.
+        "auc_detected_genes": rank_auc(source_detected, retained),
+        "spearman_decision_cost_detected_genes": rank_correlation(
+            decision, source_detected
+        ),
+        "median_detected_genes_retained": (
+            float(np.median(source_detected[retained])) if retained.any()
+            else float("nan")),
+        "median_detected_genes_rejected": (
+            float(np.median(source_detected[~retained])) if (~retained).any()
+            else float("nan")),
         "median_total_counts_retained": float(np.median(source_depth[retained]))
         if retained.any() else float("nan"),
         "median_total_counts_rejected": float(np.median(source_depth[~retained]))
@@ -666,6 +748,19 @@ def main() -> None:
     parser.add_argument(
         "--equalise-quantile", type=float, default=0.10,
         help="Pooled-depth quantile the shared target is taken from",
+    )
+    parser.add_argument(
+        "--regress-out", action="append", default=[],
+        choices=("detected_genes", "total_counts"),
+        help="Remove this covariate's linear component from the principal "
+             "components before the cost is built; may be repeated. Regressed "
+             "on the covariate's rank, because the correlation being removed "
+             "is measured as Spearman. It cannot tell technical variation "
+             "from biological: at one depth a transcriptionally broader cell "
+             "genuinely detects more genes. In *this* simulation it can, "
+             "because breadth carries no biology here -- which is exactly why "
+             "a good result on the depth arms would not transfer, and why the "
+             "homogeneous_breadth arms exist.",
     )
     parser.add_argument(
         "--cost", choices=("squared_euclidean", "cosine"),
@@ -746,6 +841,7 @@ def main() -> None:
                 f"{arm} rep={replicate} "
                 f"rejection={record['source_rejection_rate']:.3f} "
                 f"auc_depth={record['auc_total_counts']:.3f} "
+                f"auc_genes={record['auc_detected_genes']:.3f} "
                 f"rho_cost_depth={record['spearman_decision_cost_total_counts']:.3f}",
                 flush=True,
             )
@@ -789,6 +885,13 @@ def main() -> None:
         "equalise_quantile": (args.equalise_quantile
                               if args.equalise_depth else None),
         "cost": args.cost,
+        # The configuration as the object itself records it, so a run can be
+        # identified from its own report. The hand-written fields above are
+        # kept because existing collectors read them, but they were assembled
+        # by listing arguments one at a time and `--regress-out` was already
+        # missing from that list the first time it ran.
+        "preprocessing": preprocessing_for(args).as_dict(),
+        "preprocessing_label": preprocessing_for(args).label(),
         "n_genes": args.n_genes,
         "n_hvg": args.n_hvg,
         "n_pcs": args.n_pcs,

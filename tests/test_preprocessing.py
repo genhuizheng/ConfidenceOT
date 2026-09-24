@@ -208,6 +208,103 @@ class PreprocessingContractTest(unittest.TestCase):
         self.assertEqual(set(record), set(explicit))
 
 
+class RegressOutTest(unittest.TestCase):
+    """The covariate has to come out of the components, and only that."""
+
+    @staticmethod
+    def breadth_fixture(seed: int = 5, n_source: int = 90, n_target: int = 80):
+        """Cells at one total depth whose detected-gene count differs.
+
+        This is the shape the depth arms cannot make: in both simulators
+        detection breadth is a function of depth, so a correction aimed at
+        depth and one aimed at breadth cannot be told apart there.
+        """
+        rng = np.random.default_rng(seed)
+
+        def side(n: int) -> np.ndarray:
+            counts = np.zeros((n, N_GENES), dtype=np.int64)
+            for cell in range(n):
+                breadth = 45 if cell % 2 else 12
+                picked = rng.choice(N_GENES, breadth, replace=False)
+                counts[cell, picked] = rng.multinomial(
+                    2000, np.ones(breadth) / breadth)
+            return counts.astype(np.float64)
+
+        return side(n_source), side(n_target)
+
+    def test_removes_the_covariate_from_the_components(self):
+        from scipy.stats import spearmanr
+
+        source, target = self.breadth_fixture()
+        detected = np.concatenate([(source > 0).sum(axis=1),
+                                   (target > 0).sum(axis=1)]).astype(float)
+        totals = np.concatenate([source.sum(axis=1), target.sum(axis=1)])
+        # The fixture's point: depth is constant, breadth is not.
+        self.assertEqual(float(totals.std()), 0.0)
+
+        def strongest(configuration):
+            prepared = configuration.representation(
+                source, target, seed=3, source_genes=GENES,
+                target_genes=GENES)
+            points = np.vstack([prepared.source, prepared.target])
+            return max(abs(spearmanr(points[:, k], detected).statistic)
+                       for k in range(points.shape[1]))
+
+        before = strongest(Preprocessing(n_hvg=40, n_pcs=8))
+        after = strongest(Preprocessing(n_hvg=40, n_pcs=8,
+                                        regress_out=("detected_genes",)))
+        self.assertGreater(before, 0.5)
+        self.assertLess(after, 0.1)
+
+    def test_label_carries_the_covariates_and_round_trips(self):
+        configuration = Preprocessing(
+            normalisation="rank_value", rank_top_n=256, equalise_depth=True,
+            cost="cosine", regress_out=("detected_genes",))
+        self.assertEqual(configuration.label(), "rank256_rg-genes_ds_cos")
+        self.assertEqual(
+            Preprocessing.from_label("rank256_rg-genes_ds_cos").regress_out,
+            ("detected_genes",))
+        self.assertEqual(
+            Preprocessing.from_label("logcpm_rg-genes-counts_cos").regress_out,
+            ("detected_genes", "total_counts"))
+
+    def test_unknown_or_repeated_covariates_are_refused(self):
+        with self.assertRaises(ValueError):
+            Preprocessing(regress_out=("n_genes",))
+        with self.assertRaises(ValueError):
+            Preprocessing(regress_out=("total_counts", "total_counts"))
+        with self.assertRaises(ValueError):
+            Preprocessing.from_label("logcpm_rg-mito_cos")
+
+    def test_precomputed_input_refuses_to_invent_a_covariate(self):
+        # A residual matrix has no zeros to count, so a detected-gene count
+        # read off it would be the gene count, identical for every cell.
+        configuration = Preprocessing(
+            normalisation="precomputed", label_stem="sct",
+            regress_out=("detected_genes",), n_hvg=10, n_pcs=3)
+        supplied = np.random.default_rng(1).normal(size=(20, 30))
+        with self.assertRaises(ValueError):
+            configuration.representation(supplied[:10], supplied[10:], seed=1)
+        # Supplied explicitly, it works: only the caller knows the real values.
+        prepared = configuration.representation(
+            supplied[:10], supplied[10:], seed=1,
+            covariates=np.arange(20, dtype=float))
+        self.assertIn("regressed out", prepared.provenance["regression"])
+
+    def test_regression_precedes_the_cosine_normalisation(self):
+        # Normalising and then subtracting a fit would leave vectors that are
+        # no longer unit, and the identity the cosine cost rests on with them.
+        source, target = self.breadth_fixture()
+        prepared = Preprocessing(
+            n_hvg=40, n_pcs=8, cost="cosine",
+            regress_out=("detected_genes",),
+        ).representation(source, target, seed=3, source_genes=GENES,
+                         target_genes=GENES)
+        for side in (prepared.source, prepared.target):
+            np.testing.assert_allclose(np.linalg.norm(side, axis=1), 1.0,
+                                       atol=1e-6)
+
+
 class PrimitiveTest(unittest.TestCase):
     def test_unit_rows_normalises_and_leaves_zero_rows_alone(self):
         rows = unit_rows(np.array([[3.0, 4.0], [0.0, 0.0]], dtype=np.float32))

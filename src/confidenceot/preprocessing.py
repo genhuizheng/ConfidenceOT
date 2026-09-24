@@ -58,6 +58,7 @@ from typing import Any, Literal, Sequence
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy import sparse
+from scipy.stats import rankdata
 
 Normalisation = Literal[
     "cpm", "log_cpm", "log1p", "precomputed",
@@ -451,6 +452,8 @@ class Preprocessing:
     cost: Cost = "squared_euclidean"
     scale: Scale = "median_sampled_pair"
     scale_sample_pairs: int = 1_000_000
+    regress_out: tuple[str, ...] = ()
+    regress_on_ranks: bool = True
     label_stem: str | None = None
 
     def __post_init__(self) -> None:
@@ -479,6 +482,12 @@ class Preprocessing:
                 "only the caller knows what produced the matrix, and an "
                 "unnamed configuration cannot be reported"
             )
+        unknown = [name for name in self.regress_out if name not in COVARIATES]
+        if unknown:
+            raise ValueError(
+                f"regress_out names {unknown}; expected any of {COVARIATES}")
+        if len(set(self.regress_out)) != len(self.regress_out):
+            raise ValueError("regress_out repeats a covariate")
 
     # ---- naming and recording -------------------------------------------
 
@@ -493,6 +502,11 @@ class Preprocessing:
         if self.label_stem is None and self.normalisation.startswith("rank"):
             stem = f"{stem}{self.rank_top_n}"
         parts = [stem]
+        if self.regress_out:
+            # Between the stem and the other two, so existing labels are
+            # unchanged and the parser can keep stripping from the end.
+            parts.append("rg-" + "-".join(_COVARIATE_TAG[name] for name
+                                          in self.regress_out))
         if self.equalise_depth:
             parts.append("ds")
         if self.cost == "cosine":
@@ -530,10 +544,22 @@ class Preprocessing:
         equalise = False
         if parts and parts[-1] == "ds":
             equalise, parts = True, parts[:-1]
+        regressed: tuple[str, ...] = ()
+        if parts and parts[-1].startswith("rg-"):
+            inverse_tag = {tag: name for name, tag in _COVARIATE_TAG.items()}
+            tags = parts[-1][len("rg-"):].split("-")
+            missing = [tag for tag in tags if tag not in inverse_tag]
+            if missing:
+                raise ValueError(
+                    f"label {label!r} names unknown covariates {missing}; "
+                    f"expected any of {sorted(inverse_tag)}")
+            regressed = tuple(inverse_tag[tag] for tag in tags)
+            parts = parts[:-1]
         stem = "_".join(parts)
         if not stem:
             raise ValueError(f"label {label!r} names no transform")
-        settings: dict[str, Any] = {"cost": cost, "equalise_depth": equalise}
+        settings: dict[str, Any] = {"cost": cost, "equalise_depth": equalise,
+                                    "regress_out": regressed}
         inverse = {value: key for key, value in _LABEL_STEM.items()}
         rank_stems = tuple(
             value for key, value in _LABEL_STEM.items() if key.startswith("rank")
@@ -589,6 +615,9 @@ class Preprocessing:
             "n_pcs": self.n_pcs,
             "cost": self.cost,
             "scale": self.scale,
+            "regress_out": list(self.regress_out),
+            "regress_on_ranks": (self.regress_on_ranks if self.regress_out
+                                 else None),
         }
 
     # ---- the steps ------------------------------------------------------
@@ -634,6 +663,7 @@ class Preprocessing:
         seed: int,
         source_genes: Sequence[Any] | None = None,
         target_genes: Sequence[Any] | None = None,
+        covariates: ArrayLike | None = None,
         extra_provenance: dict[str, Any] | None = None,
     ) -> Representation:
         """Joint representation of both sides, in one shared coordinate system.
@@ -756,6 +786,33 @@ class Preprocessing:
         components = min(self.n_pcs, dense.shape[0] - 1, dense.shape[1])
         coordinates = PCA(n_components=components,
                           random_state=seed).fit_transform(dense)
+        regression_note = "no covariate regressed out"
+        if self.regress_out:
+            # Before the cosine step, not after. Normalising to unit length and
+            # then subtracting a fitted component would leave vectors that are
+            # no longer unit, and the identity the cosine cost rests on --
+            # ||a-b||^2 = 2 - 2cos for unit vectors -- would no longer hold.
+            if covariates is None:
+                if self.normalisation == "precomputed":
+                    raise ValueError(
+                        "regress_out on a precomputed representation needs "
+                        "`covariates`: the supplied matrix is not counts, so "
+                        "a detected-gene count read off it means nothing")
+                covariates = cell_covariates(
+                    _stack(source_x, target_x), self.regress_out)
+            design = np.asarray(covariates, dtype=np.float64)
+            if design.ndim == 1:
+                design = design[:, None]
+            if design.shape[0] != coordinates.shape[0]:
+                raise ValueError(
+                    f"covariates have {design.shape[0]} rows and the joint "
+                    f"representation has {coordinates.shape[0]}")
+            coordinates = regress_out(coordinates, design,
+                                      use_ranks=self.regress_on_ranks)
+            regression_note = (
+                f"{'rank of ' if self.regress_on_ranks else ''}"
+                + ", ".join(self.regress_out)
+                + " regressed out of the principal components")
         source_pca = coordinates[:source_n]
         target_pca = coordinates[source_n:]
         if self.cost == "cosine":
@@ -767,6 +824,7 @@ class Preprocessing:
             "detection_filter": detection_note,
             "joint_hvg": hvg_note,
             "joint_pca": "centered and gene-scaled PCA",
+            "regression": regression_note,
             "common_gene_n": len(common),
             "hvg_n": int(len(selected)),
             "pca_components": int(components),
@@ -848,6 +906,82 @@ class Preprocessing:
         cost = squared_euclidean(representation.source,
                                  representation.target) / scale
         return CostMatrix(cost=cost, scale=scale, representation=representation)
+
+
+COVARIATES: tuple[str, ...] = ("detected_genes", "total_counts")
+# Short names for the label, so a configuration that regresses a covariate out
+# can still be named in one string and parsed back.
+_COVARIATE_TAG = {"detected_genes": "genes", "total_counts": "counts"}
+
+
+def cell_covariates(matrix: Any, names: Sequence[str]) -> NDArray[np.float64]:
+    """Per-cell covariates read off the matrix the representation is built on.
+
+    ``detected_genes`` is the count of non-zero genes and ``total_counts`` the
+    row sum.  Both are computed on the matrix as supplied, which for the
+    production pipeline means *after* read equalisation -- and that is the
+    point: the equalised total is near constant by construction while the
+    detected-gene count is not, so detection breadth is the quantity left to
+    remove.
+    """
+    unknown = [name for name in names if name not in COVARIATES]
+    if unknown:
+        raise ValueError(f"unknown covariates {unknown}; expected {COVARIATES}")
+    csr = sparse.csr_matrix(matrix)
+    csr.eliminate_zeros()
+    columns = []
+    for name in names:
+        if name == "detected_genes":
+            columns.append(np.diff(csr.indptr).astype(np.float64))
+        else:
+            columns.append(np.asarray(csr.sum(axis=1), dtype=np.float64).ravel())
+    return np.column_stack(columns) if columns else np.zeros((csr.shape[0], 0))
+
+
+def regress_out(
+    coordinates: NDArray[np.floating],
+    covariates: NDArray[np.float64],
+    *,
+    use_ranks: bool = True,
+) -> NDArray[np.floating]:
+    """Remove each covariate's linear component from every coordinate.
+
+    Applied to the principal components rather than to the genes.  Regressing
+    per gene, as ``scanpy.pp.regress_out`` does, costs one fit per gene for the
+    same target, and the quantity actually measured here is the correlation
+    between a covariate and a *component* -- so that is where it is removed.
+
+    ``use_ranks`` regresses on the rank of the covariate, not its value,
+    because the correlation being removed is measured as Spearman. Removing the
+    linear component of the raw value leaves any monotone non-linear part
+    behind, which a Spearman check would still find; removing the linear
+    component of the rank targets the monotone part directly.
+
+    **This does not distinguish technical from biological variation.** At one
+    sequencing depth a transcriptionally broader cell genuinely detects more
+    genes, so the detected-gene count is not a purely technical covariate on
+    real data, and what comes out here is whatever was linear in it. On the
+    simulations it *is* purely technical -- both simulators make detection
+    breadth a function of depth with no independent source -- so a simulated
+    result for this step is favourable for a reason that does not transfer.
+    That is the same trap read equalisation fell into; see
+    ``cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md``.
+    """
+    values = np.asarray(coordinates)
+    design = np.asarray(covariates, dtype=np.float64)
+    if design.ndim != 2 or design.shape[0] != values.shape[0]:
+        raise ValueError("covariates must be one row per coordinate row")
+    if design.shape[1] == 0:
+        return values
+    if use_ranks:
+        design = np.column_stack([rankdata(column) for column in design.T])
+    design = np.column_stack([np.ones(len(design)), design])
+    # Least squares rather than a normal-equation solve: two covariates that
+    # are near-duplicates of each other make the normal equations singular,
+    # and lstsq returns the minimum-norm solution instead of failing.
+    fitted, *_ = np.linalg.lstsq(design, values.astype(np.float64), rcond=None)
+    residual = values.astype(np.float64) - design @ fitted
+    return residual.astype(values.dtype, copy=False)
 
 
 def _stack(source: Any, target: Any) -> Any:

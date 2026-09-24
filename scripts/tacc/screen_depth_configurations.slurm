@@ -91,6 +91,27 @@ configurations=(
   # is real; if it does not, one of the implementations is doing something
   # unexpected and the swap is not a property of the transforms.
   "pearson|--representation pearson_residuals"
+  # The low-gene-number round. The winning configuration handles total depth
+  # and leaves detection breadth: on real data the leading axes track detected
+  # genes at rho 0.645, higher than the 0.60 the *old* configuration reached
+  # against total depth. These are the two ways of attacking that, on top of
+  # the winner rather than instead of it.
+  #
+  # Reading them needs the homogeneous_breadth arms, where total depth is
+  # constant and breadth is not. In every other arm here -- and in splatter --
+  # breadth is a function of depth, so "fixed the depth" and "fixed the
+  # breadth" are one statement and these three would be indistinguishable.
+  #
+  # `dr10` restricts the gene pool before the transform, so a deep cell and a
+  # shallow one rank the same genes. `rg` removes the covariate from the
+  # components afterwards. The second is the stronger instrument and the less
+  # defensible one: detection breadth is not purely technical on real data, so
+  # a good score here is not by itself permission to use it. The simulation
+  # cannot say otherwise, because breadth carries no biology in it.
+  "rank256_ds_cos_dr10|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine --minimum-detection-rate 0.10"
+  "rank256_ds_cos_dr25|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine --minimum-detection-rate 0.25"
+  "rank256_rg-genes_ds_cos|--representation rank_value --rank-top-n 256 --equalise-depth --cost cosine --regress-out detected_genes"
+  "logcpm_rg-genes_cos|--representation log_cpm --cost cosine --regress-out detected_genes"
 )
 
 task=${SLURM_ARRAY_TASK_ID:-0}
