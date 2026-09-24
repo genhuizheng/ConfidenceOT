@@ -165,7 +165,7 @@ def panel_validation(axes) -> None:
               "depth spread, sd(log depth) 0 to 0.9 -- panels (a) to (d), (f) left",
               fontsize=6.2, color=C_COUNTS, ha="left")
     axes.text(0.55, 0.22,
-              "detection breadth at fixed total counts -- panel (f) centre",
+              "detection breadth at fixed total counts -- panel (f), hollow squares",
               fontsize=6.2, color=C_GENES, ha="left")
     axes.text(7.6, 0.58, "one side only would be a batch effect,",
               fontsize=5.8, color="#77776f", ha="left")
@@ -180,16 +180,26 @@ def panel_ablation(axes, ablation: pd.DataFrame, order: list[str],
                    title: str) -> None:
     """The factorial, with the metric that belongs to each factor beside it.
 
-    Three columns rather than one, because a single score would hide that the
+    Four columns rather than one, because a single score would hide that the
     factors do different jobs: a configuration can clear the depth axis and
     leave the gene axis untouched, and only showing both makes that visible.
     ``f1_deep`` is with them because specificity without power is free -- log
     CPM keeps its specificity ranking while its F1 falls from 0.88 to 0.25 once
     depth is spread.
+
+    The fourth column is the one the round exists for. ``axis_vs_genes`` is
+    measured where detection breadth rides on depth, and the full model clears
+    it at 0.085. ``axis_vs_genes_split`` is the same correlation where total
+    counts are held at 3,119 and breadth varies on its own, and there the full
+    model sits at 0.730. Plotting only the first would show three solved
+    problems and hide that the configuration does not act on breadth at all
+    once the totals are equalised -- which is what the real data's 0.645 is.
+    The two are drawn as a filled and a hollow square of the same colour,
+    because they are one quantity under two regimes rather than two quantities.
     """
     present = [name for name in order if name in ablation.index]
     y_positions = np.arange(len(present))[::-1]
-    axes.set_ylim(-0.75, len(present) - 0.25)
+    axes.set_ylim(-0.85, len(present) - 0.15)
     axes.set_yticks(y_positions)
     axes.set_yticklabels([PRETTY.get(name, name) for name in present],
                          fontsize=6.8)
@@ -201,19 +211,34 @@ def panel_ablation(axes, ablation: pd.DataFrame, order: list[str],
     for spine in ("top", "right", "left"):
         axes.spines[spine].set_visible(False)
 
+    # Three sub-levels within each row. The series collide at real values --
+    # rank+DS puts the count and gene axes both near 0.08, and rank puts the
+    # fixed-count square within 0.008 of the power diamond -- so without the
+    # offset two different measurements render as one marker.
+    OFFSET_COUNTS, OFFSET_GENES, OFFSET_POWER = 0.17, 0.0, -0.21
     for y, name in zip(y_positions, present):
         row = ablation.loc[name]
         axes.axhline(y, color="#eeeee8", linewidth=0.7, zorder=0)
-        axes.plot([row.axis_vs_counts], [y], marker="o", markersize=5,
-                  color=C_COUNTS, linestyle="none", zorder=4)
-        axes.plot([row.axis_vs_genes], [y], marker="s", markersize=4.6,
-                  color=C_GENES, linestyle="none", zorder=4)
-        axes.plot([row.f1_deep], [y], marker="D", markersize=4.2,
-                  color=C_POWER, linestyle="none", zorder=4)
+        axes.plot([row.axis_vs_counts], [y + OFFSET_COUNTS], marker="o",
+                  markersize=5, color=C_COUNTS, linestyle="none", zorder=4)
+        axes.plot([row.axis_vs_genes], [y + OFFSET_GENES], marker="s",
+                  markersize=4.6, color=C_GENES, linestyle="none", zorder=4)
+        if "axis_vs_genes_split" in row.index and row.axis_vs_genes_split == row.axis_vs_genes_split:
+            # Hollow, and joined to its filled twin by a hairline, so the eye
+            # reads the gap as one measurement moving between two regimes.
+            axes.plot([row.axis_vs_genes, row.axis_vs_genes_split],
+                      [y + OFFSET_GENES] * 2, color=C_GENES, linewidth=0.7,
+                      alpha=0.45, zorder=3)
+            axes.plot([row.axis_vs_genes_split], [y + OFFSET_GENES],
+                      marker="s", markersize=4.6, markerfacecolor="white",
+                      markeredgecolor=C_GENES, markeredgewidth=1.0,
+                      linestyle="none", zorder=4)
+        axes.plot([row.f1_deep], [y + OFFSET_POWER], marker="D",
+                  markersize=4.2, color=C_POWER, linestyle="none", zorder=4)
 
-    axes.set_xlabel("left two: leading-axis correlation with the covariate "
-                    "(lower is better)\nright: F1 at sd(log depth) 0.9 "
-                    "(higher is better)", fontsize=6.6)
+    axes.set_xlabel("circles and squares: leading-axis correlation with the "
+                    "covariate (lower is better)\ndiamonds: F1 at sd(log "
+                    "depth) 0.9 (higher is better)", fontsize=6.6)
     # Short labels and a small face: the first version ran "power at high
     # depth spread" off the right edge of the panel.
     axes.legend(handles=[
@@ -221,10 +246,13 @@ def panel_ablation(axes, ablation: pd.DataFrame, order: list[str],
                label="axis vs counts", markersize=4.6),
         Line2D([], [], marker="s", linestyle="", color=C_GENES,
                label="axis vs genes", markersize=4.2),
+        Line2D([], [], marker="s", linestyle="", markerfacecolor="white",
+               markeredgecolor=C_GENES, markeredgewidth=1.0, color=C_GENES,
+               label="same, at fixed counts", markersize=4.2),
         Line2D([], [], marker="D", linestyle="", color=C_POWER,
                label="power, deep", markersize=3.8),
-    ], loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=3, frameon=False,
-        fontsize=6.0, handletextpad=0.3, columnspacing=0.9)
+    ], loc="lower center", bbox_to_anchor=(0.5, 1.01), ncol=4, frameon=False,
+        fontsize=6.0, handletextpad=0.3, columnspacing=0.8)
     axes.set_title(title, loc="left", fontsize=8.4, fontweight="semibold",
                    pad=22)
 
