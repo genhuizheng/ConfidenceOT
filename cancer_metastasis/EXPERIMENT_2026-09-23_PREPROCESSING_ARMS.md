@@ -399,10 +399,14 @@ assumption that the diagnostics are complete, and for 6a they are not.
 
 | | |
 |---|---|
-| baseline, observed | 0.645 |
+| baseline, observed | **per dataset**; 0.645 was the across-dataset figure and is not any one dataset's reference |
 | simulation says regress-out gives | 0.012 |
 | **pass** | the regress-out arm's distribution falls substantially towards zero |
 | **fail** | it does not move |
+
+Read per dataset against that dataset's own baseline. An earlier draft named
+0.645 as "the observed baseline", which is the across-dataset number from
+section 8 of the resolution document; head and neck's own baseline is 0.422.
 
 A failure here means the regression is not reaching the real covariate, and
 **nothing else about that arm is interpretable** — not its gate, not its
@@ -452,15 +456,55 @@ is unchanged, that stays open**, and it is not evidence against any arm here.
 
 ## 7. Real-data results
 
-*Empty. To be filled from the runs in section 4, read strictly in the order of
-section 6, and only after section 5 is closed.*
+Filled as arms return, in the order of section 6.
+
+### 7a. Head and neck, GSE181919 — 6a passes
+
+Complete 2026-09-23, four pairs, 810 malignant cells. Medians over pairs from
+`tools/audit_depth_axis.py`.
+
+| | pre-equalisation depth axis | **detected-genes axis** | equalised-depth control |
+|---|---:|---:|---:|
+| `rank256_ds_cos` | 0.282 | **0.422** | 0.190 |
+| `rank256_rg-genes_ds_cos` | 0.288 | **0.109** | 0.172 |
+
+**6a passes, and the shape of the pass is what makes it credible.** The
+detected-gene axis falls by a factor of 3.9 while the depth axis and the
+equalisation control do not move at all. The regression reached its target
+covariate on real data and left the neighbouring one alone, which is the
+outcome a spurious improvement would not produce.
+
+Per pair: P38 0.513 → 0.099, P22 0.344 → 0.049, P46 0.409 → 0.118, and P59
+0.434 → 0.336. Three fall hard; P59 barely moves and is recorded as such.
+
+### 7b. Head and neck — 6b is not estimable here, as was already established
+
+Retention runs 0.579, 0.938, 0.394 and 0.732 in the baseline, so the
+second pair rejects about 6% of roughly 56 source cells. The per-pair gate AUCs
+printed for this dataset are a handful of cells wide, and the apparent
+worsening on that pair, `auc_n_genes_by_counts` 0.117 → 0.252, is noise of that
+width rather than a result.
+
+This was not a surprise: section 4b of the resolution document established on
+2026-09-21 that GSE181919 cannot carry a per-pair acceptance test -- three of
+its four pairs sit one to two standard errors from the threshold -- and
+recorded the amendment **before any number existed**, that this dataset is
+evaluated on the **pooled** gate. That amendment governs here, and it is the
+one place where section 6b's "never pooled" does not apply.
+
+### 7c. Remaining
 
 | | baseline `rank256_ds_cos` | breadth `rank256_rg-genes_ds_cos` | no-equalisation `rank256_cos` |
 |---|---|---|---|
-| 6a axis vs detected genes | 0.645 | *pending* | *pending* |
-| 6b per-pair gate deviation | 1/3 ovarian, 1/2 prostate over bound | *pending* | *pending* |
-| 6c Jaccard against baseline | — | *pending* | *pending* |
-| 6d retention | *see section 8 of the resolution document* | *pending* | *pending* |
+| ovarian, 94 pairs | done | *running* | not submitted, see section 4 |
+| prostate, 24 pairs | done | *running* | not submitted |
+| colorectal, 5 pairs | done | *running* | *running* |
+| headneck, 4 pairs | done | **7a, 7b** | not submitted |
+
+Ovarian and prostate are the datasets that decide this. Head and neck is the
+smallest of the four and the only one whose acceptance test was already known
+not to be estimable, so 7a is a licence to keep reading rather than a result
+about the configuration.
 
 ---
 
