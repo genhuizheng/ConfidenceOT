@@ -130,6 +130,32 @@ ARMS = {
                                       "breadth_fraction": 0.5,
                                       "breadth_ratio": 0.12,
                                       "median_depth": 3119.0},
+    # The continuous form, calibrated to how the real data is actually shaped
+    # rather than to a clean split. GSE180661 has 95% of its cells within 15%
+    # of the median detected-gene count and a thin tail to 282; sigma 0.30
+    # reproduces those deciles.
+    #
+    # It reaches an axis correlation of about 0.10, against the 0.645 measured
+    # on the real data -- and even at sigma 0.50, a spread wider than the real
+    # one, it only reaches 0.229. Purely technical breadth variation at fixed
+    # total counts therefore does not reproduce what the real data shows.
+    #
+    # That is a result, not a failed calibration. Read equalisation thins each
+    # cell hypergeometrically, which preserves proportions, so two cells with
+    # the same underlying profile should arrive at 3,119 counts with the same
+    # detected-gene distribution. The real data's 282-to-1,400 spread at
+    # exactly 3,119 counts therefore says the underlying profiles differ --
+    # cells differ in transcriptome complexity. Which bears directly on
+    # regressing the covariate out: what is being removed is not purely
+    # technical.
+    "homogeneous_breadth_observed": {"depth_sigma": 0.0,
+                                     "perturbed_fraction": 0.0,
+                                     "breadth_sigma": 0.30,
+                                     "median_depth": 3119.0},
+    "perturbed_breadth_observed": {"depth_sigma": 0.0,
+                                   "perturbed_fraction": 0.2,
+                                   "breadth_sigma": 0.30,
+                                   "median_depth": 3119.0},
 }
 
 # Enabled only by --depth-source: the same two questions asked at the depth
@@ -345,6 +371,7 @@ def simulate_counts(
     perturbation_log2: float,
     breadth_fraction: float = 0.0,
     breadth_ratio: float = 0.25,
+    breadth_sigma: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return integer counts, realised depth, and the perturbed-cell mask.
 
@@ -390,7 +417,26 @@ def simulate_counts(
         perturbed[rng.choice(n_cells, count, replace=False)] = True
         affected = rng.choice(n_genes, max(1, n_genes // 10), replace=False)
         rates[np.ix_(perturbed, affected)] *= 2.0 ** perturbation_log2
-    if breadth_fraction > 0.0:
+    if breadth_sigma > 0.0:
+        # The continuous form, and the one that matches how real data looks.
+        # A 50/50 split makes half the cells unusual; on GSE180661 95% of cells
+        # sit within 15% of the median detected-gene count (p5 1,054 against a
+        # median of 1,238) with a thin tail reaching 282. The axis correlation
+        # of 0.645 measured there is therefore a weak monotone gradient running
+        # through every cell, not two separable groups, and a method that
+        # handles a clean split need not handle a gradient.
+        #
+        # Each cell keeps a lognormal fraction of the panel, capped at all of
+        # it, so most cells are at full breadth and the tail thins out.
+        keep_fraction = np.minimum(
+            1.0, rng.lognormal(0.0, breadth_sigma, size=n_cells))
+        for index in range(n_cells):
+            kept = max(2, int(round(keep_fraction[index] * n_genes)))
+            if kept >= n_genes:
+                continue
+            silenced = rng.choice(n_genes, n_genes - kept, replace=False)
+            rates[index, silenced] = 0.0
+    elif breadth_fraction > 0.0:
         if not 0.0 < breadth_ratio <= 1.0:
             raise ValueError("breadth_ratio must lie in (0, 1]")
         narrow = np.zeros(n_cells, dtype=bool)
@@ -537,6 +583,7 @@ def run_replicate(
         breadth = {
             "breadth_fraction": settings.get("breadth_fraction", 0.0),
             "breadth_ratio": settings.get("breadth_ratio", 0.25),
+            "breadth_sigma": settings.get("breadth_sigma", 0.0),
         }
         source_counts, source_depth, perturbed = simulate_counts(
             rng, n_cells=args.n_cells, depth_sigma=settings["depth_sigma"],

@@ -114,7 +114,11 @@ def ablation_table(arms: pd.DataFrame) -> pd.DataFrame:
 
     table["f1_clean"] = pick("perturbed_depth_cv0", "perturbed_f1")
     table["f1_deep"] = pick("perturbed_depth_cv_high", "perturbed_f1")
-    table["f1_breadth"] = pick("perturbed_breadth_composition", "perturbed_f1")
+    # The realistic arm, not the bimodal one: a method that handles a clean
+    # 50/50 split need not handle the weak monotone gradient the real data has.
+    table["f1_breadth"] = pick("perturbed_breadth_observed", "perturbed_f1")
+    table["f1_breadth_split"] = pick("perturbed_breadth_composition",
+                                     "perturbed_f1")
 
     depth_arms = ["homogeneous_depth_cv_low", "homogeneous_depth_cv_mid",
                   "homogeneous_depth_cv_high"]
@@ -122,14 +126,16 @@ def ablation_table(arms: pd.DataFrame) -> pd.DataFrame:
         [(pick(arm, "auc_total_counts") - 0.5).abs() for arm in depth_arms],
         axis=1).max(axis=1)
     table["gate_vs_genes"] = (
-        pick("homogeneous_breadth_composition", "auc_detected_genes") - 0.5
+        pick("homogeneous_breadth_observed", "auc_detected_genes") - 0.5
     ).abs()
     table["axis_vs_counts"] = pd.concat(
         [pick(arm, "max_abs_rho_pc_total_counts") for arm in depth_arms],
         axis=1).max(axis=1)
-    table["axis_vs_genes"] = pick("homogeneous_breadth_composition",
+    table["axis_vs_genes"] = pick("homogeneous_breadth_observed",
                                   "max_abs_rho_pc_detected_genes")
-    table["reject_breadth"] = pick("homogeneous_breadth_composition",
+    table["axis_vs_genes_split"] = pick("homogeneous_breadth_composition",
+                                        "max_abs_rho_pc_detected_genes")
+    table["reject_breadth"] = pick("homogeneous_breadth_observed",
                                    "source_rejection_rate")
     return table.reset_index()
 
