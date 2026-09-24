@@ -313,6 +313,30 @@ REPRESENTATIONS = ("log_cpm", "rank_value", "rank_no_median",
                    "pearson_residuals")
 
 
+def gene_symbols(data: Any) -> np.ndarray:
+    """Gene symbols, which are not what ``gene_keys`` returns.
+
+    ``gene_keys`` prefers ``gene_id`` and so yields Ensembl identifiers on
+    objects that carry them; it is the right key for joining a representation
+    to a manifest. Anything that names genes -- a marker set, a pathway, a
+    result table a human reads -- needs the symbol instead, and reaching for
+    ``gene_keys`` there silently matches nothing rather than failing, which is
+    exactly what happened to the first proliferation score.
+
+    Moved here from ``21_prepare_four_state_malignant_pseudobulk.py``, whose
+    copy stays because its results are complete;
+    ``tests/test_cancer_gene_symbols.py`` pins the two together.
+    """
+    symbols = np.asarray(data.var_names.astype(str), dtype=str)
+    if "gene_symbol" in data.var:
+        candidate = data.var["gene_symbol"].astype(str).str.strip().to_numpy(dtype=str)
+        valid = ~pd.Series(candidate).str.lower().isin(
+            {"", "na", "n/a", "nan", "none", "null", "<na>"}
+        ).to_numpy()
+        symbols = np.where(valid, candidate, symbols)
+    return np.asarray([value.strip() for value in symbols], dtype=str)
+
+
 def normalize_expression(
     matrix: Any, kind: str, target_sum: float = 10_000.0
 ) -> tuple[Any, str]:

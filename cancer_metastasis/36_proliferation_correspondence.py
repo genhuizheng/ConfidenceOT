@@ -51,7 +51,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 
-from common import expression_matrix, gene_keys, load_exact_side
+from common import expression_matrix, gene_symbols, load_exact_side
 
 # Tirosh et al. G2M, the standard set, trimmed to symbols these objects carry.
 # Fixed rather than derived from the result: scoring with the genes the
@@ -92,18 +92,36 @@ def side_paths(manifest: pd.DataFrame, pair_id: str, side: str) -> list[str]:
 
 
 def score(paths: list[str], sample: str, ids: list[str]) -> tuple[float, int]:
-    """Mean log1p CPM over the G2M set for the named cells."""
+    """Mean log1p CPM over the G2M set for the named cells.
+
+    Raises rather than returning a blank on either way this can go wrong. The
+    first version returned NaN for a missing cell and NaN for an unmatched
+    gene set, which produced a table of NaN with no indication of which of the
+    two had happened -- and the cause turned out to be the third possibility,
+    ``gene_keys`` yielding Ensembl identifiers that no symbol can match.
+    """
     data = load_exact_side(paths, sample)
     lookup = {str(value): index for index, value in enumerate(data.obs_names)}
-    rows = np.asarray([lookup[value] for value in ids if value in lookup],
-                      dtype=np.int64)
+    missing = [value for value in ids if value not in lookup]
+    if missing:
+        raise KeyError(
+            f"{len(missing)} of {len(ids)} classified cells are absent from "
+            f"{sample!r}, e.g. {missing[:3]}. The classification and the "
+            f"manifest describe different cells."
+        )
+    rows = np.asarray([lookup[value] for value in ids], dtype=np.int64)
     if rows.size == 0:
         return float("nan"), 0
     matrix = sparse.csr_matrix(expression_matrix(data))[rows]
-    keys = np.asarray([str(key) for key in gene_keys(data)])
+    keys = np.asarray([str(key) for key in gene_symbols(data)])
     columns = np.flatnonzero(np.isin(keys, G2M))
     if columns.size == 0:
-        return float("nan"), int(rows.size)
+        raise RuntimeError(
+            f"None of the {len(G2M)} G2M symbols matched the gene names of "
+            f"{sample!r}. First five names present: {list(keys[:5])}. Note "
+            f"that gene_keys prefers Ensembl identifiers; this needs "
+            f"gene_symbols."
+        )
     library = np.asarray(matrix.sum(axis=1), dtype=np.float64).ravel()
     library[library <= 0] = np.nan
     cpm = np.asarray(matrix[:, columns].todense(), dtype=np.float64)
