@@ -51,6 +51,13 @@ from make_journal_figure import (  # noqa: E402
 # nothing, then one factor at a time, then the pairs, then all three.
 ABLATION = ["logcpm", "rank256", "logcpm_ds", "logcpm_cos",
             "rank256_ds", "rank256_cos", "logcpm_ds_cos", "rank256_ds_cos"]
+# Outside the factorial and in the main panel anyway. The isolated-breadth
+# column does not collapse for any of the eight above, and a column where
+# nothing works reads as "unsolved" when the truth is "unsolved by anything in
+# this design, and solved by one thing outside it at a cost this simulation
+# cannot price". That arm is the one now running on real data, so leaving it in
+# the supplement would hide the reason the real-data comparison exists.
+BEYOND_FACTORIAL = ["rank256_rg-genes_ds_cos"]
 EXTRA = ["rank256_ds_cos_dr10", "rank256_ds_cos_dr25",
          "rank256_rg-genes_ds_cos", "logcpm_rg-genes_cos"]
 # Full names rather than a column of filled/open circles beside the axis. The
@@ -223,6 +230,14 @@ def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
     """
     present = [name for name in order if name in ablation.index]
     y_positions = np.arange(len(present))[::-1]
+    # Rows drawn from a list that is not the factorial are set apart by a rule
+    # rather than by a footnote, so a reader cannot take the bottom row for a
+    # ninth cell of a 2x2x2.
+    separated = [name for name in present if name in BEYOND_FACTORIAL]
+    rule_y = None
+    if separated:
+        first = present.index(separated[0])
+        rule_y = float(y_positions[first]) + 0.5
     columns = spec.subgridspec(1, 4, wspace=0.14)
     axes_list = [figure.add_subplot(columns[0, index]) for index in range(4)]
 
@@ -243,6 +258,9 @@ def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
             axes.spines[spine].set_visible(False)
         for y in y_positions:
             axes.axhline(y, color="#f1f1ec", linewidth=0.7, zorder=0)
+        if rule_y is not None:
+            axes.axhline(rule_y, color=C_RULE, linewidth=0.7, alpha=0.5,
+                         zorder=1)
 
     # column, value, heading, subtitle, colour, marker, filled
     SERIES = (
@@ -276,6 +294,14 @@ def panel_ablation(figure, spec, ablation: pd.DataFrame, order: list[str],
 
     axes_list[0].text(0.0, 1.22, title, transform=axes_list[0].transAxes,
                       fontsize=8.4, fontweight="semibold", va="bottom")
+    if rule_y is not None:
+        # Under the title, not beside the rule: at the right edge of the last
+        # column the note ran off the figure, which a standalone render shows
+        # and a gridspec render crops without trace.
+        axes_list[0].text(
+            0.0, 1.08, "last row sits outside the 2x2x2",
+            transform=axes_list[0].transAxes, fontsize=5.8, color="#77776f",
+            ha="left", va="bottom", style="italic")
 
 
 def _figure_drawer(function):
@@ -336,11 +362,13 @@ def main() -> None:
         "panel_e_validation": (panel_validation, (6.9, 3.1)),
         "panel_f_ablation": (
             _figure_drawer(lambda fig: panel_ablation_standalone(
-                fig, ablation, ABLATION, "(f)  Preprocessing ablation")),
+                fig, ablation, ABLATION + BEYOND_FACTORIAL,
+                "(f)  Preprocessing ablation")),
             (7.8, 3.4)),
         "supplementary_ablation_all": (
             _figure_drawer(lambda fig: panel_ablation_standalone(
-                fig, ablation, ABLATION + EXTRA,
+                fig, ablation, ABLATION + BEYOND_FACTORIAL + [
+                    name for name in EXTRA if name not in BEYOND_FACTORIAL],
                 "Supplementary: every configuration")),
             (8.2, 4.6)),
     }
@@ -365,7 +393,8 @@ def main() -> None:
         panel_specificity(figure.add_subplot(grid[1, 0]), rejection)
         panel_runtime(figure.add_subplot(grid[1, 1]), runtime)
         panel_validation(figure.add_subplot(grid[2, :]))
-        panel_ablation(figure, grid[3, :], ablation, ABLATION,
+        panel_ablation(figure, grid[3, :], ablation,
+                       ABLATION + BEYOND_FACTORIAL,
                        "(f)  Preprocessing ablation")
         for suffix in ("png", "pdf"):
             figure.savefig(args.out / f"figure2.{suffix}", dpi=400)
