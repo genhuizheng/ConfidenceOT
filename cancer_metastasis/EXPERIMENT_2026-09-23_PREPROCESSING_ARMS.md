@@ -696,6 +696,80 @@ recorded the amendment **before any number existed**, that this dataset is
 evaluated on the **pooled** gate. That amendment governs here, and it is the
 one place where section 6b's "never pooled" does not apply.
 
+### 7d. Ovarian differential expression, GSE180661, 2026-09-24
+
+The first differential expression this project has run that clears its own
+checks. It is also, on its face, a result about the cell cycle and nothing
+else.
+
+**What ran.** The original manifest held 243 rows across 84 patients spanning
+all four datasets; trimming to the pairs the gate root supplies left 94 rows
+and 29 patients, and the trim is what kept `21_` from raising on the first
+non-ovarian patient it met. Four pairs were dropped for
+`calibration_m4e_inference_valid`, which is the prespecification's own
+calibration filter, taking two patients with them. 27 patients reached the fit.
+
+**The contrast.** 25,492 genes tested, 1,228 at FDR 0.05, and at the
+prespecified two-fold floor 138 genes -- 90 of them outside the OT feature
+set. Every one of the 90 is higher in the **retained** cells; not one is
+higher in the rejected. At the looser 1.4-fold floor it is 208 against 11.
+
+**What the genes are.** KIF20A, PLK1, PIF1, DLGAP5, CDCA3, GAS2L3, FAM83D,
+KIF2C, DEPDC1, GTSE1, CCNA2, CKAP2L, at 4 to 5.7-fold and FDR around 1e-27.
+A mitotic signature, unmixed.
+
+**All four checks pass.**
+
+| | |
+|---|---|
+| Disqualifier 1, keratin/SPRR/S100A in the top 30 | **0** |
+| Disqualifier 2, effects tracking the retained fraction | median abs rho 0.170, max 0.529, 11 genes flagged |
+| Disqualifier 3, leave-one-patient-out over 27 folds | worst Jaccard **0.871**, does not fire |
+| survival across folds | **115 of 138** survive every fold, 0 survive none |
+
+Disqualifier 1 clearing is the preprocessing round's return: keratin and SPRR
+led the rejected group of all three datasets before the depth work, and they
+are now absent from the top 30 entirely.
+
+**The size-factor explanation for the one-sidedness is refuted.** A pseudobulk
+dominated by a few genes would inflate its size factor and push everything
+else down, producing exactly this asymmetry. It is not what happened: the top
+gene takes 0.0287 of the rejected library against 0.0259 of the retained, and
+the top twenty 0.234 against 0.218. Neither side is dominated. The asymmetry
+is real, and its mechanism is that retained cells share one coherent state
+while rejected cells are heterogeneous and average to no shared programme.
+
+**EMT is absent, and this was checked on the all-gene table.** The non-OT
+validation table excludes the features the representation used, which is most
+of the EMT and epithelial sets; on the all-gene table 26 of 26 EMT genes and
+10 of 10 epithelial genes are present. No EMT gene is significant and none
+exceeds 1.21-fold. Among the epithelial genes only CDH1 reaches significance,
+at 1.16-fold and on the rejected side -- an order of magnitude below the
+mitotic effects and far below the two-fold floor.
+
+So what the gate separates is cycling from non-cycling, not invasive from
+non-invasive.
+
+**What that does and does not license.** Proliferation is required for a
+metastasis to grow once it has arrived, so retained cells resembling a
+proliferative lesion is a coherent reading. It is not evidence that they were
+the cells able to leave: dissemination is associated with EMT and with
+cell-cycle exit, and neither appears here. A metastasis that has already
+colonised is proliferative because it is growing, and primary cells that
+resemble it may simply be the primary's own cycling fraction.
+
+Proliferation is also the most common confounder in single-cell differential
+expression -- any two subsets differing in cycling fraction produce this --
+so finding it is not by itself evidence of anything.
+
+**The number that separates the two readings is not yet in.**
+`36_proliferation_correspondence.py` asks whether the retained-minus-rejected
+proliferation gap tracks the partner lesion's own proliferation. The gap is
++1.32 in log1p CPM at the median and positive in 26 of 27 patients, which is
+suggestive of a property of the primary alone but not decisive, since ovarian
+metastases may all be proliferative. Also outstanding: the pathway-level view,
+where the GSEA results are keyed on a `pathway` column rather than `Name`.
+
 ### 7c. Remaining
 
 | | baseline `rank256_ds_cos` | breadth `rank256_rg-genes_ds_cos` | no-equalisation `rank256_cos` |
