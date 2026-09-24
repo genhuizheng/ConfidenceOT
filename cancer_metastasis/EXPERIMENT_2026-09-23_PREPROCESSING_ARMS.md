@@ -493,6 +493,136 @@ Spearman of 0.79 already does, and the subcluster-uniformity test, which was
 demoted to affecting how a result is described rather than whether it can be
 drawn.
 
+**The cross-patient mismatched manifest was dropped, then reinstated on
+2026-09-24 with an argument about calibrating a retention floor, and both moves
+were wasted: it was built and run on 2026-09-15.** See
+`28_build_mismatched_manifest.py`, `29_compare_matched_mismatched.py` and
+`30_validate_similarity_readout.py`. Searching the repository before proposing
+an experiment would have cost less than either decision.
+
+What those runs found, recorded in `30`'s docstring:
+
+| | |
+|---|---|
+| retained fraction, matched to mismatched | **0.351 to 0.000**, 94 pairs, signed-rank p = 8e-17 |
+| cost ordering preserved under the swap | rho = 0.378 |
+| retention vs pseudobulk correlation | **partial Spearman 0.79**, partialling out cell count; 0.785 within solid lesions alone |
+| same patient, different lesion | 64% of one patient's primary cells change label |
+| SPECTRUM-OV-003, same 1,332 cells | 0.420 to 0.032 on naming a different lesion |
+| across patients, one lesion each | 0.000 to 0.879 |
+
+**The floor this control was reinstated to measure does not exist.** Mismatched
+retention is 0.000, not 40%, so the gate carries no generic
+"cells-of-this-cancer-resemble-cells-of-this-cancer" component and no
+downstream contrast is diluted by one. The whole argument of 2026-09-24 was for
+measuring a quantity already measured at zero.
+
+**And the finding that matters is a different one, which the floor argument
+obscured.** Retention is not merely similarity-tracking in the aggregate: the
+*same primary cells* get a different answer depending on which lesion of the
+*same patient* is on the other side. 64% label churn, and one patient moving
+0.420 to 0.032 over an identical cell set. A property that changes when you
+point at a different lesion of one tumour is not a property of the cells, so it
+cannot be metastatic competence -- and no control, floor or regression settles
+that better than this already does.
+
+`30`'s prespecified reading was three-way, and the outcome was *supported*: the
+correlation is strong across the union of matched and mismatched arms, with the
+mismatched pairs extending the similarity range downward continuously rather
+than forming a separate cluster. The `min_cell_n` confound the script names for
+itself was tested and is what the "partial" in 0.79 controls for.
+
+This is the origin of the framing in `DEG_PRESPECIFICATION_2026-09-15.md`,
+written the same day: "This is **not** a test of metastatic competence." That
+sentence is not a caveat someone added for safety. It is the conclusion of
+these three scripts.
+
+**Nothing to run.** The regression proposed on 2026-09-24 -- matched and
+mismatched on one similarity axis, testing whether matched pairs sit above the
+line -- is what `30` already implements and already answered.
+
+---
+
+## 6. Prespecified reading
+
+Fixed before any arm returned. Three readouts, in order. A later readout is not
+interpreted if an earlier one fails.
+
+### 6a. The axis — the breadth arm's own test
+
+`max_abs_spearman_pc_detected_genes`, per pair, from
+**`tools/audit_depth_axis.py`**.
+
+**The chain does not produce this.** J4 runs
+`25_diagnose_gate_covariates.py`, which scores the *gate* against covariates,
+and `26_diagnose_pairing_quality.py`. Neither computes the representation's
+leading axis, so the primary readout -- the one every later readout is
+conditioned on -- needs a separate invocation against the stored joint PCA
+coordinates that `CONFIDENCEOT_SAVE_PAIRING_EDGES=1` writes:
+
+    python cancer_metastasis/tools/audit_depth_axis.py \
+      --dataset <name>=<ot_root> --dataset <name>=<other_ot_root> \
+      --predownsample-depth <equalised>/predownsample_depth.csv.gz \
+      --out <axis_comparison.csv>
+
+Recorded here because a diagnostics job that reports `COMPLETED` invites the
+assumption that the diagnostics are complete, and for 6a they are not.
+
+| | |
+|---|---|
+| baseline, observed | **per dataset**; 0.645 was the across-dataset figure and is not any one dataset's reference |
+| simulation says regress-out gives | 0.012 |
+| **pass** | the regress-out arm's distribution falls substantially towards zero |
+| **fail** | it does not move |
+
+Read per dataset against that dataset's own baseline. An earlier draft named
+0.645 as "the observed baseline", which is the across-dataset number from
+section 8 of the resolution document; head and neck's own baseline is 0.422.
+
+A failure here means the regression is not reaching the real covariate, and
+**nothing else about that arm is interpretable** — not its gate, not its
+retention, not its agreement with the baseline.
+
+### 6b. The gate, per pair and never pooled
+
+`|auc_predownsample_total_counts − 0.5|` and the detected-gene equivalent, read
+as the **per-pair distribution** for any dataset with at least 6 pairs.
+
+Pooling is what hid the answer last time: ovarian pooled to 0.497 while its
+pairs ran 0.18 to 0.92. The pooled number is not reported here.
+
+The informative comparison is which way 6a and 6b move together:
+
+| axis (6a) | per-pair gate deviations | reading |
+|---|---|---|
+| falls | fall | breadth was driving the gate; regress-out addresses it |
+| **falls** | **unchanged** | breadth was not driving the gate; the residual is something no arm here touches |
+| does not fall | any | 6a failed; see above |
+
+The second row is a real possible outcome and would be the most informative
+one. It must not be reported as a failure of the arm — the arm would have done
+exactly what it claims and shown the claim was about the wrong covariate.
+
+### 6c. Withdrawn 2026-09-24
+
+This was the Jaccard agreement between the equalisation and no-equalisation
+arms. It was written down as "descriptive, not a test" whose outcomes "select
+no arm on their own", which is a readout that cannot change what is reported --
+so it does not belong in a prespecified reading, and keeping it would have cost
+the three unsubmitted `rank256_cos` chains 26 job slots to produce.
+
+Recorded rather than deleted, because the reason it was withdrawn applies to
+the next check that gets proposed: checks were accumulating faster than they
+were being retired. The ones that remain are 6a, which conditions everything
+after it, 6b, which sets the per-pair exclusion rule the differential
+expression depends on, and 6d, which is one number.
+
+Also dropped for the same reason: the same-patient primary-versus-primary
+control, which can only state the limit more precisely than the partial
+Spearman of 0.79 already does, and the subcluster-uniformity test, which was
+demoted to affecting how a result is described rather than whether it can be
+drawn.
+
 **The cross-patient mismatched manifest was dropped with them and should not
 have been.** It was judged as a significance test -- do matched and mismatched
 pairs separate -- which is trivially yes and proves nothing, and that judgement
