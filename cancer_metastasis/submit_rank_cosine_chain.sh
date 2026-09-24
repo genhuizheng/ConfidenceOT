@@ -45,6 +45,13 @@
 #                 spearman near 0. Without it the run produces a gate nobody
 #                 has checked.
 #
+# A label without _ds skips J1 entirely and runs on the original count
+# matrices, so the pseudobulk and the differential expression downstream of
+# it are not paying for the correction either. That arm exists because the
+# screen cannot price equalisation: its depth carries no signal, so nothing
+# measured there can charge the stage for what it removes. See section 9b of
+# SEQUENCING_DEPTH_RESOLUTION.md.
+#
 # Writes to its own output root, so every existing result stays intact and the
 # two configurations can be read side by side.
 #
@@ -57,6 +64,8 @@
 #   bash cancer_metastasis/submit_rank_cosine_chain.sh ovarian
 #   bash cancer_metastasis/submit_rank_cosine_chain.sh colorectal
 #   PREPROCESSING=rank128_ds_cos bash cancer_metastasis/submit_rank_cosine_chain.sh headneck
+#   PREPROCESSING=rank256_rg-genes_ds_cos bash cancer_metastasis/submit_rank_cosine_chain.sh ovarian
+#   PREPROCESSING=rank256_cos bash cancer_metastasis/submit_rank_cosine_chain.sh ovarian
 #   SOURCE_MANIFEST=/path/to/manifest.csv bash cancer_metastasis/submit_rank_cosine_chain.sh colorectal
 #   DRY_RUN=1 bash cancer_metastasis/submit_rank_cosine_chain.sh prostate
 set -eo pipefail
@@ -78,6 +87,17 @@ result=$CANCER_COT_ROOT
 replication_root=${CONFIDENCEOT_REPLICATION_ROOT:-$result/author_labeled_replication_GSE181919_GSE225857_20260912}
 stamp=${RANK_COSINE_STAMP:-20260921}
 preprocessing=${PREPROCESSING:-rank256_ds_cos}
+# Does this configuration carry the equalisation stage? Asked of the class
+# that defines the label, never matched against the string here. A shell
+# that guessed wrong would run on the wrong counts while the label still
+# read _ds, and the pair runner cannot catch that: equalisation is recorded
+# by the run rather than applied by it, so the label would still verify.
+equalise_stage=$(PYTHONPATH="$CONFIDENCEOT_REPO/src" "$env_path/bin/python" -c "from confidenceot.preprocessing import Preprocessing; print('ds' if Preprocessing.from_label('$preprocessing').equalise_depth else '')") || {
+  echo "Could not read $preprocessing with confidenceot.Preprocessing," >&2
+  echo "using $env_path/bin/python. Fix that before submitting: the" >&2
+  echo "alternative is guessing which counts the run should read." >&2
+  exit 2
+}
 target_quantile=${TARGET_QUANTILE:-0.10}
 max_fraction_short=${MAX_FRACTION_SHORT:-0.01}
 
@@ -152,7 +172,7 @@ annotation_args=()
 for annotation in "${annotations[@]}"; do
   annotation_args+=(--malignant-annotation "$annotation")
 done
-if [[ -f "$manifest" ]]; then
+if [[ -n "$equalise_stage" && -f "$manifest" ]]; then
   echo "J1 equalise    reusing $manifest"
   equalise_job=""
 else
@@ -214,12 +234,23 @@ else
       exit 2
     fi
   fi
+  if [[ -z "$equalise_stage" ]]; then
+    # No _ds in the label: the run reads the original counts, so there is
+    # nothing to equalise and the source manifest is already the pair list.
+    # Both arms still see the same cells -- the equalisation step is given
+    # 0/0/100 thresholds, so it selects on the author labels alone.
+    manifest=$source_manifest
+    equalise_job=""
+    echo "J1 equalise    skipped, $preprocessing has no _ds stage"
+    echo "J1 counts      original, $manifest"
+  else
   equalise_job=$(submit \
     -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J "cot_ds_$dataset" \
     -o "$result/logs/ds_${dataset}_%j.out" \
     -e "$result/logs/ds_${dataset}_%j.err" \
     --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/27_downsample_counts.py $source_manifest $equalised $(printf '%q ' "${annotation_args[@]}")--target-quantile $target_quantile --minimum-total-counts 0 --minimum-detected-genes 0 --maximum-mitochondrial-percent 100")
   echo "J1 equalise    $equalise_job -> $equalised"
+  fi
 fi
 
 # J2. The rank-cut gate. Runs on the equalised manifest, so it must depend on
@@ -273,17 +304,24 @@ echo "J3 ot array    $ot_job -> $ot"
 
 # J4. The acceptance test, against each cell's original depth rather than the
 # corrected, near-constant one.
+# Without equalisation the recorded depth already is the original depth,
+# so there is no pre-downsampling table to join and the diagnostics must
+# not be told to look for one.
+predownsample=""
+if [[ -n "$equalise_stage" ]]; then
+  predownsample=" --predownsample-depth $equalised/predownsample_depth.csv.gz"
+fi
 diagnose_job=$(submit --dependency=afterok:"${ot_job%%_*}" \
   -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J "cot_diag_$dataset" \
   -o "$result/logs/diag_${dataset}_%j.out" \
   -e "$result/logs/diag_${dataset}_%j.err" \
-  --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/25_diagnose_gate_covariates.py $diagnostics --dataset $accession=$ot --predownsample-depth $equalised/predownsample_depth.csv.gz; python cancer_metastasis/26_diagnose_pairing_quality.py $diagnostics --dataset $accession=$ot")
+  --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/25_diagnose_gate_covariates.py $diagnostics --dataset $accession=$ot$predownsample; python cancer_metastasis/26_diagnose_pairing_quality.py $diagnostics --dataset $accession=$ot")
 echo "J4 diagnose    $diagnose_job -> $diagnostics"
 
 echo
 printf 'dataset        %s (%s)\n' "$dataset" "$accession"
 printf 'preprocessing  %s\n' "$preprocessing"
-printf 'equalised      %s\n' "$equalised"
+printf 'counts         %s\n' "${equalise_stage:+equalised, $equalised}${equalise_stage:-original}"
 printf 'manifest       %s\n' "$manifest"
 printf 'ot             %s\n' "$ot"
 printf 'diagnostics    %s\n' "$diagnostics"

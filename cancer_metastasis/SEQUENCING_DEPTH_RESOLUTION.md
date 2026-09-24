@@ -17,17 +17,24 @@ named hid that by averaging effects in both directions, and all four datasets
 sit at or above the hardest rung the screen ever measured. No differential
 expression from these runs.
 
-**And the configuration does not act on detection breadth at all** (section
+**The configuration also does not act on detection breadth at all** (section
 9). The 2026-09-23 ablation separated the two covariates for the first time,
 by holding total counts fixed while varying the detected-gene count. There,
 rank + DS + cosine leaves the leading axis correlated with detected genes at
 0.729, against 0.085 on the depth arms -- and 0.645 is what the real data
-shows. That is not a residual the treatment failed to reach; it is a
-covariate the treatment does not touch once the totals are equalised. A
-detected-gene regress-out arm removes it to 0.011 in simulation, and is
-submitted alongside the existing run as a comparison, not a replacement:
-breadth on real data is partly biological, which is exactly why it cannot
-be a default.
+shows. That is not a residual the treatment failed to reach; it is a covariate
+the treatment does not touch once the totals are equalised.
+
+**And whether read equalisation belongs in the pipeline at all is open, not
+settled** (9b, 9f). Every arm of every screen run so far treats depth as pure
+nuisance, so no measurement here can charge equalisation for anything it
+removes -- the same objection this document raises against regress-out, which
+it failed to apply to equalisation for a week. On real data depth is partly
+biological, and the stage is applied at the file level, so the differential
+expression and the scoring pay for it too. Three arms therefore go to the real
+data together -- with equalisation, with equalisation plus regress-out, and
+without equalisation -- and the comparison between them is what decides it.
+No differential expression from any of them until it does.
 
 ---
 
@@ -685,7 +692,7 @@ before this round. At zero depth spread log CPM scores 0.880 and looks
 competitive; spread the depth and it falls to 0.249. The earlier figure
 measured power only at zero spread and could not see that.
 
-### 9b. Is downsampling needed? Yes -- and the gate metric says no
+### 9b. Is downsampling needed? The screen cannot say
 
 The question the PI asked directly, `rank256_cos` against `rank256_ds_cos`:
 
@@ -699,14 +706,33 @@ Dropping DS *improves* the gate's depth deviation, and passes the
 prespecified `|auc - 0.5| <= 0.10` of section 7 comfortably. On that number
 alone the stage should go.
 
-It should not go, and the reason is that this is the same one-number summary
-that section 8 caught hiding per-pair structure on real data. Two other
-columns disagree with it: without DS the representation's depth axis is
-entirely intact at 0.969, and power at high depth spread falls by 0.097. The
-four datasets sit at sd(log depth) 0.68-0.92, which is exactly the regime
-where that 0.097 applies. A gate that reads clean on a representation still
-organised by depth is a gate whose threshold happens to cut across the axis,
-not one that is free of it.
+Two columns disagree with it. Without DS the representation's depth axis is
+entirely intact at 0.969, and power at high depth spread falls by 0.097 -- and
+the four datasets sit at sd(log depth) 0.68-0.92, which is the regime where
+that 0.097 applies.
+
+**Neither set of numbers settles it, and an earlier draft of this section said
+they did.** Depth in this simulation is applied by multinomial sampling from a
+profile independent of cell identity. Downsampling reads therefore cannot
+destroy signal here, because no arm has any signal in depth to destroy. DS is
+being measured in a place where it cannot lose. That is exactly the objection
+9d raises against regress-out, and it applies to DS with the same force; the
+screen was ranking treatments by how much nuisance they remove, having never
+asked what removal costs.
+
+On real data depth is not pure nuisance. RNA content tracks cell size, cycle
+phase and transcriptional activity, so deep cells are not merely
+better-sampled versions of shallow ones. Equalisation is also applied at the
+file level by `27_downsample_counts.py`, so the pseudobulk, the differential
+expression and the UCell scoring all read the reduced counts, not only the OT
+-- a cost that falls outside every metric in this table. And section 7 already
+records the stage's own defect: `--target-quantile 0.10` leaves the shallowest
+tenth untouched by construction, so it covers 90% of cells and misses the ones
+whose depth matters most.
+
+So the position is that this screen cannot decide it. `rank256_cos` goes to
+the real data as a third arm rather than being ruled out by a simulator that
+cannot charge it for anything it removes.
 
 ### 9c. The shipped configuration does not handle detection breadth
 
@@ -767,7 +793,14 @@ Two arms across all four datasets, sharing one equalised count matrix and
 differing in exactly one field of the configuration:
 
 - `rank256_ds_cos` -- already run 2026-09-21, section 8
-- `rank256_rg-genes_ds_cos` -- new
+- `rank256_rg-genes_ds_cos` -- new, and the one 9c argues for
+- `rank256_cos` -- new, no equalisation stage at all, per 9b
+
+The third arm is not a variant of the other two. It reads the original count
+matrices, so its pseudobulk and differential expression would run at full
+depth, and the chain skips `27_downsample_counts.py` entirely rather than
+reusing its output. That makes it the only arm whose downstream stages are not
+already paying for the correction.
 
 Prespecified reading, written before the runs return:
 
@@ -788,7 +821,28 @@ Not an acceptance test on its own. Regress-out passing 1 and 2 would say it
 removes the covariate, not that removing the covariate was right -- 9d is why.
 Still **no differential expression from either arm.**
 
-### 9f. A defect found while wiring this, which would have been invisible
+### 9f. The arm this simulation does not have
+
+Every arm above treats depth and detection breadth as pure nuisance. Nothing
+in any of them carries signal, so any treatment that removes a covariate is
+free by construction. The screen therefore ranks treatments by how much they
+remove and has no way to ask what removal costs -- a property of the design,
+not of any one treatment. DS, rank and regress-out all benefit from it
+equally.
+
+What would change that is an arm in which the planted subpopulation differs in
+depth as well as in profile, which is the realistic case: a cell state that
+changes transcription changes RNA content. Recall on that arm measures what
+read equalisation costs when depth is informative, and it is the only number
+that could justify the stage on more than convenience. The same construction
+with detection breadth would do the same for regress-out and for the rank
+encoding.
+
+Until that arm exists, 9a's attribution stands and 9b's verdict does not. We
+know which covariate each treatment removes. We do not know what any of them
+costs.
+
+### 9g. A defect found while wiring this, which would have been invisible
 
 `--preprocessing` parsed the whole configuration and then unpacked four of its
 fields into separate arguments. `regress_out` was not one of the four, and
