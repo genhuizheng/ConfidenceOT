@@ -93,6 +93,66 @@ that cost instead of waiting on a measurement of it. It needs no new code:
 root as separate arguments and joins cells by identifier, raising on anything
 it cannot find. Section 2e of `EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md`.
 
+### Two methods, scoped by dataset size, 2026-09-24
+
+The same contrast is estimated two ways. They are not a primary and a
+sensitivity: they answer different questions, and the deliverable is which
+genes and pathways recur under both.
+
+**Method A -- paired pseudobulk.** One lesion per patient, one pseudobulk per
+patient per status, `~patient_id + comparison_status`, floor 10 cells per
+status. Asks: is there a **common** effect across patients. Implemented, needs
+only a submitter: `21_prepare_four_state_malignant_pseudobulk.py` ->
+`13_run_paired_pydeseq2.py` -> `15_run_pydeseq2_gseapy.py`.
+
+**Method B -- per-patient, then combined.** Within each patient, cell-level
+retained vs rejected. Record the effect size and the per-patient gene list,
+then combine three ways: **gene overlap**, **direction consistency** (the
+fraction of patients agreeing on sign), and **meta-analysis** across patients.
+Asks: how **consistent** is the effect, and how many patients carry it.
+
+Method B is what makes patient support a reported column rather than something
+recovered afterwards, which is why it and the leave-one-patient-out refit
+together replace the pair-level filter this document withdrew.
+
+**Scope by dataset.** Method B needs enough patients for overlap and a
+meta-analysis to mean anything.
+
+| dataset | pairs | Method A | Method B |
+|---|---:|---|---|
+| GSE180661 ovarian | 92 | yes, primary | **yes, reported in full** |
+| GSE271675 prostate | 24 | yes, primary | exploratory only; no overlap requirement |
+| GSE225857 colorectal | 5 | yes | no |
+| GSE181919 head and neck | 4 | yes | no |
+
+For the two small datasets, note that `31_audit_deg_disqualifiers.py` raises
+below 6 patients, so no patient-dominance verdict is computable for them at
+all. That is a property of the datasets, not a failure of the run, and is
+reported as such.
+
+**What has to be written.** Method A is complete. Method B is not:
+
+1. Per-patient primary DE does not exist. `11_run_robust_target_deg.py` has the
+   right core -- a Scanpy Wilcoxon on a rejected-versus-retained label with BH
+   correction and tie correction -- but it is bound to the **target** side in two
+   places (`side == "target"` when reading the gate, and `load_exact_side` on the
+   target paths) and is built around the cap-robust target states, which the
+   primary side has no analogue for. A new script is cleaner than a `--side`
+   flag. It must read counts from the **original** matrices and labels from the
+   equalised gate root, the same split Method A uses.
+2. The combination step needs a driver.
+   `12_meta_analyze_robust_target_deg.py` already implements
+   `meta_table(patient_effects, minimum_patients)` -- a patient-level Wilcoxon
+   meta-analysis with BH adjustment -- but is wired to `11_`'s output layout.
+3. Leave-one-patient-out refit for Method A. Each patient dropped in turn,
+   `13_run_paired_pydeseq2.py` refitted, and the per-gene survival profile
+   recorded. This is the literal Disqualifier 3 and exists nowhere.
+4. The cross-method comparison. Which genes clear Method A, which clear Method
+   B's meta-analysis, in how many patients individually, and with what
+   direction agreement -- and the same at pathway level from the GSEA outputs.
+   This is the deliverable, and it is the one piece whose output format is not
+   already fixed by an existing script.
+
 ### Inclusion is closed, 2026-09-24
 
 **There is no pair-level inclusion criterion. Every pair with a computable gate
