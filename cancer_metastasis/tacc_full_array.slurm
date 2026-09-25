@@ -111,7 +111,18 @@ failures=0
 echo "Worker $task_id/$task_count processing $pair_count manifest rows"
 echo "Rejection caps: source=$source_budget target=$target_budget"
 echo "Maximum observed cells per side: $maximum_observed_cells"
-echo "Preprocessing: ${preprocessing:-${CONFIDENCEOT_REPRESENTATION:-log_cpm} / ${CONFIDENCEOT_COST:-squared_euclidean}}"
+# Printed as three separate facts rather than one line with defaults folded
+# in. The old form rendered "log_cpm / squared_euclidean" whenever a NAMED
+# configuration was in force, because the named path leaves REPRESENTATION and
+# COST unset on purpose -- so the banner announced the opposite of what ran,
+# and a reader checking the log saw the configuration the whole preprocessing
+# round exists to have replaced. run.json carries the truth; this now agrees
+# with it.
+if [[ -n "${preprocessing:-}" ]]; then
+  echo "Preprocessing: named configuration '$preprocessing' (representation and cost come from it)"
+else
+  echo "Preprocessing: ${CONFIDENCEOT_REPRESENTATION:-log_cpm} / ${CONFIDENCEOT_COST:-squared_euclidean}"
+fi
 scope_args=(--analysis-scope "$analysis_scope")
 pairing_args=()
 qc_args=()
