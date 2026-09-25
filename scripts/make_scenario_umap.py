@@ -104,10 +104,12 @@ C_REJECT = "#c4553b"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--splatter-root", type=Path, default=None,
+    parser.add_argument("--splatter-root", type=Path,
+                        default=Path("benchmark_results/splatter_pools"),
                         help="Output root of generate_splatter_population_benchmark.R")
-    parser.add_argument("--n", type=int, default=800,
-                        help="Cells per condition")
+    parser.add_argument("--n", type=int, default=400,
+                        help="Cells per condition; the pools under "
+                             "--splatter-root hold n_0400")
     parser.add_argument("--replicate", type=int, default=1)
     parser.add_argument("--genes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7300)
@@ -121,16 +123,20 @@ def parse_args() -> argparse.Namespace:
                         help="The scale the embedding is laid out on; larger "
                              "with a matching min-dist gives fat clusters "
                              "close together instead of tight ones far apart")
-    parser.add_argument("--scenarios", default=None,
+    parser.add_argument("--scenarios",
+                        default="S1_extinction,S2_emergence",
                         help="Comma-separated subset, e.g. "
                              "S0_clean_movement,S1_extinction,S2_emergence")
     parser.add_argument("--layout", choices=("joint", "paired", "schematic",
                                              "shared"),
-                        default="joint",
-                        help="joint: one embedding per scenario. paired: two "
-                             "panels on that embedding. schematic: drawn, no "
-                             "counts.")
-    parser.add_argument("--out", type=Path, required=True)
+                        default="shared",
+                        help="shared: source and target side by side on one "
+                             "embedding. joint: one embedding per scenario. "
+                             "paired: two panels on that embedding. "
+                             "schematic: drawn, no counts.")
+    parser.add_argument("--out", type=Path, default=Path("figures/schematic"),
+                        help="Every schematic is written to one folder, "
+                             "apart from the results")
     return parser.parse_args()
 
 

@@ -92,6 +92,10 @@ scripts/tacc/*
 # chosen after seeing the numbers.
 !/BENCHMARK_METRICS.md
 
+# What lives in the schematic folder and the command that rebuilds each one.
+# The images themselves stay untracked; the scripts are what is tracked.
+!/figures/schematic/README.md
+
 # OS/editor files
 .DS_Store
 Thumbs.db

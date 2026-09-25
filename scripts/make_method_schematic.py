@@ -205,8 +205,9 @@ def build(out: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path,
-                        default=Path("benchmark_results/journal_figure"))
+    parser.add_argument("--out", type=Path, default=Path("figures/schematic"),
+                        help="Every schematic is written to one folder, "
+                             "apart from the results")
     build(parser.parse_args().out)
 
 

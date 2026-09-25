@@ -70,7 +70,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth-sd", type=float, default=0.9,
                         help="sd of log depth, the spread the benchmark uses")
     parser.add_argument("--seed", type=int, default=7300)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path, default=Path("figures/schematic"),
+                        help="Every schematic is written to one folder, "
+                             "apart from the results")
     return parser.parse_args()
 
 
