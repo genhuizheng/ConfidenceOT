@@ -52,18 +52,44 @@ From: rocker/r-ver:4.4.1
     R -q -e 'BiocManager::install(version = "3.20", ask = FALSE, update = FALSE)'
     R -q -e 'BiocManager::install(c("splatter", "SingleCellExperiment", "SummarizedExperiment"), ask = FALSE, update = FALSE)'
 
-    # Fail the build, not the first job that uses it -- and not by loading the
-    # packages, which is a weaker check than it looks. Bioconductor packages
-    # built from source on aarch64 can install cleanly and then misbehave at
-    # run time, so the build runs the actual call the benchmark makes, with
-    # the same arguments, and looks at the object that comes back.
-    R -q -e 'suppressPackageStartupMessages({library(splatter); library(Matrix); library(jsonlite)}); \
-      params <- setParams(newSplatParams(), batchCells = c(50, 50), batch.facLoc = 0, batch.facScale = 0, group.prob = rep(1/5, 5), dropout.type = "none", nGenes = 200, seed = 1); \
-      sim <- splatSimulate(params, method = "groups", verbose = FALSE); \
-      counts <- counts(sim); \
-      stopifnot(dim(counts) == c(200, 100), is.numeric(as.numeric(counts[1, 1])), sum(counts) > 0, length(unique(colData(sim)$Group)) == 5, length(unique(colData(sim)$Batch)) == 2, all(is.finite(rowData(sim)$GeneMean))); \
-      writeMM(as(counts, "CsparseMatrix"), tempfile()); \
-      cat("splatter", as.character(packageVersion("splatter")), "simulated", sum(counts), "counts on", R.version$platform, "\n")'
+    # Fail the build, not the first job that uses it -- and not by loading
+    # the packages, which is a weaker check than it looks. Bioconductor
+    # packages built from source on aarch64 can install cleanly and then
+    # misbehave at run time, so the build runs the actual call the benchmark
+    # makes, with the same arguments, and looks at the object that comes back.
+    #
+    # A heredoc, not R -e with backslash continuations: the shell eats those
+    # and hands R a line ending in a lone backslash, which it reports as an
+    # unexpected end of line after everything has already been installed.
+    R -q --no-save <<'VERIFY'
+suppressPackageStartupMessages({
+    library(splatter)
+    library(SingleCellExperiment)
+    library(SummarizedExperiment)
+    library(Matrix)
+    library(jsonlite)
+})
+params <- setParams(newSplatParams(),
+                    batchCells     = c(50, 50),
+                    batch.facLoc   = 0,
+                    batch.facScale = 0,
+                    group.prob     = rep(1 / 5, 5),
+                    dropout.type   = "none",
+                    nGenes         = 200,
+                    seed           = 1)
+sim <- splatSimulate(params, method = "groups", verbose = FALSE)
+matrix <- counts(sim)
+stopifnot(
+    identical(dim(matrix), c(200L, 100L)),
+    sum(matrix) > 0,
+    length(unique(colData(sim)$Group)) == 5,
+    length(unique(colData(sim)$Batch)) == 2,
+    all(is.finite(rowData(sim)$GeneMean))
+)
+writeMM(as(matrix, "CsparseMatrix"), tempfile())
+cat("splatter", as.character(packageVersion("splatter")),
+    "simulated", sum(matrix), "counts on", R.version$platform, "\n")
+VERIFY
 
 %environment
     export LC_ALL=C.UTF-8
