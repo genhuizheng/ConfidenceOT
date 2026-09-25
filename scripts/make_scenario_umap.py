@@ -69,7 +69,7 @@ SCENARIOS = ("S0_clean_movement", "S1_extinction", "S2_emergence",
              "S3_source_outlier", "S4_bifurcation", "S5_abundance_shift")
 
 TITLES = {
-    "S0_clean_movement": "S0  clean movement",
+    "S0_clean_movement": "S0  control",
     "S1_extinction": "S1  extinction",
     "S2_emergence": "S2  emergence",
     "S3_source_outlier": "S3  source outlier",
@@ -78,7 +78,7 @@ TITLES = {
 }
 
 READING = {
-    "S0_clean_movement": "B moves. Reject nothing.",
+    "S0_clean_movement": "Every population is on both sides. Reject nothing.",
     "S1_extinction": "A has no target. Reject source A.",
     "S2_emergence": "G has no source. Reject target G.",
     "S3_source_outlier": "O has no target. Reject source O.",
@@ -111,7 +111,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replicate", type=int, default=1)
     parser.add_argument("--genes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7300)
-    parser.add_argument("--layout", choices=("joint", "paired", "schematic"),
+    parser.add_argument("--scenarios", default=None,
+                        help="Comma-separated subset, e.g. "
+                             "S0_clean_movement,S1_extinction,S2_emergence")
+    parser.add_argument("--layout", choices=("joint", "paired", "schematic",
+                                             "shared"),
                         default="joint",
                         help="joint: one embedding per scenario. paired: two "
                              "panels on that embedding. schematic: drawn, no "
@@ -665,6 +669,125 @@ def draw_schematic(axes, scenario: str) -> None:
         spine.set_linewidth(0.6)
 
 
+
+# The population each scenario is about. Everything else is background that
+# behaves the same way in all three, and labelling it six times over says
+# nothing three times over.
+SUBJECT = {
+    "S0_clean_movement": None,
+    "S1_extinction": "A",
+    "S2_emergence": "G",
+    "S3_source_outlier": "O",
+    "S4_bifurcation": "B",
+    "S5_abundance_shift": None,
+}
+
+
+def draw_shared(figure, grid, scenarios, loaded, seed: int) -> dict:
+    """One embedding for several scenarios, then one panel each.
+
+    The R generator builds a single Splatter pool per (N, replicate) and every
+    scenario selects its cells from it, so the scenarios share an expression
+    model and can honestly share a map. Embedding them together means a
+    population lands in the same place in all the panels: the reader learns
+    the layout once and then reads only what changed, instead of re-finding
+    six clusters in each panel.
+
+    Only the population a scenario is about is labelled. The others are there
+    because a scenario is a difference against a background, and a background
+    that is named in every panel stops being background.
+    """
+    from matplotlib import patheffects
+
+    counts = np.vstack([block[0] for block in loaded])
+    offsets, start = [], 0
+    for block in loaded:
+        offsets.append((start, start + block[0].shape[0]))
+        start += block[0].shape[0]
+    points = embed(counts, seed)
+
+    report = {}
+    for index, (scenario, (_, meta)) in enumerate(zip(scenarios, loaded)):
+        lo, hi = offsets[index]
+        local = points[lo:hi]
+        axes = figure.add_subplot(grid[0, index])
+        source = (meta["condition"] == "source").to_numpy()
+        population = meta["population"].to_numpy()
+        subject = SUBJECT.get(scenario)
+
+        # The whole shared map in pale grey, so each panel is read against the
+        # same background rather than against its own extent.
+        axes.scatter(points[:, 0], points[:, 1], s=1.2, c="#f2f2ee",
+                     linewidths=0, zorder=1)
+        other = population != subject if subject else np.ones(len(meta), bool)
+        axes.scatter(local[other & source, 0], local[other & source, 1], s=7,
+                     facecolors="none", edgecolors="#b9b9b2", linewidths=0.45,
+                     zorder=2)
+        axes.scatter(local[other & ~source, 0], local[other & ~source, 1],
+                     s=4, c="#9d9d95", linewidths=0, zorder=3)
+
+        if subject is None:
+            # The control. Nothing to single out, so the reading is the
+            # absence of any mark: every cluster carries both an open source
+            # ring and a filled target dot.
+            report[scenario] = {
+                "populations_on_both_sides": sorted(
+                    set(population[source]) & set(population[~source])),
+                "source_only": sorted(set(population[source])
+                                      - set(population[~source])),
+                "target_only": sorted(set(population[~source])
+                                      - set(population[source]))}
+            axes.text(0.5, 0.045, "no population is missing from either side",
+                      transform=axes.transAxes, fontsize=7.4, color="#6a6a62",
+                      ha="center", style="italic", zorder=9)
+        else:
+            colour = PALETTE.get(subject, C_REJECT)
+            rows_source = source & (population == subject)
+            rows_target = ~source & (population == subject)
+            # Drawn in the style of the side it is actually on: an open ring
+            # for a source population, a filled dot for a target one. The
+            # earlier version filled both, which said "target" about a
+            # population that exists only in the source.
+            if rows_source.sum():
+                axes.scatter(local[rows_source, 0], local[rows_source, 1],
+                             s=19, facecolors="none", edgecolors=colour,
+                             linewidths=1.0, zorder=5)
+            if rows_target.sum():
+                axes.scatter(local[rows_target, 0], local[rows_target, 1],
+                             s=11, c=colour, linewidths=0, zorder=6)
+            centre = (local[rows_target] if rows_target.sum()
+                      else local[rows_source]).mean(axis=0)
+            axes.scatter([centre[0]], [centre[1]], s=430, facecolors="none",
+                         edgecolors=C_REJECT, linewidths=1.9, zorder=7)
+            side = "source only" if not rows_target.sum() else "target only"
+            axes.text(centre[0], centre[1] + 1.5, subject, fontsize=10,
+                      fontweight="bold", ha="center", va="bottom",
+                      color=colour, zorder=9,
+                      path_effects=[patheffects.withStroke(linewidth=2.8,
+                                                           foreground="white")])
+            axes.text(centre[0], centre[1] - 1.6, side, fontsize=6.8,
+                      ha="center", va="top", color=C_REJECT, zorder=9,
+                      path_effects=[patheffects.withStroke(linewidth=2.4,
+                                                           foreground="white")])
+            report[scenario] = {"subject": subject, "side": side,
+                                "cells": int(max(rows_source.sum(),
+                                                 rows_target.sum()))}
+        margin = 0.035 * max(np.ptp(points[:, 0]), np.ptp(points[:, 1]))
+        axes.set_xlim(points[:, 0].min() - margin, points[:, 0].max() + margin)
+        axes.set_ylim(points[:, 1].min() - margin,
+                      points[:, 1].max() + 2.4 * margin)
+        axes.set_xticks([])
+        axes.set_yticks([])
+        axes.set_title(TITLES[scenario], loc="left", fontsize=9.2,
+                       fontweight="semibold", pad=10)
+        axes.text(0.0, 1.012, READING[scenario], transform=axes.transAxes,
+                  fontsize=7.2, color="#55555a", va="bottom")
+        for spine in axes.spines.values():
+            spine.set_color("#e0e0da")
+            spine.set_linewidth(0.6)
+    return report
+
+
 def main() -> None:
     args = parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -672,6 +795,55 @@ def main() -> None:
                   else "structure-matched synthetic counts, not Splatter")
     report: dict[str, object] = {"counts_source": provenance, "n": args.n,
                                  "genes": args.genes, "seed": args.seed}
+
+    chosen = (tuple(s.strip() for s in args.scenarios.split(","))
+              if args.scenarios else SCENARIOS)
+    unknown = [s for s in chosen if s not in SCENARIOS]
+    if unknown:
+        raise SystemExit(f"unknown scenario {unknown}; known: {list(SCENARIOS)}")
+
+    if args.layout == "shared":
+        loaded = [
+            load_splatter(args.splatter_root, scenario, args.n, args.replicate)
+            if args.splatter_root
+            else synthesise(scenario, args.n, args.genes, args.seed + index)
+            for index, scenario in enumerate(chosen)]
+        with mpl.rc_context(STYLE):
+            figure = plt.figure(figsize=(3.25 * len(chosen), 3.75))
+            grid = figure.add_gridspec(1, len(chosen), wspace=0.055,
+                                       left=0.012, right=0.988, top=0.845,
+                                       bottom=0.035)
+            report["shared_embedding"] = draw_shared(figure, grid, chosen,
+                                                     loaded, args.seed)
+            figure.text(0.012, 0.985,
+                        "One embedding, three questions. All three scenarios "
+                        "draw their cells from a single Splatter pool, so a "
+                        "population sits in the\nsame place in every panel: "
+                        "the map is learned once and each panel shows only "
+                        "what changed. Grey is the unchanged background.",
+                        fontsize=7.4, color="#55555a", va="top",
+                        linespacing=1.55)
+            figure.legend(handles=[
+                Line2D([], [], marker="o", linestyle="", markerfacecolor="none",
+                       markeredgecolor="#8a8a84", markeredgewidth=0.9,
+                       label="source", markersize=6),
+                Line2D([], [], marker="o", linestyle="", color="#8a8a84",
+                       label="target", markersize=5),
+                Line2D([], [], marker="o", linestyle="", markerfacecolor="none",
+                       markeredgecolor=C_REJECT, markeredgewidth=1.8,
+                       label="no counterpart: reject", markersize=10),
+            ], loc="upper right", ncol=3, frameon=False, fontsize=7.4,
+                bbox_to_anchor=(0.988, 1.012), columnspacing=1.8,
+                handletextpad=0.5)
+            for suffix in ("png", "pdf"):
+                figure.savefig(args.out / f"scenario_umap.{suffix}",
+                               bbox_inches="tight")
+            plt.close(figure)
+        (args.out / "diagnostics.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8")
+        print(json.dumps(report, indent=2))
+        print(f"\n{args.out / 'scenario_umap.png'}")
+        return
 
     with mpl.rc_context(STYLE):
         wide = args.layout == "paired"
