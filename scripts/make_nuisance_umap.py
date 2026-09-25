@@ -506,17 +506,10 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 spine.set_linewidth(0.6)
             figure.text(0.666 + 0.128 * index, 0.088, text, fontsize=7.2,
                         color="#55555a", va="center")
-        # What the arm returns as numbers. "How many cells are wrongly
-        # rejected" was prose; these are the four columns the run writes.
-        figure.text(x_primary, 0.046,
-                    "metrics, against the nuisance of each row:   false "
-                    "rejections $\\to$ 0    AUC(rejected | nuisance) "
-                    "$\\to$ 0.5", fontsize=7.2, color="#55555a", va="center")
-        figure.text(x_primary + 0.196, 0.024,
-                    "$\\rho$(cost, nuisance) $\\to$ 0    "
-                    "$\\rho$(coupling, nuisance) $\\to$ 0",
-                    fontsize=7.2, color="#55555a", va="center")
-        figure.text(x_primary, 0.002, "coupling and gate are schematic",
+        # The metrics are definitions, not part of the setting, and they are
+        # written down in BENCHMARK_METRICS.md. Listing them here put four
+        # formulae under a figure whose job is to say what is generated.
+        figure.text(x_primary, 0.030, "coupling and gate are schematic",
                     fontsize=7.2, color="#8c8c86", va="center", style="italic")
 
         for suffix in ("png", "pdf"):
