@@ -64,4 +64,47 @@ fi
 
 echo
 echo "built $sif"
-apptainer exec "$sif" Rscript -e 'cat(R.version.string, "on", R.version$platform, "\n"); cat("splatter", as.character(packageVersion("splatter")), "\n")'
+
+# The check, against the finished image. Loading the packages is weaker than
+# it looks -- Bioconductor packages built from source on aarch64 can install
+# cleanly and misbehave at run time -- so this runs the call the benchmark
+# makes, with the same arguments, and looks at the object that comes back.
+#
+# Outside the build on purpose: a failure here leaves the image on disk, so
+# fixing the check costs a minute rather than another twenty.
+if ! apptainer exec -B /scratch "$sif" R -q --no-save <<'VERIFY'
+suppressPackageStartupMessages({
+    library(splatter)
+    library(SingleCellExperiment)
+    library(SummarizedExperiment)
+    library(Matrix)
+    library(jsonlite)
+})
+params <- setParams(newSplatParams(),
+                    batchCells     = c(50, 50),
+                    batch.facLoc   = 0,
+                    batch.facScale = 0,
+                    group.prob     = rep(1 / 5, 5),
+                    dropout.type   = "none",
+                    nGenes         = 200,
+                    seed           = 1)
+sim <- splatSimulate(params, method = "groups", verbose = FALSE)
+matrix <- counts(sim)
+stopifnot(
+    identical(dim(matrix), c(200L, 100L)),
+    sum(matrix) > 0,
+    length(unique(colData(sim)$Group)) == 5,
+    length(unique(colData(sim)$Batch)) == 2,
+    all(is.finite(rowData(sim)$GeneMean))
+)
+writeMM(as(matrix, "CsparseMatrix"), tempfile())
+cat("splatter", as.character(packageVersion("splatter")),
+    "simulated", sum(matrix), "counts on", R.version$platform, "\n")
+VERIFY
+then
+    echo >&2
+    echo "the image built but does not generate. It is still at $sif, so "\
+         "re-run this job to check it again after a fix; nothing has to be "\
+         "rebuilt." >&2
+    exit 6
+fi
