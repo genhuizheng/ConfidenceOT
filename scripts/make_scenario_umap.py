@@ -769,6 +769,11 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
                 axes.scatter([centre[0]], [centre[1]], s=2600,
                              facecolors="none", edgecolors=colour,
                              linewidths=2.4, zorder=6)
+                axes.text(centre[0], centre[1], subject, fontsize=17,
+                          fontweight="bold", ha="center", va="center",
+                          color="white", zorder=10,
+                          path_effects=[patheffects.withStroke(
+                              linewidth=3.6, foreground=colour)])
             else:
                 # The vacated position. Without the mark the panel is simply
                 # missing a cluster, and a missing cluster among six is not
@@ -777,6 +782,10 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
                 axes.scatter([where[0]], [where[1]], s=2600,
                              facecolors="none", edgecolors=C_REJECT,
                              linewidths=2.4, linestyle=(0, (4, 3)), zorder=6)
+                # Inside the empty ring, greyed: it names what is not there.
+                axes.text(where[0], where[1], subject, fontsize=17,
+                          fontweight="bold", ha="center", va="center",
+                          color=C_REJECT, alpha=0.42, zorder=10)
             axes.set_xlim(limits[0], limits[1])
             axes.set_ylim(limits[2], limits[3])
             axes.set_xticks([])
