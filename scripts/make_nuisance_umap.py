@@ -75,8 +75,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def one_population(nuisance: str, n_cells: int, n_genes: int, depth_sd: float,
-                   rng: np.random.Generator, uniform: bool = False
-                   ) -> np.ndarray:
+                   rng: np.random.Generator, uniform: bool = False,
+                   profile: np.ndarray | None = None) -> np.ndarray:
     """One population carrying exactly one nuisance, and nothing else.
 
     Every cell draws from the same relative expression profile, so a figure
@@ -94,8 +94,13 @@ def one_population(nuisance: str, n_cells: int, n_genes: int, depth_sd: float,
     -- the totals already agree -- which is what makes it a separate problem
     rather than a symptom of the first.
     """
-    profile = rng.gamma(shape=0.5, scale=3.0, size=n_genes) + 0.05
-    profile /= profile.sum()
+    # Passed in when two draws have to come from the *same* population.
+    # Drawn afresh on each call, two draws are two different populations, and
+    # an embedding of them separates the sides -- which is a picture of a
+    # mistake rather than of the benchmark arm.
+    if profile is None:
+        profile = rng.gamma(shape=0.5, scale=3.0, size=n_genes) + 0.05
+        profile = profile / profile.sum()
     order = np.argsort(-profile)
 
     counts = np.zeros((n_cells, n_genes))
@@ -256,66 +261,94 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
     return report
 
 
-def benchmark_figure(nuisance: str, out: Path, seed: int) -> None:
-    """How the arm that measures it is built."""
-    facts = NUISANCE[nuisance]
-    rng = np.random.default_rng(seed)
-    cloud = np.clip(rng.normal(0.0, 1.0, size=(70, 2)), -1.9, 1.9)
+def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
+                     seed: int) -> dict:
+    """How the arms are built, in the same language the other figures use.
+
+    Source on the left, target on the right, one shared embedding so a cell's
+    position means the same thing in both. Both sides are drawn from the same
+    population and both carry the same nuisance, so every cell has a
+    counterpart and the correct answer is to reject nothing.
+
+    That is the whole content, and it is said by what is *not* drawn. In the
+    scenario figure a ring marks a population with no counterpart; here the
+    gradient is plainly present and no ring appears anywhere, which is the
+    distinction the arms exist to test -- a method may not treat a nuisance
+    both sides share as though it were a missing population.
+
+    Applied to one side only this would be a batch effect between samples,
+    which is a different problem with its own methods, and the arm would no
+    longer have "reject nothing" as its answer.
+    """
+    report: dict = {}
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.4, 2.5))
-        axes = figure.add_axes([0.02, 0.05, 0.96, 0.78])
-        axes.set_xlim(0, 12)
-        axes.set_ylim(0.35, 3.05)
-        axes.axis("off")
+        figure = plt.figure(figsize=(6.6, 6.0))
+        outer = figure.add_gridspec(2, 1, hspace=0.30, left=0.015,
+                                    right=0.885, top=0.945, bottom=0.02)
+        for row, nuisance in enumerate(("depth", "breadth")):
+            facts = NUISANCE[nuisance]
+            rng = np.random.default_rng(seed + 100 + row)
+            # One population, then two independent draws from it, each
+            # carrying the nuisance in the same way. The profile is drawn once
+            # and shared: two draws that each invent their own profile are two
+            # different populations, and the embedding separates them.
+            shared = rng.gamma(shape=0.5, scale=3.0, size=genes) + 0.05
+            shared = shared / shared.sum()
+            source = one_population(nuisance, cells // 2, genes, depth_sd, rng,
+                                    profile=shared)
+            target = one_population(nuisance, cells // 2, genes, depth_sd, rng,
+                                    profile=shared)
+            counts = np.vstack([source, target])
+            is_source = np.arange(len(counts)) < len(source)
+            values = (counts.sum(axis=1) if nuisance == "depth"
+                      else (counts > 0).sum(axis=1))
+            points = embed(counts, "logcpm", seed)
+            colour = np.log10(values + 1.0)
+            limits = (points[:, 0].min(), points[:, 0].max(),
+                      points[:, 1].min(), points[:, 1].max())
+            pad = 0.04 * max(limits[1] - limits[0], limits[3] - limits[2])
 
-        def blob(x: float, y: float, shade: np.ndarray | None = None) -> None:
-            axes.scatter(cloud[:, 0] * 0.21 + x, cloud[:, 1] * 0.21 + y,
-                         s=4.5, c="#9a9a94" if shade is None else shade,
-                         cmap="viridis", linewidths=0, zorder=3)
-
-        def arrow(x0: float, x1: float, y: float) -> None:
-            axes.annotate("", xy=(x1, y), xytext=(x0, y),
-                          arrowprops=dict(arrowstyle="-|>", color="#8c8c86",
-                                          linewidth=1.0, mutation_scale=10))
-
-        shade = np.linspace(0.0, 1.0, len(cloud))
-        blob(1.0, 1.9)
-        axes.text(1.0, 2.45, "one population", fontsize=8,
-                  fontweight="semibold", ha="center")
-        arrow(1.7, 2.6, 1.9)
-        for y, side in ((2.42, "source"), (1.18, "target")):
-            blob(3.5, y, shade)
-            # Beside the cloud, not above it: above, the label for the upper
-            # draw sat on the heading and the one for the lower draw sat on
-            # the cloud itself.
-            axes.text(4.05, y, side, fontsize=7.6, ha="left", va="center",
-                      color="#55555a")
-        axes.text(3.5, 2.86, "two independent draws", fontsize=8,
-                  fontweight="semibold", ha="center")
-        axes.annotate("", xy=(3.15, 2.36), xytext=(2.6, 1.92),
-                      arrowprops=dict(arrowstyle="-|>", color="#8c8c86",
-                                      linewidth=1.0, mutation_scale=10))
-        axes.annotate("", xy=(3.15, 1.24), xytext=(2.6, 1.88),
-                      arrowprops=dict(arrowstyle="-|>", color="#8c8c86",
-                                      linewidth=1.0, mutation_scale=10))
-        axes.text(5.25, 1.8, facts["construction"], fontsize=7.8,
-                  color="#b07d2b" if nuisance == "depth" else "#1f6f8b",
-                  ha="left", va="center", linespacing=1.5)
-        arrow(4.75, 5.15, 1.8)
-        arrow(7.9, 8.3, 1.8)
-        axes.text(8.45, 2.02, "correct answer", fontsize=8,
-                  fontweight="semibold", ha="left")
-        axes.text(8.45, 1.52, "reject nothing", fontsize=9.5,
-                  fontweight="bold", color="#2f7d4f", ha="left")
-        axes.text(0.05, 0.78, facts["why_both"], fontsize=7.4,
-                  color="#55555a", ha="left", va="top", linespacing=1.5)
-        figure.text(0.02, 0.975,
-                    f"{facts['title']}: how the benchmark arm is built",
-                    fontsize=8.4, fontweight="semibold", va="top")
+            inner = outer[row].subgridspec(1, 2, wspace=0.05)
+            for column, (side, mask) in enumerate((("source", is_source),
+                                                   ("target", ~is_source))):
+                axes = figure.add_subplot(inner[0, column])
+                axes.scatter(points[~mask, 0], points[~mask, 1], s=7,
+                             c="#ececE6", linewidths=0, zorder=1)
+                dots = axes.scatter(points[mask, 0], points[mask, 1],
+                                    c=colour[mask], s=11, cmap="viridis",
+                                    linewidths=0, zorder=3,
+                                    vmin=colour.min(), vmax=colour.max())
+                axes.set_xlim(limits[0] - pad, limits[1] + pad)
+                axes.set_ylim(limits[2] - pad, limits[3] + pad)
+                axes.set_xticks([])
+                axes.set_yticks([])
+                for spine in axes.spines.values():
+                    spine.set_color("#d8d8d2")
+                    spine.set_linewidth(0.6)
+                axes.set_title(side, loc="center", fontsize=8,
+                               color="#55555a", pad=4)
+                if column == 1:
+                    bar = figure.colorbar(dots, ax=axes, fraction=0.055,
+                                          pad=0.025)
+                    bar.set_label(facts["colour_by"], fontsize=7)
+                    bar.ax.tick_params(labelsize=6.5)
+                    bar.outline.set_linewidth(0.5)
+                else:
+                    axes.text(0.0, 1.14,
+                              f"({chr(97 + row)})  {facts['title']}",
+                              transform=axes.transAxes, fontsize=8.4,
+                              fontweight="semibold", ha="left", va="bottom")
+            report[nuisance] = {
+                "source_cells": int(is_source.sum()),
+                "target_cells": int((~is_source).sum()),
+                "correct_answer": "reject nothing",
+                "shared": ("both sides carry the nuisance, so every cell has "
+                           "a counterpart"),
+            }
         for suffix in ("png", "pdf"):
-            figure.savefig(out / f"{nuisance}_benchmark.{suffix}",
-                           bbox_inches="tight")
+            figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
         plt.close(figure)
+    return report
 
 
 def main() -> None:
@@ -330,12 +363,12 @@ def main() -> None:
     }
     report["problem"] = problem_figure(args.out, args.cells, args.genes,
                                        args.depth_sd, args.seed)
-    for nuisance in ("depth", "breadth"):
-        benchmark_figure(nuisance, args.out, args.seed)
+    report["benchmark"] = benchmark_figure(args.out, args.cells, args.genes,
+                                           args.depth_sd, args.seed)
     (args.out / "diagnostics.json").write_text(json.dumps(report, indent=2),
                                                encoding="utf-8")
     print(json.dumps(report, indent=2))
-    for name in ("problem", "depth_benchmark", "breadth_benchmark"):
+    for name in ("problem", "benchmark"):
         print(args.out / f"{name}.png")
 
 
