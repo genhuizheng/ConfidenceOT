@@ -33,7 +33,6 @@ scripts/
 scripts/*
 !scripts/benchmark_logging.py
 !scripts/generate_splatter_population_benchmark.R
-!scripts/generate_splatter_depth_arms.R
 !scripts/run_splatter_population_uot_benchmark.py
 !scripts/run_splatter_gene_perturbation_benchmark.py
 !scripts/run_splatter_dual_backbone_calibrated_case.py
@@ -41,9 +40,6 @@ scripts/*
 !scripts/build_n1000_combined_mass_deficit_f1_report.py
 !scripts/aggregate_confidenceot_grid.py
 !scripts/finalize_splatter_scaling_benchmark.py
-!scripts/validate_depth_null_specificity.py
-!scripts/screen_depth_configurations.sh
-!scripts/collect_depth_screen.py
 !scripts/make_journal_figure.py
 !scripts/make_figure2.py
 !scripts/make_method_schematic.py
@@ -54,12 +50,8 @@ scripts/tacc/*
 !scripts/tacc/finalize_splatter_scaling.slurm
 !scripts/tacc/submit_splatter_scaling.sh
 !scripts/tacc/install_splatter_dependencies.slurm
-!scripts/tacc/screen_depth_configurations.slurm
-!scripts/tacc/preflight_depth_screen.sh
 !scripts/tacc/r_environment.sh
 !scripts/tacc/prepare_r_sctransform.slurm
-!scripts/tacc/export_depth_screen.sh
-!scripts/tacc/generate_splatter_depth_arms.slurm
 *.inspect.ndjson
 *.zip
 
