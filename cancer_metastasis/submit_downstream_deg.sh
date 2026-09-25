@@ -45,6 +45,7 @@ dataset=${1:-}
 # them cannot read a value left over from the caller's environment.
 malignant_column=
 annotations=
+source_manifest=
 # HRA000036 (nasopharyngeal) is absent on purpose: 234 malignant primary and
 # 38 malignant metastatic cells cannot carry a per-patient contrast at a floor
 # of 10 per status. GSE225857 is absent because it has no usable primary file.
@@ -83,7 +84,6 @@ case "$dataset" in
   ovarian)
     accession=GSE180661
     malignant_column=malignant
-    source_manifest=$result/manifest/pair_manifest_eligible.csv
     equalised=$result/downsampled_GSE180661_20260914
     patient_array=${PATIENT_ARRAY:-0-7}
     ;;
@@ -104,53 +104,54 @@ case "$dataset" in
     # to transport and cannot be the colorectal arm however it is configured.
     accession=GSE315534
     malignant_column=malignant
-    source_manifest=$result/manifest/GSE315534/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE315534_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   colorectal2)
     accession=GSE178318
     malignant_column=malignant
-    source_manifest=$result/manifest/GSE178318/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE178318_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   breast)
     accession=GSE167036
     malignant_column=malignant
-    source_manifest=$result/manifest/GSE167036/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE167036_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   gastric)
     accession=GSE163558
     malignant_column=malignant
-    source_manifest=$result/manifest/GSE163558/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE163558_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   pancreatic)
     accession=GSE197177
     malignant_column=malignant
-    source_manifest=$result/manifest/GSE197177/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE197177_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   headneck2)
     accession=GSE188737
     malignant_column=malignant
-    source_manifest=$result/manifest/GSE188737/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE188737_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   headneck)
     accession=GSE181919
     malignant_column=malignant
-    source_manifest=$result/author_labeled_replication_GSE181919_GSE225857_rerun_20260912/GSE181919/manifest/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE181919_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
 esac
+
+# One manifest for every arm but prostate, restricted by the trim's
+# --dataset-id, which is how the transport chain reads it too. Per-dataset
+# copies were briefly written into this table from a naming convention rather
+# than from disk, and none of those paths existed.
+if [[ -z "${source_manifest:-}" ]]; then
+  source_manifest=${SOURCE_MANIFEST:-${PANCANCER_MANIFEST:-$result/manifest/pancancer_20260924/pair_manifest_eligible.csv}}
+fi
 
 gate=$result/ot_${accession}_${preprocessing}_$stamp
 trimmed=$result/manifest_trimmed/${accession}_${preprocessing}_$stamp.csv
