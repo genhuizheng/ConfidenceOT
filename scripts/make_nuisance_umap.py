@@ -151,7 +151,7 @@ NUISANCE = {
     "breadth": {
         "title": "low-gene effect",
         "ideal": "ideal: no nFeature variation",
-        "affected": "real: nFeature varies, nCount fixed",
+        "affected": "real: nFeature varies",
         "colour_by": "genes detected per cell",
         "construction": ("the same breadth spread on both sides,\n"
                          "total counts held at 3,000"),
