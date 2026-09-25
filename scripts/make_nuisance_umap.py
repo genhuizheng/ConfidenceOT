@@ -265,147 +265,100 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """The task definition: what is generated, what is true, what is scored.
+    """The task: what is generated, what is true, what is scored.
 
-    An earlier version drew a line between the i-th source cell and the i-th
-    target cell. **There is no such pairing.** The two sides are independent
-    draws from one population, so a source cell has no particular target cell
-    it belongs to, and a line saying otherwise describes a benchmark that does
-    not exist. The ground truth here is a statement about *sets*: every source
-    cell has some valid partner in the target set, or it has none at all.
+    Named the way the scenarios are named. "Specificity arm" and "power arm"
+    are the statistics of the thing and say nothing about what is in the
+    dishes; the two cases are a pair where every population is on both sides,
+    and a pair where one population is in the source and not the target.
 
-    Three things a benchmark figure has to carry, and this one carries them as
-    three columns.
+    Colour is biology and size is the technical nuisance, so which variation
+    is meant to be there is separable by eye. A ring marks the cells that
+    should be rejected. What is scored is written under each row.
 
-    **Generation.** Colour is biology and size is the technical nuisance, so
-    the two kinds of variable are separable by eye. In the specificity arm
-    there is one population and no biological difference between the sides at
-    all; in the power arm a subpopulation is added to the source only.
+    No line joins a source cell to a target cell, because none of them are
+    joined: the sides are independent draws, and the truth is whether a cell
+    has any partner in the other side at all, not which one.
 
-    **Ground truth.** Which cells should be rejected, drawn as a ring. Nothing
-    in the specificity arm; exactly the planted cells in the power arm. Both
-    arms are needed and neither is sufficient: a method that never rejects
-    scores perfectly on the first, and one that rejects everything scores
-    perfectly on the recall of the second.
-
-    **Evaluation.** What is computed from the method's output. Rejection is
-    scored per cell against the ring, and technical invariance is scored as
-    the correlation between the gate and the nuisance, which should be zero
-    whatever the arm.
+    Both rows are needed. A method that never rejects is right about the first
+    and a method that rejects everything is right about the second's recall,
+    so either alone defines a task that can be passed without doing anything.
     """
     rng = np.random.default_rng(seed)
-    n = 34
-    planted = 10
+    n, planted = 34, 10
     report: dict = {}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(7.1, 4.1))
-        for row, (arm, subtitle) in enumerate((
-                ("specificity", "one population, drawn twice"),
-                ("power", "a subpopulation added to the source only"))):
-            axes = figure.add_axes([0.015, 0.600 - 0.430 * row,
-                                    0.625, 0.330])
-            axes.set_xlim(-2.6, 12.4)
-            axes.set_ylim(-1.18, 1.34)
+        figure = plt.figure(figsize=(6.9, 3.2))
+        for row, (title, truth, scored) in enumerate((
+                ("every population on both sides", "reject nothing",
+                 "false rejection rate"),
+                ("one population missing from the target",
+                 f"reject those {planted} cells", "precision and recall"))):
+            axes = figure.add_axes([0.015, 0.545 - 0.455 * row, 0.63, 0.365])
+            axes.set_xlim(-2.7, 12.4)
+            axes.set_ylim(-0.95, 1.30)
             axes.axis("off")
 
             for column, side in enumerate(("source", "target")):
                 x0 = 0.6 + 6.2 * column
-                extra = planted if (arm == "power" and side == "source") else 0
+                extra = planted if (row == 1 and side == "source") else 0
                 total = n + extra
                 spread = rng.uniform(-1.0, 1.0, size=(total, 2))
                 spread[:, 0] *= 2.1
-                spread[:, 1] = 0.30 + 0.52 * spread[:, 1]
-                # Size is the technical nuisance; colour is biology. Keeping
-                # them in different channels is the first thing the figure has
-                # to say, because a reader cannot judge a benchmark without
-                # knowing which variation is supposed to be there.
+                spread[:, 1] = 0.44 + 0.44 * spread[:, 1]
                 sizes = 9.0 + 52.0 * rng.beta(1.6, 2.2, size=total)
                 colours = np.array(["#0072B2"] * n + ["#D55E00"] * extra)
                 axes.scatter(spread[:, 0] + x0, spread[:, 1], s=sizes,
                              c=colours, linewidths=0, alpha=0.9, zorder=3)
-                if extra:
-                    for index in range(n, total):
-                        axes.scatter([spread[index, 0] + x0], [spread[index, 1]],
-                                     s=sizes[index] + 90, facecolors="none",
-                                     edgecolors=C_REJECT, linewidths=1.1,
-                                     zorder=5)
-                axes.text(x0, 0.88, side, fontsize=7.6, ha="center",
+                for index in range(n, total):
+                    axes.scatter([spread[index, 0] + x0], [spread[index, 1]],
+                                 s=sizes[index] + 95, facecolors="none",
+                                 edgecolors=C_REJECT, linewidths=1.1, zorder=5)
+                axes.text(x0, -0.22, side, fontsize=7.6, ha="center",
                           color="#55555a")
-            axes.text(-2.5, 1.16, f"({chr(97 + row)})  {arm} arm",
-                      fontsize=8.4, fontweight="semibold", ha="left")
-            axes.text(12.3, 1.17, subtitle, fontsize=7.2,
-                      ha="right", va="baseline", color="#55555a")
 
-            truth = ("no cell is rejected" if arm == "specificity"
-                     else f"exactly the {planted} planted cells are rejected")
-            scored = ("false rejection rate" if arm == "specificity"
-                      else "precision, recall, F1 against the ring")
-            axes.text(-2.5, -0.62, "ground truth", fontsize=7.4,
+            axes.text(-2.6, 1.14, f"({chr(97 + row)})  {title}", fontsize=8.4,
                       fontweight="semibold", ha="left")
-            axes.text(-2.5, -0.98, truth, fontsize=7.2, ha="left",
-                      color="#2f7d4f" if arm == "specificity" else C_REJECT)
-            axes.text(5.4, -0.62, "scored by", fontsize=7.4,
-                      fontweight="semibold", ha="left")
-            axes.text(5.4, -0.98, scored, fontsize=7.2, ha="left",
+            axes.text(-2.6, -0.62, truth, fontsize=8, fontweight="bold",
+                      ha="left", color="#2f7d4f" if row == 0 else C_REJECT)
+            axes.text(12.3, -0.62, scored, fontsize=7.6, ha="right",
                       color="#55555a")
-            report[arm] = {"ground_truth": truth, "scored_by": scored}
+            report[title] = {"ground_truth": truth, "scored_by": scored}
 
-        # Its own 0-1 data coordinates rather than transAxes with clipping
-        # off. Drawn the other way, the markers sat outside the axes as far as
-        # matplotlib was concerned, and bbox_inches="tight" grew the canvas to
-        # contain them -- a figure eleven thousand pixels tall.
-        legend = figure.add_axes([0.665, 0.17, 0.325, 0.76])
+        legend = figure.add_axes([0.675, 0.13, 0.315, 0.74])
         legend.set_xlim(0, 1)
         legend.set_ylim(0, 1)
         legend.axis("off")
-        legend.text(0.0, 0.99, "generation", fontsize=8.4,
-                    fontweight="semibold", va="top")
-        legend.text(0.0, 0.91, "colour is biology", fontsize=7.0,
-                    color="#8c8c86", va="top", style="italic")
-        for y, colour, text in ((0.815, "#0072B2", "the shared population"),
-                                (0.735, "#D55E00", "the planted subpopulation")):
-            legend.scatter([0.04], [y], s=46, c=colour, linewidths=0)
-            legend.text(0.12, y, text, fontsize=7.2, va="center")
-
-        legend.text(0.0, 0.64,
-                    "size is the technical nuisance,\napplied to both sides",
-                    fontsize=7.0, color="#8c8c86", va="top", style="italic",
-                    linespacing=1.6)
-        for y, size, text in ((0.505, 14, "shallow, or few genes"),
-                              (0.425, 58, "deep, or many genes")):
-            legend.scatter([0.04], [y], s=size, c="#8c8c86", linewidths=0)
-            legend.text(0.12, y, text, fontsize=7.2, va="center")
-        legend.text(0.0, 0.345,
-                    "depth sd(log) 0 to 0.9, or\nbreadth at fixed total counts",
-                    fontsize=7.0, color="#8c8c86", va="top", linespacing=1.6)
-
-        legend.text(0.0, 0.215, "ground truth", fontsize=8.4,
-                    fontweight="semibold", va="top")
-        legend.scatter([0.04], [0.135], s=46, facecolors="none",
+        y = 0.95
+        for colour, text in (("#0072B2", "population on both sides"),
+                             ("#D55E00", "population on one side")):
+            legend.scatter([0.05], [y], s=46, c=colour, linewidths=0)
+            legend.text(0.15, y, text, fontsize=7.6, va="center")
+            y -= 0.125
+        legend.scatter([0.05], [y], s=46, facecolors="none",
                        edgecolors=C_REJECT, linewidths=1.1)
-        legend.text(0.12, 0.135, "should be rejected", fontsize=7.2,
-                    va="center", color=C_REJECT)
-        legend.text(0.0, 0.055,
-                    "There is no cell-to-cell pairing:\nthe sides are "
-                    "independent draws,\nso the truth is which cells have a\n"
-                    "partner in the other set at all.",
-                    fontsize=7.0, color="#8c8c86", va="top", linespacing=1.6)
+        legend.text(0.15, y, "should be rejected", fontsize=7.6, va="center",
+                    color=C_REJECT)
+        y -= 0.20
+        legend.text(0.0, y, "cell size: how deeply it was sequenced,",
+                    fontsize=7.4, color="#55555a", va="center")
+        y -= 0.10
+        legend.text(0.0, y, "or how many genes it detected", fontsize=7.4,
+                    color="#55555a", va="center")
+        y -= 0.10
+        legend.text(0.0, y, "both sides carry the same spread", fontsize=7.4,
+                    color="#55555a", va="center")
+        y -= 0.19
+        legend.text(0.0, y, "no cell is paired to a particular cell",
+                    fontsize=7.4, color="#8c8c86", va="center", style="italic")
+        y -= 0.10
+        legend.text(0.0, y, "on the other side", fontsize=7.4,
+                    color="#8c8c86", va="center", style="italic")
 
-        figure.text(
-            0.015, 0.012,
-            "Both arms carry the nuisance and both are needed: a method "
-            "that never rejects is perfect on (a),\n"
-            "and one that rejects everything is perfect on (b)'s recall. "
-            "Technical invariance is\n"
-            "scored across both, as the correlation between the gate and "
-            "the nuisance.",
-            fontsize=7.2, color="#55555a", va="bottom", linespacing=1.55)
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
         plt.close(figure)
-    report["technical_invariance"] = ("|corr(gate, nuisance)|, scored in both "
-                                      "arms, expected zero")
     return report
 
 
