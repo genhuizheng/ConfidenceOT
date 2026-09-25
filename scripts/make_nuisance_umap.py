@@ -240,26 +240,6 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     spine.set_linewidth(0.6)
                 axes.set_title(facts[kind], loc="center", fontsize=8,
                                color="#55555a", pad=4)
-                if strength > 0.5:
-                    # Drawn across the middle of the cloud, in the direction
-                    # the nuisance increases. The reader sees the ordering
-                    # rather than being told about it.
-                    centre = points.mean(axis=0)
-                    # Sized from the cloud's extent along the arrow's own
-                    # direction, not from the larger of the two axes: a
-                    # diagonal gradient on a wide cloud otherwise runs off the
-                    # top of the panel and over the title.
-                    along = (points - centre) @ np.array([np.cos(angle),
-                                                          np.sin(angle)])
-                    reach = 0.62 * float(np.percentile(np.abs(along), 92))
-                    step = np.array([np.cos(angle), np.sin(angle)]) * reach
-                    axes.annotate(
-                        "", xy=tuple(centre + step),
-                        xytext=tuple(centre - step),
-                        arrowprops=dict(arrowstyle="-|>", color="#33333a",
-                                        linewidth=1.2, mutation_scale=11,
-                                        shrinkA=0, shrinkB=0, alpha=0.85),
-                        zorder=9, annotation_clip=True)
                 if column == 1:
                     bar = figure.colorbar(dots, ax=axes, fraction=0.055,
                                           pad=0.025)
