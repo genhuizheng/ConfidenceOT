@@ -45,10 +45,23 @@ dataset=${1:-}
 # them cannot read a value left over from the caller's environment.
 malignant_column=
 annotations=
+# HRA000036 (nasopharyngeal) is absent on purpose: 234 malignant primary and
+# 38 malignant metastatic cells cannot carry a per-patient contrast at a floor
+# of 10 per status. GSE225857 is absent because it has no usable primary file.
 case "$dataset" in
-  ovarian|prostate|colorectal|headneck) ;;
+  ovarian|prostate|colorectal|colorectal2|breast|gastric|pancreatic|headneck|headneck2) ;;
   *)
-    echo "Usage: $0 {ovarian|prostate|colorectal|headneck}" >&2
+    echo "Usage: $0 {ovarian|prostate|colorectal|colorectal2|breast|gastric|pancreatic|headneck|headneck2}" >&2
+    echo >&2
+    echo "  ovarian     GSE180661  64,515 / 95,569 malignant (primary/metastasis)" >&2
+    echo "  colorectal  GSE315534   5,947 / 13,036" >&2
+    echo "  breast      GSE167036   3,561 /    700" >&2
+    echo "  pancreatic  GSE197177   3,012 /  2,362" >&2
+    echo "  colorectal2 GSE178318   2,883 /  2,165" >&2
+    echo "  headneck2   GSE188737   2,673 /  1,246" >&2
+    echo "  headneck    GSE181919   1,263 /    234" >&2
+    echo "  gastric     GSE163558     586 /  3,502" >&2
+    echo "  prostate    GSE271675  deposit labels, a different source" >&2
     exit 2
     ;;
 esac
@@ -86,10 +99,48 @@ case "$dataset" in
     patient_array=${PATIENT_ARRAY:-0-3}
     ;;
   colorectal)
-    accession=GSE225857
+    # GSE315534, not GSE225857. Among GSE225857's usable files there is no
+    # primary at all -- 4 blood, 1 metastasis, 0 primary -- so it has no pair
+    # to transport and cannot be the colorectal arm however it is configured.
+    accession=GSE315534
     malignant_column=malignant
-    source_manifest=$result/author_labeled_replication_GSE181919_GSE225857_rerun_20260912/GSE225857/manifest/pair_manifest_malignant_eligible.csv
-    equalised=$result/downsampled_GSE225857_$stamp
+    source_manifest=$result/manifest/GSE315534/pair_manifest_malignant_eligible.csv
+    equalised=$result/downsampled_GSE315534_$stamp
+    patient_array=${PATIENT_ARRAY:-0-1}
+    ;;
+  colorectal2)
+    accession=GSE178318
+    malignant_column=malignant
+    source_manifest=$result/manifest/GSE178318/pair_manifest_malignant_eligible.csv
+    equalised=$result/downsampled_GSE178318_$stamp
+    patient_array=${PATIENT_ARRAY:-0-1}
+    ;;
+  breast)
+    accession=GSE167036
+    malignant_column=malignant
+    source_manifest=$result/manifest/GSE167036/pair_manifest_malignant_eligible.csv
+    equalised=$result/downsampled_GSE167036_$stamp
+    patient_array=${PATIENT_ARRAY:-0-1}
+    ;;
+  gastric)
+    accession=GSE163558
+    malignant_column=malignant
+    source_manifest=$result/manifest/GSE163558/pair_manifest_malignant_eligible.csv
+    equalised=$result/downsampled_GSE163558_$stamp
+    patient_array=${PATIENT_ARRAY:-0-1}
+    ;;
+  pancreatic)
+    accession=GSE197177
+    malignant_column=malignant
+    source_manifest=$result/manifest/GSE197177/pair_manifest_malignant_eligible.csv
+    equalised=$result/downsampled_GSE197177_$stamp
+    patient_array=${PATIENT_ARRAY:-0-1}
+    ;;
+  headneck2)
+    accession=GSE188737
+    malignant_column=malignant
+    source_manifest=$result/manifest/GSE188737/pair_manifest_malignant_eligible.csv
+    equalised=$result/downsampled_GSE188737_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   headneck)
@@ -129,6 +180,46 @@ if [[ ! -d "$gate" ]]; then
   echo "Run submit_rank_cosine_chain.sh for $dataset first." >&2
   exit 2
 fi
+
+# The gg queue allows 40 submitted jobs per user and counts every array task
+# separately, so a chain that looks like six submissions is really array+5.
+# Submitting past the cap does not queue the overflow: sbatch refuses it, and
+# the refusal lands in the middle of a dependency chain, leaving the stages
+# that did get in waiting on a job id that will never exist. Counted here
+# rather than remembered.
+# Computed here and not further down: without `set -u` an array_n that is
+# not yet assigned evaluates to 0 inside $(( )), so the check would quietly
+# ask for five jobs instead of thirteen and wave through the overflow it
+# exists to stop. That is the failure this guard is for, and it was in the
+# first version of the guard itself.
+array_n=$(python - "$patient_array" <<'PY'
+import sys
+lo, _, hi = sys.argv[1].partition("-")
+print(int(hi or lo) - int(lo) + 1)
+PY
+)
+if ! [[ "$array_n" =~ ^[0-9]+$ ]] || (( array_n < 1 )); then
+  echo "Could not read an array size from PATIENT_ARRAY='$patient_array'" >&2
+  exit 2
+fi
+
+GG_JOB_CAP=${GG_JOB_CAP:-40}
+queued_now() {
+  if [[ -n "${DRY_RUN:-}" ]]; then echo 0; return; fi
+  # -r expands array tasks to one line each, which is how the cap counts them.
+  squeue -u "$USER" -h -r 2>/dev/null | wc -l | tr -d ' '
+}
+required=$((array_n + 5))
+in_queue=$(queued_now)
+if (( in_queue + required > GG_JOB_CAP )); then
+  echo "Refusing to submit: $in_queue jobs are already queued and this chain" >&2
+  echo "needs $required more, which is over the cap of $GG_JOB_CAP." >&2
+  echo "Wait for the running work, or lower PATIENT_ARRAY (currently" >&2
+  echo "$patient_array, $array_n tasks). Nothing was submitted." >&2
+  exit 3
+fi
+printf 'queue          %s of %s used, this chain needs %s\n' \
+  "$in_queue" "$GG_JOB_CAP" "$required"
 
 submit() {
   if [[ -n "${DRY_RUN:-}" ]]; then
@@ -243,16 +334,6 @@ printf 'deg            %s\n' "$deg"
 printf 'gsea           %s\n' "$gsea"
 printf 'audit          %s\n' "$audit"
 printf 'leave-one-out  %s\n' "$loo"
-echo
-# The gg queue allows 40 submitted jobs per user and counts each array task
-# separately, so the array is the whole cost and the rest is five.
-array_n=$(python - "$patient_array" <<'PY'
-import sys
-lo, _, hi = sys.argv[1].partition("-")
-print(int(hi or lo) - int(lo) + 1)
-PY
-)
-printf 'slurm budget   %s jobs (1 trim + %s array + 4)\n' "$((array_n + 5))" "$array_n"
 echo
 if [[ -z "${DRY_RUN:-}" ]]; then
   squeue -u "$USER" -o "%.12i %.16j %.10T %.28E"
