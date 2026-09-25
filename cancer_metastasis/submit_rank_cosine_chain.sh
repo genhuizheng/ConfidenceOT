@@ -72,9 +72,9 @@ set -eo pipefail
 
 dataset=${1:-}
 case "$dataset" in
-  ovarian|prostate|colorectal|headneck) ;;
+  ovarian|prostate|colorectal|colorectal2|breast|gastric|pancreatic|headneck|headneck2) ;;
   *)
-    echo "Usage: $0 {ovarian|prostate|colorectal|headneck}" >&2
+    echo "Usage: $0 {ovarian|prostate|colorectal|colorectal2|breast|gastric|pancreatic|headneck|headneck2}" >&2
     exit 2
     ;;
 esac
@@ -106,38 +106,110 @@ max_fraction_short=${MAX_FRACTION_SHORT:-0.01}
 # reused rather than rebuilt: re-running the quantile on a different cell set
 # changes the target depth too, and the two runs would then differ in two ways
 # at once.
+# Emptied before the case so a value left in the caller's environment cannot
+# select an arm's behaviour.
+malignant_column=
+annotations=()
+equalised=
+prostate_manifest=
 case "$dataset" in
   ovarian)
     accession=GSE180661
-    annotations=(Ovarian.cancer.cell)
-    source_manifest=$result/manifest/pair_manifest_eligible.csv
+    malignant_column=malignant
+    # The one equalised root that predates all this. Reused rather than
+    # rebuilt, because re-running the quantile on a different cell set changes
+    # the target depth too and the runs would then differ in two ways at once.
     equalised=${EQUALISED_ROOT:-$result/downsampled_GSE180661_20260914}
     array=${OT_ARRAY:-0-7}
     ;;
   prostate)
+    # The only arm that cannot use the uniform call: these h5ads come from a
+    # different source and predate it, so it keeps its own manifest and its own
+    # labels, and its malignant compartment is defined differently in kind from
+    # every other arm. A Methods statement, not a preference.
     accession=GSE271675
     annotations=(Epithelial "Basal Epithelial" Neuroendocrine)
-    source_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
+    prostate_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
     equalised=${EQUALISED_ROOT:-$result/downsampled_GSE271675_20260916}
     array=${OT_ARRAY:-0-7}
     ;;
   colorectal)
-    accession=GSE225857
-    annotations=(Tu01_AREG Tu02_DEFA5 Tu03_SRRM2 Tu04_RGMB Tu05_PCNA
-                 Tu06_NKD1 Tu07_MKI67 Tu08_GNG13 Tu09_MUC2 Tu10_COL3A1
-                 Tu11_PLA2G2A)
-    source_manifest=$replication_root/GSE225857/manifest/pair_manifest_malignant_eligible.csv
-    equalised=${EQUALISED_ROOT:-$result/downsampled_GSE225857_$stamp}
-    array=${OT_ARRAY:-0-3}
+    accession=GSE315534
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-2}
+    ;;
+  colorectal2)
+    accession=GSE178318
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-2}
+    ;;
+  breast)
+    accession=GSE167036
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-2}
+    ;;
+  gastric)
+    accession=GSE163558
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-1}
+    ;;
+  pancreatic)
+    accession=GSE197177
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-1}
+    ;;
+  headneck2)
+    accession=GSE188737
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-2}
     ;;
   headneck)
     accession=GSE181919
-    annotations=(Malignant.cells)
-    source_manifest=$replication_root/GSE181919/manifest/pair_manifest_malignant_eligible.csv
-    equalised=${EQUALISED_ROOT:-$result/downsampled_GSE181919_$stamp}
-    array=${OT_ARRAY:-0-3}
+    malignant_column=malignant
+    array=${OT_ARRAY:-0-2}
     ;;
 esac
+
+# Every arm but prostate draws its pairs from the one pan-cancer manifest that
+# 01_build_pair_manifest.py writes over the whole converted root, restricted by
+# dataset_id. Per-dataset manifest files are not built: the pan-cancer one
+# already holds 243 pairs across twelve deposits, and a second copy per dataset
+# is a second thing to keep in step.
+if [[ -n "$prostate_manifest" ]]; then
+  source_manifest=$prostate_manifest
+else
+  source_manifest=${SOURCE_MANIFEST:-${PANCANCER_MANIFEST:-$result/manifest/pancancer_20260924/pair_manifest_eligible.csv}}
+fi
+if [[ -z "${equalised:-}" ]]; then
+  equalised=${EQUALISED_ROOT:-$result/downsampled_${accession}_$stamp}
+fi
+
+# gg allows 40 submitted jobs and counts array tasks one by one. This chain is
+# the array plus three, and going over does not queue the overflow: sbatch
+# refuses it mid-chain, leaving the stages that did get in waiting on an id
+# that will never exist.
+GG_JOB_CAP=${GG_JOB_CAP:-40}
+array_n=$(python - "$array" <<'PYCOUNT'
+import sys
+lo, _, hi = sys.argv[1].partition("-")
+print(int(hi or lo) - int(lo) + 1)
+PYCOUNT
+)
+if ! [[ "$array_n" =~ ^[0-9]+$ ]] || (( array_n < 1 )); then
+  echo "Could not read an array size from OT_ARRAY='$array'" >&2
+  exit 2
+fi
+required=$((array_n + 3))
+in_queue=0
+if [[ -z "${DRY_RUN:-}" ]]; then
+  in_queue=$(squeue -u "$USER" -h -r 2>/dev/null | wc -l | tr -d ' ')
+fi
+if (( in_queue + required > GG_JOB_CAP )); then
+  echo "Refusing to submit: $in_queue queued, this chain needs $required," >&2
+  echo "cap is $GG_JOB_CAP. Lower OT_ARRAY (now $array) or wait." >&2
+  exit 3
+fi
+echo "queue          $in_queue of $GG_JOB_CAP used, this chain needs $required"
 
 ot=$result/ot_${accession}_${preprocessing}_$stamp
 diagnostics=$result/gate_diagnostic_${accession}_${preprocessing}_$stamp
@@ -168,10 +240,20 @@ mkdir -p "$result/logs"
 
 # J1. Equalisation, only when its output is absent. A present manifest is
 # treated as authoritative: it is the thing every later stage reads.
+# One selector, built once, used by the equalisation and the rank audit alike.
+# Building it twice is how the depth screen and the production runner came to
+# measure different configurations while appearing to share one.
 annotation_args=()
-for annotation in "${annotations[@]}"; do
-  annotation_args+=(--malignant-annotation "$annotation")
-done
+scope_args=()
+if [[ -n "$malignant_column" ]]; then
+  annotation_args+=(--malignant-column "$malignant_column")
+  scope_args+=(--malignant-column "$malignant_column")
+else
+  for annotation in "${annotations[@]}"; do
+    annotation_args+=(--malignant-annotation "$annotation")
+    scope_args+=(--include-annotation "$annotation")
+  done
+fi
 if [[ -n "$equalise_stage" && -f "$manifest" ]]; then
   echo "J1 equalise    reusing $manifest"
   equalise_job=""
@@ -255,10 +337,6 @@ fi
 
 # J2. The rank-cut gate. Runs on the equalised manifest, so it must depend on
 # J1 when J1 was submitted.
-scope_args=()
-for annotation in "${annotations[@]}"; do
-  scope_args+=(--include-annotation "$annotation")
-done
 audit_dependency=()
 if [[ -n "$equalise_job" ]]; then
   audit_dependency=(--dependency=afterok:"$equalise_job")
@@ -274,8 +352,14 @@ echo "J2 rank audit  $audit_job  ($preprocessing, tolerance $max_fraction_short)
 export CONFIDENCEOT_MANIFEST="$manifest"
 export CONFIDENCEOT_OUTPUT_ROOT="$ot"
 export CONFIDENCEOT_ANALYSIS_SCOPE=malignant
-printf -v joined '%s|' "${annotations[@]}"
-export CONFIDENCEOT_INCLUDE_ANNOTATIONS="${joined%|}"
+if [[ -n "$malignant_column" ]]; then
+  export CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column"
+  unset CONFIDENCEOT_INCLUDE_ANNOTATIONS
+else
+  printf -v joined '%s|' "${annotations[@]}"
+  export CONFIDENCEOT_INCLUDE_ANNOTATIONS="${joined%|}"
+  unset CONFIDENCEOT_MALIGNANT_COLUMN
+fi
 export CONFIDENCEOT_PREPROCESSING="$preprocessing"
 # The array job refuses these alongside a named configuration, so anything left
 # in the submitting shell would stop the job rather than silently override it.

@@ -112,7 +112,16 @@ def subtype_mask(data, column: str, excluded: list[str]) -> np.ndarray:
 def analysed_subset(sample: str, files: tuple[str, ...], args: argparse.Namespace):
     """Load one sample and keep only the cells the analysis would use."""
     data = load_exact_side(list(files), sample)
-    data = data[malignant_annotation_mask(data, args.malignant_annotations)].copy()
+    if args.malignant_column:
+        if args.malignant_column not in data.obs:
+            raise KeyError(
+                f"obs has no {args.malignant_column!r} column; use "
+                f"--malignant-annotation for files that predate the uniform "
+                f"call. Columns present: {sorted(data.obs.columns)[:12]}")
+        keep = data.obs[args.malignant_column].astype(str).to_numpy() == args.malignant_value
+    else:
+        keep = malignant_annotation_mask(data, args.malignant_annotations)
+    data = data[keep].copy()
     if args.excluded_subtypes and data.n_obs:
         data = data[
             subtype_mask(data, args.subtype_column, args.excluded_subtypes)
@@ -155,8 +164,11 @@ def main() -> None:
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("output_root", type=Path)
     parser.add_argument(
-        "--malignant-annotation", action="append", dest="malignant_annotations",
-        required=True, help="Author malignant label to keep; may be repeated",
+        "--malignant-column", default=None, metavar="COLUMN",
+        help="Select the malignant compartment by this obs column equalling --malignant-value, instead of by the deposit's own labels. One rule for every deposit.")
+    parser.add_argument("--malignant-value", default="malignant")
+    parser.add_argument(
+        "--malignant-annotation", action="append", dest="malignant_annotations", help="Author malignant label to keep; may be repeated",
     )
     parser.add_argument("--minimum-total-counts", type=int, default=1000)
     parser.add_argument("--minimum-detected-genes", type=int, default=500)
@@ -178,6 +190,11 @@ def main() -> None:
     parser.add_argument("--subtype-column", default="cell_subtype")
     parser.add_argument("--seed", type=int, default=20260914)
     args = parser.parse_args()
+    if args.malignant_column and args.malignant_annotations:
+        parser.error("pass --malignant-column or --malignant-annotation, not both")
+    if not args.malignant_column and not args.malignant_annotations:
+        parser.error("malignant selection needs --malignant-column or at least "
+                     "one --malignant-annotation")
     if not 0.0 < args.target_quantile < 1.0:
         raise ValueError("--target-quantile must lie in (0, 1)")
     destination = args.output_root
@@ -298,6 +315,9 @@ def main() -> None:
             per_sample["already_at_or_below_target_n"].sum() / all_depth.size
         ),
         "malignant_annotations": args.malignant_annotations,
+        "malignant_selector": (
+            f"{args.malignant_column}=={args.malignant_value}"
+            if args.malignant_column else "cell_type in malignant_annotations"),
         "qc_thresholds": {
             "minimum_total_counts": args.minimum_total_counts,
             "minimum_detected_genes": args.minimum_detected_genes,

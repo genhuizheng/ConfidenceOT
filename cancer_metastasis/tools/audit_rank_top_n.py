@@ -91,6 +91,9 @@ def main() -> None:
     parser.add_argument("--analysis-scope", choices=("all", "malignant"),
                         default="all")
     parser.add_argument("--include-annotation", action="append", default=[])
+    parser.add_argument("--malignant-column", default=None, metavar="COLUMN",
+                        help="Select the malignant compartment by this obs column equalling --malignant-value, instead of by the deposit's own labels. One rule for every deposit.")
+    parser.add_argument("--malignant-value", default="malignant")
     parser.add_argument("--cell-qc", action="store_true")
     parser.add_argument("--minimum-total-counts", type=int, default=0)
     parser.add_argument("--minimum-detected-genes", type=int, default=0)
@@ -108,9 +111,10 @@ def main() -> None:
              "common total. Set to 1.0 to report without gating.")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
-    if args.analysis_scope == "malignant" and not args.include_annotation:
+    if (args.analysis_scope == "malignant" and not args.include_annotation
+            and not args.malignant_column):
         raise SystemExit("malignant scope requires at least one "
-                         "--include-annotation")
+                         "--include-annotation or --malignant-column")
     if args.preprocessing is not None:
         if args.rank_top_n is not None:
             raise SystemExit("--preprocessing carries the cut; drop "
@@ -140,7 +144,16 @@ def main() -> None:
             data = load_exact_side(paths_for(row, side),
                                    str(row[f"{side}_sample"]))
             if args.analysis_scope == "malignant":
-                keep = np.isin(scope_labels(data), args.include_annotation)
+                if args.malignant_column:
+                    if args.malignant_column not in data.obs:
+                        raise KeyError(
+                            f"obs has no {args.malignant_column!r} column; use "
+                            f"--include-annotation for files that predate the "
+                            f"uniform call")
+                    keep = (data.obs[args.malignant_column].astype(str).to_numpy()
+                            == args.malignant_value)
+                else:
+                    keep = np.isin(scope_labels(data), args.include_annotation)
                 data = data[keep].copy()
             if args.cell_qc and data.n_obs:
                 table = cell_qc_table(
