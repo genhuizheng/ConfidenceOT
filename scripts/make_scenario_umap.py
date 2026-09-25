@@ -72,17 +72,16 @@ from make_journal_figure import STYLE  # noqa: E402
 SCENARIOS = ("S0_clean_movement", "S1_extinction", "S2_emergence",
              "S3_source_outlier", "S4_bifurcation", "S5_abundance_shift")
 
-# The directory names are the simulator's and stay as they are; what a reader
-# sees says what is in the panel. "Extinction" and "emergence" name a process
-# nobody watched -- what the figure shows is a population with no counterpart
-# on the other side, which is also the thing the method has to find.
+# The S-numbers are the simulator's directory names and mean nothing to a
+# reader; the rings already say which population and on which side, so the
+# title is left to say what happened, in one phrase.
 TITLES = {
-    "S0_clean_movement": "S0  every population is on both sides",
-    "S1_extinction": "S1  population A is only in the source",
-    "S2_emergence": "S2  population G is only in the target",
-    "S3_source_outlier": "S3  population O is only in the source",
-    "S4_bifurcation": "S4  population B splits in two",
-    "S5_abundance_shift": "S5  the same populations, different proportions",
+    "S0_clean_movement": "all populations shared",
+    "S1_extinction": "population lost",
+    "S2_emergence": "population emerged",
+    "S3_source_outlier": "outlier population",
+    "S4_bifurcation": "population splits",
+    "S5_abundance_shift": "abundance shift",
 }
 
 READING = {
