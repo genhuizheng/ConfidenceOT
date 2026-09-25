@@ -111,6 +111,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replicate", type=int, default=1)
     parser.add_argument("--genes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7300)
+    parser.add_argument("--layout", choices=("joint", "paired", "schematic"),
+                        default="joint",
+                        help="joint: one embedding per scenario. paired: two "
+                             "panels on that embedding. schematic: drawn, no "
+                             "counts.")
     parser.add_argument("--out", type=Path, required=True)
     return parser.parse_args()
 
@@ -451,6 +456,215 @@ def draw_scenario(axes, points, meta: pd.DataFrame, scenario: str) -> None:
     return moves
 
 
+
+def draw_paired(axes_left, axes_right, points, meta: pd.DataFrame,
+                scenario: str) -> list[dict]:
+    """Two panels on one embedding, and arrows only where something moved.
+
+    The two-panel layout produced a rail per population when every population
+    got an arrow: shared coordinates mean an unmoved population is the same
+    point in both panels, and the line between them is horizontal and as wide
+    as the gap. Drawing only the displacements leaves at most two arrows in any
+    scenario, so the rails are gone and what is left is the movement. Presence
+    and absence are then read by comparing the panels, which is the one thing
+    this layout does better than a single frame.
+    """
+    from matplotlib import patheffects
+
+    source = (meta["condition"] == "source").to_numpy()
+    population = meta["population"].to_numpy()
+    limits = (points[:, 0].min() - 1, points[:, 0].max() + 1,
+              points[:, 1].min() - 1, points[:, 1].max() + 1)
+
+    for axes, mask, label in ((axes_left, source, "source"),
+                              (axes_right, ~source, "target")):
+        axes.scatter(points[~mask, 0], points[~mask, 1], s=2.5, c="#eeeeea",
+                     linewidths=0, zorder=1)
+        for name in sorted(set(population[mask])):
+            rows = mask & (population == name)
+            axes.scatter(points[rows, 0], points[rows, 1], s=5,
+                         c=PALETTE.get(name, "#333333"), linewidths=0, zorder=3)
+            centre = points[rows].mean(axis=0)
+            axes.text(centre[0], centre[1], name, fontsize=7,
+                      fontweight="bold", ha="center", va="center", zorder=8,
+                      color=PALETTE.get(name, "#333333"),
+                      path_effects=[patheffects.withStroke(linewidth=2.2,
+                                                           foreground="white")])
+        axes.set_xlim(limits[0], limits[1])
+        axes.set_ylim(limits[2], limits[3])
+        axes.set_xticks([])
+        axes.set_yticks([])
+        axes.set_title(label, fontsize=7, color="#55555a", pad=2)
+        for spine in axes.spines.values():
+            spine.set_color("#d8d8d2")
+            spine.set_linewidth(0.6)
+
+    def centroid(side, name):
+        rows = side & (population == name)
+        return points[rows].mean(axis=0) if rows.sum() else None
+
+    def spread(side, name) -> float:
+        rows = side & (population == name)
+        if rows.sum() < 2:
+            return float("inf")
+        block = points[rows]
+        return float(np.sqrt(((block - block.mean(axis=0)) ** 2).sum(axis=1).mean()))
+
+    source_names = sorted(set(population[source]))
+    target_names = sorted(set(population[~source]))
+    descendants = {name: [name] for name in source_names}
+    if scenario == "S4_bifurcation" and "B" in descendants:
+        descendants["B"] = [n for n in ("B1", "B2") if n in target_names]
+    matched = {c for children in descendants.values() for c in children}
+
+    moves = []
+    for name in source_names:
+        start = centroid(source, name)
+        children = [c for c in descendants[name] if c in target_names]
+        if start is None:
+            continue
+        if not children:
+            axes_left.scatter([start[0]], [start[1]], s=230, facecolors="none",
+                              edgecolors=C_REJECT, linewidths=1.5, zorder=6)
+            axes_left.annotate(name + " gone", xy=tuple(start), xytext=(0, -14),
+                               textcoords="offset points", fontsize=6.4,
+                               color=C_REJECT, ha="center", zorder=7)
+            continue
+        for child in children:
+            end = centroid(~source, child)
+            shift = float(np.linalg.norm(end - start))
+            reference = min(spread(source, name), spread(~source, child))
+            moves.append({"population": name, "child": child,
+                          "shift": round(shift, 3),
+                          "own_spread": round(reference, 3),
+                          "drawn": bool(shift > reference)})
+            if shift <= reference:
+                continue
+            axes_left.add_artist(ConnectionPatch(
+                xyA=tuple(start), coordsA=axes_left.transData,
+                xyB=tuple(end), coordsB=axes_right.transData,
+                arrowstyle="-|>", mutation_scale=11, linewidth=1.4,
+                color="#1a1a1f", zorder=9, clip_on=False))
+    for name in target_names:
+        if name in matched:
+            continue
+        end = centroid(~source, name)
+        axes_right.scatter([end[0]], [end[1]], s=230, facecolors="none",
+                           edgecolors=C_REJECT, linewidths=1.5, zorder=6)
+        axes_right.annotate(name + " new", xy=tuple(end), xytext=(0, -14),
+                            textcoords="offset points", fontsize=6.4,
+                            color=C_REJECT, ha="center", zorder=7)
+    return moves
+
+
+def draw_schematic(axes, scenario: str) -> None:
+    """The same six scenarios drawn rather than computed.
+
+    No counts, no embedding: populations are discs on a ring at fixed places,
+    so every scenario has the same geometry and the only thing that differs
+    between panels is what the scenario says. A UMAP spends most of its area on
+    where the clusters happened to land, which is noise for a figure whose job
+    is to say what the question is. This version cannot show that the method
+    works and is not meant to; it says what it is being asked.
+    """
+    from matplotlib.patches import Circle
+
+    ring = {name: (np.cos(angle), np.sin(angle)) for name, angle in
+            zip(BASE[:6], np.linspace(np.pi / 2, np.pi / 2 - 2 * np.pi, 6,
+                                      endpoint=False))}
+    ring["G"] = (0.0, 0.0)
+    ring["O"] = (-0.34, 0.30)
+    present_source = set(BASE[:6])
+    present_target = set(BASE[:6])
+    moved: dict[str, list[str]] = {}
+    ringed_source: set[str] = set()
+    ringed_target: set[str] = set()
+
+    if scenario == "S0_clean_movement":
+        moved = {"B": ["B"]}
+    elif scenario == "S1_extinction":
+        present_target.discard("A")
+        ringed_source.add("A")
+    elif scenario == "S2_emergence":
+        present_target.add("G")
+        ringed_target.add("G")
+    elif scenario == "S3_source_outlier":
+        present_source.add("O")
+        ringed_source.add("O")
+    elif scenario == "S4_bifurcation":
+        moved = {"B": ["B1", "B2"]}
+        present_target.discard("B")
+        present_target.update({"B1", "B2"})
+        base = np.asarray(ring["B"])
+        ring["B1"] = tuple(base + np.array([-0.30, -0.62]))
+        ring["B2"] = tuple(base + np.array([0.52, -0.40]))
+
+    sizes = {name: 0.16 for name in ring}
+    if scenario == "S5_abundance_shift":
+        heavy = {"A": 0.23, "B": 0.20, "C": 0.17, "D": 0.13, "E": 0.10, "F": 0.09}
+
+    for name in sorted(present_source):
+        centre = ring[name]
+        radius = (heavy[name] if scenario == "S5_abundance_shift" and name in heavy
+                  else sizes[name])
+        axes.add_patch(Circle(centre, radius, facecolor="none",
+                              edgecolor="#9a9a94", linewidth=1.1, zorder=3))
+    for name in sorted(present_target):
+        centre = ring[name]
+        radius = sizes[name] * (0.62 if scenario == "S5_abundance_shift"
+                                and name in ("A", "B", "C") else 1.0)
+        if scenario == "S5_abundance_shift" and name in ("D", "E", "F"):
+            radius = sizes[name] * 1.35
+        axes.add_patch(Circle(centre, radius * 0.72,
+                              facecolor=PALETTE.get(name, "#333333"),
+                              edgecolor="none", alpha=0.9, zorder=4))
+        axes.text(centre[0], centre[1], name, fontsize=7.6, fontweight="bold",
+                  ha="center", va="center", color="white", zorder=6)
+    for name in sorted(present_source - present_target):
+        centre = ring[name]
+        axes.text(centre[0], centre[1], name, fontsize=7.6, fontweight="bold",
+                  ha="center", va="center", color="#9a9a94", zorder=6)
+
+    for parent, children in moved.items():
+        for child in children:
+            start = np.asarray(ring[parent], dtype=float)
+            end = np.asarray(ring[child], dtype=float)
+            if np.allclose(start, end):
+                end = start + np.array([0.52, -0.46])
+                ring[child] = tuple(end)
+                axes.add_patch(Circle(tuple(end), sizes[parent] * 0.72,
+                                      facecolor=PALETTE.get(child, "#333333"),
+                                      edgecolor="none", alpha=0.9, zorder=4))
+                axes.text(end[0], end[1], child, fontsize=7.6,
+                          fontweight="bold", ha="center", va="center",
+                          color="white", zorder=6)
+            axes.annotate("", xy=tuple(end), xytext=tuple(start),
+                          arrowprops=dict(arrowstyle="-|>", color="#1a1a1f",
+                                          linewidth=1.5, shrinkA=13, shrinkB=13,
+                                          mutation_scale=13), zorder=5)
+    for name, target_side in ((n, False) for n in ringed_source):
+        centre = ring[name]
+        axes.add_patch(Circle(centre, 0.24, facecolor="none",
+                              edgecolor=C_REJECT, linewidth=1.7, zorder=7))
+        axes.text(centre[0], centre[1] - 0.33, name + " gone", fontsize=6.6,
+                  color=C_REJECT, ha="center", zorder=7)
+    for name in ringed_target:
+        centre = ring[name]
+        axes.add_patch(Circle(centre, 0.24, facecolor="none",
+                              edgecolor=C_REJECT, linewidth=1.7, zorder=7))
+        axes.text(centre[0], centre[1] - 0.33, name + " new", fontsize=6.6,
+                  color=C_REJECT, ha="center", zorder=7)
+
+    axes.set_xlim(-1.62, 1.62)
+    axes.set_ylim(-1.52, 1.42)
+    axes.set_aspect("equal")
+    axes.set_xticks([])
+    axes.set_yticks([])
+    for spine in axes.spines.values():
+        spine.set_color("#d8d8d2")
+        spine.set_linewidth(0.6)
+
+
 def main() -> None:
     args = parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -460,9 +674,13 @@ def main() -> None:
                                  "genes": args.genes, "seed": args.seed}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(7.4, 9.6))
-        grid = figure.add_gridspec(3, 2, wspace=0.07, hspace=0.22,
-                                   left=0.02, right=0.98, top=0.895, bottom=0.03)
+        wide = args.layout == "paired"
+        figure = plt.figure(figsize=(7.4, 11.0) if wide else (7.4, 9.6))
+        grid = figure.add_gridspec(6 if wide else 3, 2,
+                                   wspace=0.05 if wide else 0.07,
+                                   hspace=0.55 if wide else 0.22,
+                                   left=0.02, right=0.98,
+                                   top=0.925 if wide else 0.895, bottom=0.03)
         for row, scenario in enumerate(SCENARIOS):
             if args.splatter_root:
                 counts, meta = load_splatter(args.splatter_root, scenario,
@@ -470,12 +688,24 @@ def main() -> None:
             else:
                 counts, meta = synthesise(scenario, args.n, args.genes,
                                           args.seed + row)
-            points = embed(counts, args.seed)
-            axes = figure.add_subplot(grid[row // 2, row % 2])
-            moves = draw_scenario(axes, points, meta, scenario)
+            if args.layout == "schematic":
+                axes = figure.add_subplot(grid[row // 2, row % 2])
+                draw_schematic(axes, scenario)
+                moves = []
+            elif args.layout == "paired":
+                points = embed(counts, args.seed)
+                left = figure.add_subplot(grid[row, 0])
+                right = figure.add_subplot(grid[row, 1])
+                moves = draw_paired(left, right, points, meta, scenario)
+                axes = left
+            else:
+                points = embed(counts, args.seed)
+                axes = figure.add_subplot(grid[row // 2, row % 2])
+                moves = draw_scenario(axes, points, meta, scenario)
             axes.set_title(TITLES[scenario], loc="left", fontsize=8.8,
-                           fontweight="semibold", pad=12)
-            axes.text(0.0, 1.015, READING[scenario], transform=axes.transAxes,
+                           fontweight="semibold", pad=16 if args.layout == "paired" else 12)
+            axes.text(0.0, 1.075 if args.layout == "paired" else 1.015,
+                      READING[scenario], transform=axes.transAxes,
                       fontsize=7, color="#55555a", va="bottom")
             report[scenario] = {
                 "cells": int(len(meta)),
