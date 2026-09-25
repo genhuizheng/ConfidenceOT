@@ -25,5 +25,7 @@ own, so read it straight after the run that produced it.
 The scoring is not here: metrics are defined in `BENCHMARK_METRICS.md`, so
 that a number cannot be chosen after seeing a plot.
 
-`benchmark_results/figure2/panel_e_schematic` is also a drawn panel, but it
-belongs to the Figure 2 composite and is written beside its sibling panels.
+Nothing else in the repository is a schematic. `figure2/panel_e_schematic`
+looked like one, but `make_figure2.py` stopped producing it when
+`panel_e_validation` took slot (e); the files were a leftover of the removed
+panel and have been deleted rather than moved.
