@@ -111,6 +111,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replicate", type=int, default=1)
     parser.add_argument("--genes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7300)
+    parser.add_argument("--umap-min-dist", type=float, default=0.6,
+                        help="Higher packs each cluster less tightly and "
+                             "leaves less empty field between them")
     parser.add_argument("--scenarios", default=None,
                         help="Comma-separated subset, e.g. "
                              "S0_clean_movement,S1_extinction,S2_emergence")
@@ -251,8 +254,8 @@ def load_splatter(root: Path, scenario: str, n: int, replicate: int
 # Embedding
 
 
-def embed(counts: np.ndarray, seed: int, representation: str = "logcpm"
-          ) -> np.ndarray:
+def embed(counts: np.ndarray, seed: int, representation: str = "logcpm",
+          min_dist: float = 0.3) -> np.ndarray:
     """One joint embedding of both sides, through the standard route.
 
     log CPM, top-variance genes, gene scaling, PCA, then UMAP. The scaling step
@@ -282,7 +285,7 @@ def embed(counts: np.ndarray, seed: int, representation: str = "logcpm"
     dense = dense / np.where(deviation > 1e-8, deviation, 1.0)
     components = PCA(n_components=min(30, dense.shape[0] - 1, dense.shape[1]),
                      random_state=seed).fit_transform(dense)
-    return umap.UMAP(n_neighbors=30, min_dist=0.3, random_state=seed,
+    return umap.UMAP(n_neighbors=30, min_dist=min_dist, random_state=seed,
                      verbose=False).fit_transform(components)
 
 
@@ -683,108 +686,107 @@ SUBJECT = {
 }
 
 
-def draw_shared(figure, grid, scenarios, loaded, seed: int) -> dict:
-    """One embedding for several scenarios, then one panel each.
+def draw_shared(figure, grid, scenarios, loaded, seed: int,
+                min_dist: float = 0.6) -> dict:
+    """Source on the left, target on the right, one row per scenario.
 
-    The R generator builds a single Splatter pool per (N, replicate) and every
-    scenario selects its cells from it, so the scenarios share an expression
-    model and can honestly share a map. Embedding them together means a
-    population lands in the same place in all the panels: the reader learns
-    the layout once and then reads only what changed, instead of re-finding
-    six clusters in each panel.
+    The two panels share one embedding, which is what makes them comparable:
+    the R generator builds a single Splatter pool per (N, replicate) and every
+    scenario selects from it, so a population occupies the same coordinates
+    wherever it is drawn. A cluster in the left panel with nothing at that
+    position on the right is a population the target does not have, and that
+    absence is the whole question.
 
-    Only the population a scenario is about is labelled. The others are there
-    because a scenario is a difference against a background, and a background
-    that is named in every panel stops being background.
+    No arrows between the panels. An arrow joining the same coordinates in two
+    panels is horizontal and as long as the gap between them whatever the data
+    does, so it says nothing while looking like it says something. The reading
+    here is a comparison of two pictures, which needs no line drawn on it.
+
+    The position a population has vacated is marked, because an empty patch of
+    white is not visible as an absence unless the eye is sent there.
     """
     from matplotlib import patheffects
 
     counts = np.vstack([block[0] for block in loaded])
-    offsets, start = [], 0
+    offsets, cursor = [], 0
     for block in loaded:
-        offsets.append((start, start + block[0].shape[0]))
-        start += block[0].shape[0]
-    points = embed(counts, seed)
+        offsets.append((cursor, cursor + block[0].shape[0]))
+        cursor += block[0].shape[0]
+    points = embed(counts, seed, min_dist=min_dist)
 
-    report = {}
-    for index, (scenario, (_, meta)) in enumerate(zip(scenarios, loaded)):
-        lo, hi = offsets[index]
-        local = points[lo:hi]
-        axes = figure.add_subplot(grid[0, index])
+    margin = 0.045 * max(np.ptp(points[:, 0]), np.ptp(points[:, 1]))
+    limits = (points[:, 0].min() - margin, points[:, 0].max() + margin,
+              points[:, 1].min() - margin, points[:, 1].max() + margin)
+
+    report: dict = {}
+    for row, scenario in enumerate(scenarios):
+        lo, hi = offsets[row]
+        local, meta = points[lo:hi], loaded[row][1]
         source = (meta["condition"] == "source").to_numpy()
         population = meta["population"].to_numpy()
         subject = SUBJECT.get(scenario)
+        colour = PALETTE.get(subject, C_REJECT)
+        held_by = "source" if subject in set(population[source]) else "target"
 
-        # The whole shared map in pale grey, so each panel is read against the
-        # same background rather than against its own extent.
-        axes.scatter(points[:, 0], points[:, 1], s=1.2, c="#f2f2ee",
-                     linewidths=0, zorder=1)
-        other = population != subject if subject else np.ones(len(meta), bool)
-        axes.scatter(local[other & source, 0], local[other & source, 1], s=7,
-                     facecolors="none", edgecolors="#b9b9b2", linewidths=0.45,
-                     zorder=2)
-        axes.scatter(local[other & ~source, 0], local[other & ~source, 1],
-                     s=4, c="#9d9d95", linewidths=0, zorder=3)
+        panels = {}
+        for column, (side, mask) in enumerate((("source", source),
+                                               ("target", ~source))):
+            axes = figure.add_subplot(grid[row, column])
+            panels[side] = axes
+            rest = mask & (population != subject)
+            axes.scatter(local[rest, 0], local[rest, 1], s=13, c="#cfcfc8",
+                         linewidths=0, zorder=2)
+            here = mask & (population == subject)
+            if here.sum():
+                axes.scatter(local[here, 0], local[here, 1], s=26, c=colour,
+                             linewidths=0, zorder=5)
+                centre = local[here].mean(axis=0)
+                axes.text(centre[0], centre[1] + 2.0, subject, fontsize=11,
+                          fontweight="bold", ha="center", va="bottom",
+                          color=colour, zorder=9,
+                          path_effects=[patheffects.withStroke(
+                              linewidth=3.0, foreground="white")])
+            else:
+                # The vacated position. Without the mark the panel is simply
+                # missing a cluster, and a missing cluster among six is not
+                # something a reader finds by looking.
+                where = local[population == subject].mean(axis=0)
+                axes.scatter([where[0]], [where[1]], s=620, facecolors="none",
+                             edgecolors=C_REJECT, linewidths=2.0,
+                             linestyle=(0, (3, 2)), zorder=6)
+                axes.text(where[0], where[1] + 2.0,
+                          f"no {subject}", fontsize=10.5, fontweight="bold",
+                          ha="center", va="bottom", color=C_REJECT, zorder=9,
+                          path_effects=[patheffects.withStroke(
+                              linewidth=3.0, foreground="white")])
+            axes.set_xlim(limits[0], limits[1])
+            axes.set_ylim(limits[2], limits[3])
+            axes.set_xticks([])
+            axes.set_yticks([])
+            for spine in axes.spines.values():
+                spine.set_color("#dcdcd6")
+                spine.set_linewidth(0.7)
+            if row == 0:
+                axes.text(0.5, 1.045, side, transform=axes.transAxes,
+                          fontsize=10, color="#44444a", ha="center",
+                          va="bottom")
 
-        if subject is None:
-            # The control. Nothing to single out, so the reading is the
-            # absence of any mark: every cluster carries both an open source
-            # ring and a filled target dot.
-            report[scenario] = {
-                "populations_on_both_sides": sorted(
-                    set(population[source]) & set(population[~source])),
-                "source_only": sorted(set(population[source])
-                                      - set(population[~source])),
-                "target_only": sorted(set(population[~source])
-                                      - set(population[source]))}
-            axes.text(0.5, 0.045, "no population is missing from either side",
-                      transform=axes.transAxes, fontsize=7.4, color="#6a6a62",
-                      ha="center", style="italic", zorder=9)
-        else:
-            colour = PALETTE.get(subject, C_REJECT)
-            rows_source = source & (population == subject)
-            rows_target = ~source & (population == subject)
-            # Drawn in the style of the side it is actually on: an open ring
-            # for a source population, a filled dot for a target one. The
-            # earlier version filled both, which said "target" about a
-            # population that exists only in the source.
-            if rows_source.sum():
-                axes.scatter(local[rows_source, 0], local[rows_source, 1],
-                             s=19, facecolors="none", edgecolors=colour,
-                             linewidths=1.0, zorder=5)
-            if rows_target.sum():
-                axes.scatter(local[rows_target, 0], local[rows_target, 1],
-                             s=11, c=colour, linewidths=0, zorder=6)
-            centre = (local[rows_target] if rows_target.sum()
-                      else local[rows_source]).mean(axis=0)
-            axes.scatter([centre[0]], [centre[1]], s=430, facecolors="none",
-                         edgecolors=C_REJECT, linewidths=1.9, zorder=7)
-            side = "source only" if not rows_target.sum() else "target only"
-            axes.text(centre[0], centre[1] + 1.5, subject, fontsize=10,
-                      fontweight="bold", ha="center", va="bottom",
-                      color=colour, zorder=9,
-                      path_effects=[patheffects.withStroke(linewidth=2.8,
-                                                           foreground="white")])
-            axes.text(centre[0], centre[1] - 1.6, side, fontsize=6.8,
-                      ha="center", va="top", color=C_REJECT, zorder=9,
-                      path_effects=[patheffects.withStroke(linewidth=2.4,
-                                                           foreground="white")])
-            report[scenario] = {"subject": subject, "side": side,
-                                "cells": int(max(rows_source.sum(),
-                                                 rows_target.sum()))}
-        margin = 0.035 * max(np.ptp(points[:, 0]), np.ptp(points[:, 1]))
-        axes.set_xlim(points[:, 0].min() - margin, points[:, 0].max() + margin)
-        axes.set_ylim(points[:, 1].min() - margin,
-                      points[:, 1].max() + 2.4 * margin)
-        axes.set_xticks([])
-        axes.set_yticks([])
-        axes.set_title(TITLES[scenario], loc="left", fontsize=9.2,
-                       fontweight="semibold", pad=10)
-        axes.text(0.0, 1.012, READING[scenario], transform=axes.transAxes,
-                  fontsize=7.2, color="#55555a", va="bottom")
-        for spine in axes.spines.values():
-            spine.set_color("#e0e0da")
-            spine.set_linewidth(0.6)
+        panels["source"].text(
+            0.0, 1.115 if row == 0 else 1.02, TITLES[scenario],
+            transform=panels["source"].transAxes, fontsize=10.5,
+            fontweight="semibold", ha="left", va="bottom")
+        # One arrow, between the panels, for the direction of the question --
+        # not one per population, which is the version that produced rails.
+        figure.add_artist(ConnectionPatch(
+            xyA=(1.008, 0.5), coordsA=panels["source"].transAxes,
+            xyB=(-0.008, 0.5), coordsB=panels["target"].transAxes,
+            arrowstyle="-|>", mutation_scale=26, linewidth=2.4,
+            color="#6a6a62"))
+        report[scenario] = {
+            "subject": subject, "present_on": held_by,
+            "cells": int((population == subject).sum()),
+            "reading": (f"{subject} is in the {held_by} and absent from the "
+                        f"other side")}
     return report
 
 
@@ -809,32 +811,14 @@ def main() -> None:
             else synthesise(scenario, args.n, args.genes, args.seed + index)
             for index, scenario in enumerate(chosen)]
         with mpl.rc_context(STYLE):
-            figure = plt.figure(figsize=(3.25 * len(chosen), 3.75))
-            grid = figure.add_gridspec(1, len(chosen), wspace=0.055,
-                                       left=0.012, right=0.988, top=0.845,
-                                       bottom=0.035)
-            report["shared_embedding"] = draw_shared(figure, grid, chosen,
-                                                     loaded, args.seed)
-            figure.text(0.012, 0.985,
-                        "One embedding, three questions. All three scenarios "
-                        "draw their cells from a single Splatter pool, so a "
-                        "population sits in the\nsame place in every panel: "
-                        "the map is learned once and each panel shows only "
-                        "what changed. Grey is the unchanged background.",
-                        fontsize=7.4, color="#55555a", va="top",
-                        linespacing=1.55)
-            figure.legend(handles=[
-                Line2D([], [], marker="o", linestyle="", markerfacecolor="none",
-                       markeredgecolor="#8a8a84", markeredgewidth=0.9,
-                       label="source", markersize=6),
-                Line2D([], [], marker="o", linestyle="", color="#8a8a84",
-                       label="target", markersize=5),
-                Line2D([], [], marker="o", linestyle="", markerfacecolor="none",
-                       markeredgecolor=C_REJECT, markeredgewidth=1.8,
-                       label="no counterpart: reject", markersize=10),
-            ], loc="upper right", ncol=3, frameon=False, fontsize=7.4,
-                bbox_to_anchor=(0.988, 1.012), columnspacing=1.8,
-                handletextpad=0.5)
+            figure = plt.figure(figsize=(7.4, 3.5 * len(chosen)))
+            grid = figure.add_gridspec(
+                len(chosen), 2, wspace=0.055, hspace=0.14,
+                left=0.010, right=0.990,
+                top=1 - 0.085 / len(chosen), bottom=0.015)
+            report["shared_embedding"] = draw_shared(
+                figure, grid, chosen, loaded, args.seed, args.umap_min_dist)
+            report["umap_min_dist"] = args.umap_min_dist
             for suffix in ("png", "pdf"):
                 figure.savefig(args.out / f"scenario_umap.{suffix}",
                                bbox_inches="tight")
