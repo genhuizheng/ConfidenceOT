@@ -41,13 +41,12 @@ alone defines a task that can be passed by doing nothing.
 
 | metric | definition | target | column | emitted by |
 |---|---|---|---|---|
-| false rejection rate | `#{ŷ_i = reject} / n` | **0** | `source_rejection_rate` | `scripts/validate_depth_null_specificity.py` |
-| retained fraction under the sign rule | fraction with `c_i < c`, before any budget is enforced | **1** | `sign_rule_retained_fraction` | same, and `cancer_metastasis/25_diagnose_gate_covariates.py` |
+| false rejection rate | `#{ŷ_i = reject} / n` | **0** | `source_rejection_rate` | pending the rebuilt benchmark |
+| retained fraction under the sign rule | fraction with `c_i < c`, before any budget is enforced | **1** | `sign_rule_retained_fraction` | `cancer_metastasis/25_diagnose_gate_covariates.py` |
 | nuisance AUC | Mann–Whitney AUC of `x_i` separating the two gate classes, **positive class = retained** | **0.5** | `auc_total_counts`, `auc_detected_genes` | `25_diagnose_gate_covariates.py` |
 | cost–nuisance correlation | Spearman(`c_i`, `x_i`) over all primary cells | **0** | `spearman_decision_cost_total_counts`, `..._detected_genes` | same |
 | coupling–nuisance correlation | Spearman(`x_i`, `x̄_i`) where `x̄_i = Σ_j π_ij x_j / Σ_j π_ij` is the nuisance barycentre of where cell `i` is sent | **0** | see note below | `cancer_metastasis/26_diagnose_pairing_quality.py` |
 | depth-residual gate agreement | Jaccard between the gate and a same-size gate built on the cost with the nuisance ranks regressed out | **1** | `depth_residual_gate_jaccard` | `25_diagnose_gate_covariates.py` |
-| representation axis correlation | largest `abs` Spearman between any principal component and the nuisance | **0** | `max_abs_rho_pc_total_counts`, `max_abs_spearman_pc_depth` | `validate_depth_null_specificity.py`, `26_diagnose_pairing_quality.py` |
 
 Note on the coupling metric: what is implemented today is the
 reciprocal-dominant-edge and nearest-neighbour variant —
@@ -94,7 +93,7 @@ Not as one number per method. Each metric is a **dose–response curve**:
   0.9 in the depth arm; the spread of genes detected at fixed total counts in
   the gene-detection arm.
 - one line per preprocessing: `logcpm`, `rank256`, `rank256_ds`,
-  `rank256_ds_cos`, and the others in `scripts/screen_depth_configurations.sh`.
+  `rank256_ds_cos`.
 - a method is invariant if its curve is **flat at the target**, not merely low
   at one setting.
 

@@ -1,38 +1,29 @@
-"""What sequencing depth and the low-gene effect actually do to an embedding.
+"""The two technical nuisances, as a problem statement and as a benchmark.
 
-The ablation reports a number called "axis vs total counts". It is the
-correlation between the leading axis of the representation and each cell's
-sequencing depth, and as a number it says nothing to anyone. This is the
-picture it was measured on.
+Every cell in the problem figure is drawn from one population, so there is no
+biology to find: the cells differ only in how deeply they were sequenced, or
+in how many genes were detected. Any structure the embedding shows is the
+artefact and nothing else, which is something a reader can check by looking.
 
-**Every cell here is drawn from one population.** There is no biology to find:
-the cells differ only in how deeply they were sequenced, or in how many genes
-were detected. So any structure that appears in the embedding is the artefact
-and nothing else, and the question "is the artefact still there after the
-preprocessing" is something a reader can answer by looking rather than by
-trusting a correlation coefficient.
+The two are not the same thing and the figures keep them apart.
 
-Two nuisances, and they are not the same thing.
+**Sequencing depth, nCount.** Cells get different total counts. This is what
+most normalisations are built to remove.
 
-**Sequencing depth.** Cells get different total counts -- the spread the
-benchmark uses is sd(log depth) 0.9, roughly a twenty-fold range between the
-shallowest and deepest cell. This is the thing most normalisations are built
-to remove.
+**Gene detection, nFeature.** Total counts are held *fixed* and the cells
+differ in how many distinct genes those counts land on. Depth normalisation
+cannot touch it, because the totals it would divide by already agree.
 
-**The low-gene effect, or dropout.** Total counts are held *fixed* and the
-cells differ in how many distinct genes those counts land on: the same library
-concentrated in a few genes, or spread over many. Depth normalisation does not
-touch this, because the totals already agree. It is the covariate the
-ablation's third column was about and the one nothing in the factorial
-removes.
-
-Each row is one preprocessing. Each column colours the same embedding by one
-nuisance. A gradient means the embedding is arranging cells by that nuisance;
-an even mix of colours means it is not.
+Two figures are written. ``problem.png`` puts the embedding one wants beside
+the embedding one gets, for each nuisance. ``benchmark.png`` states the
+setting the method is scored in: counts, an OT coupling, a rejection gate and
+the mask that is correct, in the case where the same populations are in both
+samples and in the case where one is missing from the target. The coupling and
+the gate there are drawn, not run.
 
 Usage:
 
-    python scripts/make_nuisance_umap.py --out benchmark_results/nuisance_umap
+    python scripts/make_nuisance_umap.py
 """
 
 from __future__ import annotations
@@ -52,14 +43,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from make_journal_figure import STYLE  # noqa: E402
 
-ARMS = (
-    ("logcpm", "log CPM"),
-    ("rank256_ds_cos", "rank + DS + cos"),
-)
-NUISANCES = (
-    ("total_counts", "sequencing depth", "total counts per cell"),
-    ("detected_genes", "low-gene effect", "genes detected per cell"),
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -149,8 +132,6 @@ def embed(counts: np.ndarray, label: str, seed: int) -> np.ndarray:
     return umap.UMAP(n_neighbors=60, min_dist=1.4, spread=1.8,
                      random_state=seed, verbose=False).fit_transform(joint)
 
-
-C_REJECT = "#c4553b"
 
 NUISANCE = {
     "depth": {

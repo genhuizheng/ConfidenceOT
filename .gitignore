@@ -41,7 +41,6 @@ scripts/*
 !scripts/aggregate_confidenceot_grid.py
 !scripts/finalize_splatter_scaling_benchmark.py
 !scripts/make_journal_figure.py
-!scripts/make_figure2.py
 !scripts/make_method_schematic.py
 !scripts/tacc/
 scripts/tacc/*
