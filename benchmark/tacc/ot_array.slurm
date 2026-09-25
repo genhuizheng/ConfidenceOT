@@ -27,10 +27,14 @@
 # the target to reject. The defaults are 0.95 on both sides, and any non-zero
 # budget with the floor off leaves the gate unconstrained.
 
+# No set -u. TACC's module files and conda's shell functions read
+# variables they do not define -- module load tacc-apptainer sources a
+# completion script that reads BASH_COMPLETION_DEBUG -- and under set -u
+# that kills the job in seconds with nothing in the log. Every expansion
+# below carries its own default.
 set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
-set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}

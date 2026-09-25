@@ -25,7 +25,6 @@
 # and scoring reports what is missing instead of refusing to run.
 
 set -eo pipefail
-set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}

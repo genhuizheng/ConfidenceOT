@@ -19,9 +19,13 @@
 # resubmitting one index reruns exactly one replicate. Anything already
 # carrying its completion flag is skipped unless CONFIDENCEOT_BENCH_FORCE=1.
 
+# No set -u. TACC's module files and conda's shell functions read
+# variables they do not define -- module load tacc-apptainer sources a
+# completion script that reads BASH_COMPLETION_DEBUG -- and under set -u
+# that kills the job in seconds with nothing in the log. Every expansion
+# below carries its own default.
 set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
-set -u
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}
