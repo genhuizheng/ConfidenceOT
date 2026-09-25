@@ -75,7 +75,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def one_population(nuisance: str, n_cells: int, n_genes: int, depth_sd: float,
-                   rng: np.random.Generator) -> np.ndarray:
+                   rng: np.random.Generator, uniform: bool = False
+                   ) -> np.ndarray:
     """One population carrying exactly one nuisance, and nothing else.
 
     Every cell draws from the same relative expression profile, so a figure
@@ -100,10 +101,16 @@ def one_population(nuisance: str, n_cells: int, n_genes: int, depth_sd: float,
     counts = np.zeros((n_cells, n_genes))
     for index in range(n_cells):
         if nuisance == "depth":
-            weights, library = profile, 3000.0 * rng.lognormal(0.0, depth_sd)
+            library = (3000.0 if uniform
+                       else 3000.0 * rng.lognormal(0.0, depth_sd))
+            weights = profile
         else:
-            width = int(np.clip(rng.lognormal(np.log(0.30), 0.60), 0.03, 1.0)
-                        * n_genes)
+            # The ideal arm holds the nuisance fixed rather than removing the
+            # cells that carry it: what is being shown is the measurement
+            # without the artefact, not a different set of cells.
+            fraction = 0.30 if uniform else float(
+                np.clip(rng.lognormal(np.log(0.30), 0.60), 0.03, 1.0))
+            width = int(fraction * n_genes)
             weights = np.zeros(n_genes)
             weights[order[:width]] = profile[order[:width]]
             weights /= weights.sum()
@@ -139,9 +146,9 @@ def embed(counts: np.ndarray, label: str, seed: int) -> np.ndarray:
 NUISANCE = {
     "depth": {
         "title": "sequencing depth",
+        "ideal": "every cell sequenced equally",
+        "affected": "cells sequenced to different depths",
         "colour_by": "total counts per cell",
-        "problem": ("Cells from one population, differing only in how deeply "
-                    "they were sequenced."),
         "construction": ("the same depth spread on both sides,\n"
                          "sd(log depth) 0 to 0.9"),
         "why_both": ("On one side only this would be a batch effect between\n"
@@ -151,9 +158,9 @@ NUISANCE = {
     },
     "breadth": {
         "title": "low-gene effect",
+        "ideal": "every cell detects the same genes",
+        "affected": "same total counts, different genes detected",
         "colour_by": "genes detected per cell",
-        "problem": ("Cells from one population with identical total counts, "
-                    "differing only in how many genes those counts land on."),
         "construction": ("the same breadth spread on both sides,\n"
                          "total counts held at 3,000"),
         "why_both": ("Depth normalisation cannot touch this: the totals\n"
@@ -168,10 +175,11 @@ def measure(points: np.ndarray, values: np.ndarray) -> float:
     """How strongly the embedding orders cells by the nuisance.
 
     The largest absolute correlation between the nuisance and any direction in
-    the plane, which is what "axis vs total counts" means and what the
-    gradient in the picture is. Taking the first coordinate alone would report
-    a small number whenever UMAP happened to lay the gradient out diagonally.
+    the plane. Taking the first coordinate alone would report a small number
+    whenever UMAP happened to lay the gradient out diagonally.
     """
+    if np.ptp(values) == 0:
+        return 0.0
     centred = points - points.mean(axis=0)
     best = 0.0
     for angle in np.linspace(0.0, np.pi, 180, endpoint=False):
@@ -181,51 +189,65 @@ def measure(points: np.ndarray, values: np.ndarray) -> float:
     return best
 
 
-def problem_figure(nuisance: str, counts: np.ndarray, out: Path,
+def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
                    seed: int) -> dict:
-    """What the nuisance does to the embedding, before and after."""
-    facts = NUISANCE[nuisance]
-    values = (counts.sum(axis=1) if nuisance == "depth"
-              else (counts > 0).sum(axis=1))
-    colour = np.log10(values + 1.0)
+    """The two problems, each as the data one wants beside the data one has.
+
+    No preprocessing appears here and none should. A problem statement that
+    names log CPM is asking the reader to care about a method before they have
+    been told what the method is for; the left panel is what the measurement
+    would look like if the nuisance did not exist, and the right panel is what
+    it looks like because it does.
+
+    Every cell in every panel is from one population, so the left panel is a
+    single featureless cloud and the right panel's structure is entirely the
+    nuisance. Nothing is labelled beyond the titles: a gradient either appears
+    or it does not, and a caption saying which would be doing the reader's
+    looking for them.
+    """
     report: dict = {}
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.4, 3.2))
-        grid = figure.add_gridspec(1, 2, wspace=0.06, left=0.02, right=0.875,
-                                   top=0.80, bottom=0.04)
-        for column, (label, arm) in enumerate(ARMS):
-            points = embed(counts, label, seed)
-            rho = measure(points, colour)
-            report[label] = round(rho, 3)
-            axes = figure.add_subplot(grid[0, column])
-            dots = axes.scatter(points[:, 0], points[:, 1], c=colour, s=11,
-                                cmap="viridis", linewidths=0)
-            axes.set_xticks([])
-            axes.set_yticks([])
-            for spine in axes.spines.values():
-                spine.set_color("#d8d8d2")
-                spine.set_linewidth(0.6)
-            axes.set_title(f"({chr(97 + column)})  {arm}", loc="left",
-                           fontsize=8.4, fontweight="semibold", pad=4)
-            axes.text(0.025, 0.025,
-                      ("cells ordered by the nuisance" if rho > 0.5
-                       else "no ordering by the nuisance"),
-                      transform=axes.transAxes, fontsize=7.4,
-                      color="#c4553b" if rho > 0.5 else "#2f7d4f",
-                      va="bottom")
-            if column == len(ARMS) - 1:
-                bar = figure.colorbar(dots, ax=axes, fraction=0.055, pad=0.025)
-                bar.set_label(facts["colour_by"], fontsize=7)
-                bar.ax.tick_params(labelsize=6.5)
-                bar.outline.set_linewidth(0.5)
-        figure.text(0.02, 0.975,
-                    f"{facts['title']}: the problem\n{facts['problem']} "
-                    "Nothing here is biology, so any structure is the "
-                    "artefact.",
-                    fontsize=7.8, color="#55555a", va="top", linespacing=1.55)
+        figure = plt.figure(figsize=(6.6, 6.0))
+        outer = figure.add_gridspec(2, 1, hspace=0.30, left=0.015,
+                                    right=0.885, top=0.945, bottom=0.02)
+        for row, nuisance in enumerate(("depth", "breadth")):
+            facts = NUISANCE[nuisance]
+            inner = outer[row].subgridspec(1, 2, wspace=0.05)
+            for column, kind in enumerate(("ideal", "affected")):
+                rng = np.random.default_rng(seed + row)
+                spread = depth_sd if kind == "affected" else 0.0
+                counts = one_population(nuisance, cells, genes, spread, rng,
+                                        uniform=kind == "ideal")
+                values = (counts.sum(axis=1) if nuisance == "depth"
+                          else (counts > 0).sum(axis=1))
+                points = embed(counts, "logcpm", seed)
+                report[f"{nuisance}/{kind}"] = round(
+                    measure(points, values.astype(float)), 3)
+                axes = figure.add_subplot(inner[0, column])
+                colour = np.log10(values + 1.0)
+                dots = axes.scatter(points[:, 0], points[:, 1], c=colour,
+                                    s=11, cmap="viridis", linewidths=0,
+                                    vmin=colour.min() - 1e-9,
+                                    vmax=colour.max() + 1e-9)
+                axes.set_xticks([])
+                axes.set_yticks([])
+                for spine in axes.spines.values():
+                    spine.set_color("#d8d8d2")
+                    spine.set_linewidth(0.6)
+                axes.set_title(facts[kind], loc="center", fontsize=8,
+                               color="#55555a", pad=4)
+                if column == 1:
+                    bar = figure.colorbar(dots, ax=axes, fraction=0.055,
+                                          pad=0.025)
+                    bar.set_label(facts["colour_by"], fontsize=7)
+                    bar.ax.tick_params(labelsize=6.5)
+                    bar.outline.set_linewidth(0.5)
+                if column == 0:
+                    axes.text(0.0, 1.14, f"({chr(97 + row)})  {facts['title']}",
+                              transform=axes.transAxes, fontsize=8.4,
+                              fontweight="semibold", ha="left", va="bottom")
         for suffix in ("png", "pdf"):
-            figure.savefig(out / f"{nuisance}_problem.{suffix}",
-                           bbox_inches="tight")
+            figure.savefig(out / f"problem.{suffix}", bbox_inches="tight")
         plt.close(figure)
     return report
 
@@ -302,20 +324,14 @@ def main() -> None:
                     "plane, which is what the ablation's axis-versus-covariate "
                     "column reports"),
     }
+    report["problem"] = problem_figure(args.out, args.cells, args.genes,
+                                       args.depth_sd, args.seed)
     for nuisance in ("depth", "breadth"):
-        counts = one_population(nuisance, args.cells, args.genes,
-                                args.depth_sd,
-                                np.random.default_rng(args.seed))
-        values = (counts.sum(axis=1) if nuisance == "depth"
-                  else (counts > 0).sum(axis=1))
-        report[f"{nuisance}_range"] = [float(values.min()), float(values.max())]
-        report[nuisance] = problem_figure(nuisance, counts, args.out, args.seed)
         benchmark_figure(nuisance, args.out, args.seed)
     (args.out / "diagnostics.json").write_text(json.dumps(report, indent=2),
                                                encoding="utf-8")
     print(json.dumps(report, indent=2))
-    for name in ("depth_problem", "depth_benchmark",
-                 "breadth_problem", "breadth_benchmark"):
+    for name in ("problem", "depth_benchmark", "breadth_benchmark"):
         print(args.out / f"{name}.png")
 
 
