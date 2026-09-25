@@ -2,8 +2,14 @@
 # Submit the whole benchmark: generation, then OT, then scoring.
 #
 #   bash benchmark/tacc/submit.sh --dry-run
+#   bash benchmark/tacc/submit.sh --stage container   # build the R image once
 #   bash benchmark/tacc/submit.sh --sizes "1000" --replicates 1
 #   bash benchmark/tacc/submit.sh --stage ot          # resubmit one stage
+#
+# Every stage goes through here, including the one-off container build, for a
+# reason that cost a job already: SLURM opens the log file named in #SBATCH -o
+# before the script runs, so a script cannot create its own log directory. The
+# directory is made here, before anything is submitted.
 #
 # The chain is held together by afterok dependencies, so a failed generation
 # stops the OT rather than running it against files that are not there.
@@ -73,6 +79,17 @@ submit() {
     echo "submitted $description as $id" >&2
     echo "$id"
 }
+
+# ---- stage 0: the container, when that is the R route -----------------------
+if [[ "$stage" == "container" ]]; then
+    submit "container build" \
+        --export=ALL,CONFIDENCEOT_BENCH_ROOT="$root",CONFIDENCEOT_REPO="$repo" \
+        "$repo/benchmark/tacc/build_container.slurm" > /dev/null
+    echo
+    echo "root        $root"
+    (( dry_run )) && echo "nothing was submitted (--dry-run)"
+    exit 0
+fi
 
 # ---- stage 1: generation and construction -----------------------------------
 generation_tasks=$(( ${#size_array[@]} * replicates ))
