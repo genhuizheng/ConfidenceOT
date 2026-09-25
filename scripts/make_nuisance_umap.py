@@ -171,7 +171,7 @@ NUISANCE = {
 }
 
 
-def measure(points: np.ndarray, values: np.ndarray) -> float:
+def measure(points: np.ndarray, values: np.ndarray) -> tuple[float, float]:
     """How strongly the embedding orders cells by the nuisance.
 
     The largest absolute correlation between the nuisance and any direction in
@@ -179,14 +179,18 @@ def measure(points: np.ndarray, values: np.ndarray) -> float:
     whenever UMAP happened to lay the gradient out diagonally.
     """
     if np.ptp(values) == 0:
-        return 0.0
+        return 0.0, 0.0
     centred = points - points.mean(axis=0)
-    best = 0.0
+    best, best_angle = 0.0, 0.0
     for angle in np.linspace(0.0, np.pi, 180, endpoint=False):
         projection = (centred[:, 0] * np.cos(angle)
                       + centred[:, 1] * np.sin(angle))
-        best = max(best, abs(float(np.corrcoef(projection, values)[0, 1])))
-    return best
+        value = float(np.corrcoef(projection, values)[0, 1])
+        if abs(value) > best:
+            # Point the arrow the way the nuisance increases, so its direction
+            # carries the sign and not only the axis.
+            best, best_angle = abs(value), angle + (np.pi if value < 0 else 0.0)
+    return best, best_angle
 
 
 def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
@@ -221,8 +225,8 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 values = (counts.sum(axis=1) if nuisance == "depth"
                           else (counts > 0).sum(axis=1))
                 points = embed(counts, "logcpm", seed)
-                report[f"{nuisance}/{kind}"] = round(
-                    measure(points, values.astype(float)), 3)
+                strength, angle = measure(points, values.astype(float))
+                report[f"{nuisance}/{kind}"] = round(strength, 3)
                 axes = figure.add_subplot(inner[0, column])
                 colour = np.log10(values + 1.0)
                 dots = axes.scatter(points[:, 0], points[:, 1], c=colour,
@@ -236,6 +240,26 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     spine.set_linewidth(0.6)
                 axes.set_title(facts[kind], loc="center", fontsize=8,
                                color="#55555a", pad=4)
+                if strength > 0.5:
+                    # Drawn across the middle of the cloud, in the direction
+                    # the nuisance increases. The reader sees the ordering
+                    # rather than being told about it.
+                    centre = points.mean(axis=0)
+                    # Sized from the cloud's extent along the arrow's own
+                    # direction, not from the larger of the two axes: a
+                    # diagonal gradient on a wide cloud otherwise runs off the
+                    # top of the panel and over the title.
+                    along = (points - centre) @ np.array([np.cos(angle),
+                                                          np.sin(angle)])
+                    reach = 0.62 * float(np.percentile(np.abs(along), 92))
+                    step = np.array([np.cos(angle), np.sin(angle)]) * reach
+                    axes.annotate(
+                        "", xy=tuple(centre + step),
+                        xytext=tuple(centre - step),
+                        arrowprops=dict(arrowstyle="-|>", color="#33333a",
+                                        linewidth=1.2, mutation_scale=11,
+                                        shrinkA=0, shrinkB=0, alpha=0.85),
+                        zorder=9, annotation_clip=True)
                 if column == 1:
                     bar = figure.colorbar(dots, ax=axes, fraction=0.055,
                                           pad=0.025)
