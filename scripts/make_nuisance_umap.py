@@ -294,10 +294,11 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     source cell is carried onto each target cell. Below it the two things
     that get compared: the gate the coupling and its costs induce, one call
     per source cell, and the mask that is correct -- in two cases. In one the
-    biology is shared on both sides, so every cell stays matchable and the
-    mask is solid. In the other a population has no counterpart, and only its
-    cells should be rejected. One case without the other is a task that can be
-    passed by never rejecting, or by rejecting everything.
+    same populations are in both samples, so the correct decision is to keep
+    every cell. In the other a population is missing from the target, and the
+    correct decision is to reject only that population. One case without the
+    other is a task that can be passed by never rejecting, or by rejecting
+    everything.
 
     The coupling and the gate here are schematic. This is the setting, not the
     result: what a real run puts in those two places is the measurement, and
@@ -473,19 +474,29 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 transform=figure.transFigure, arrowstyle="-|>",
                 mutation_scale=7, linewidth=0.9, color="#9a9a94"))
             for index, label in enumerate(("gate (schematic)", "ground truth")):
-                figure.text(case_x[0] - 0.012, 0.651 - base - 0.038 * index,
+                figure.text(case_x[0] - 0.012, 0.657 - base - 0.042 * index,
                             label, fontsize=7.0, color="#55555a", ha="right",
                             va="center")
-            for column, (header, pair) in enumerate((
-                    ("all populations shared", (returned, truth)),
-                    ("one population has no counterpart",
+            # Two layers, because they are two different statements. The
+            # header says what is in the samples; the line above the mask says
+            # what the correct decision is. Run together as one phrase, a
+            # reader cannot tell which part is the setting and which part is
+            # the answer being scored against.
+            for column, (header, decision, pair) in enumerate((
+                    ("the same populations in source and target",
+                     "keep every cell", (returned, truth)),
+                    ("one population is missing from the target",
+                     "reject only that population",
                      (returned_unmatched, truth_unmatched)))):
                 figure.text(case_x[column] + case_w / 2, 0.682 - base, header,
                             fontsize=7.0, color="#55555a", ha="center",
                             va="top")
+                figure.text(case_x[column] + case_w / 2, 0.627 - base,
+                            decision, fontsize=7.0, color="#55555a",
+                            ha="center", va="bottom")
                 for index, values in enumerate(pair):
                     gate = figure.add_axes(
-                        [case_x[column], 0.642 - base - 0.038 * index,
+                        [case_x[column], 0.648 - base - 0.042 * index,
                          case_w, 0.018])
                     gate.imshow(values[None, :], aspect="auto",
                                 cmap=mpl.colors.ListedColormap([C_DROP, C_KEEP]),
