@@ -286,7 +286,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     shown = 46
     report: dict = {}
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.9, 3.9))
+        figure = plt.figure(figsize=(6.9, 3.3))
         for row, nuisance in enumerate(("depth", "breadth")):
             facts = NUISANCE[nuisance]
             rng = np.random.default_rng(seed + 200 + row)
@@ -310,9 +310,13 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                       max(source_values.max(), target_values.max()))
             scale = np.log10(np.asarray(bounds) + 1.0)
 
-            axes = figure.add_axes([0.015, 0.545 - 0.495 * row, 0.80, 0.335])
+            # Tighter rows with a reserved band at the foot: the
+            # closing note, the lower panel's verdict and the second
+            # colour bar were all landing on each other.
+            axes = figure.add_axes([0.015, 0.615 - 0.350 * row,
+                                    0.785, 0.250])
             axes.set_xlim(-1.5, shown + 0.5)
-            axes.set_ylim(-0.55, 1.62)
+            axes.set_ylim(-0.66, 1.52)
             axes.axis("off")
             x = np.arange(shown)
             for index in range(shown):
@@ -326,14 +330,14 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     vmin=scale[0], vmax=scale[1])
                 axes.text(-0.9, y, side, fontsize=7.6, ha="right",
                           va="center", color="#55555a")
-            axes.text(0.0, 1.50, f"({chr(97 + row)})  {facts['title']}",
+            axes.text(0.0, 1.40, f"({chr(97 + row)})  {facts['title']}",
                       fontsize=8.4, fontweight="semibold", ha="left",
                       transform=axes.get_yaxis_transform(which="grid"))
-            axes.text(shown * 0.5, 1.30, facts["construction"].replace("\n", "  "),
-                      fontsize=7.4, ha="center", va="bottom",
+            axes.text(shown - 0.5, 1.40, facts["construction"].replace("\n", "  "),
+                      fontsize=7.4, ha="right", va="bottom",
                       color="#b07d2b" if nuisance == "depth" else "#1f6f8b")
-            axes.text(shown * 0.5, -0.50, "every cell matched: reject nothing",
-                      fontsize=8, fontweight="bold", color="#2f7d4f",
+            axes.text(shown * 0.5, -0.62, "every cell matched: reject nothing",
+                      fontsize=7.8, fontweight="bold", color="#2f7d4f",
                       ha="center", va="bottom")
             bar = figure.colorbar(
                 dots, ax=axes, fraction=0.035, pad=0.015, aspect=9)
@@ -344,7 +348,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                 "correct_answer": "reject nothing",
                                 "nuisance_on": "both sides"}
 
-        figure.text(0.015, 0.02,
+        figure.text(0.015, 0.035,
                     "Carried by one side only, either spread would be a batch "
                     "effect between samples: a different problem with its own "
                     "methods.\nCarried by both, a complete coupling exists, "
