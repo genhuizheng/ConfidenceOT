@@ -1,0 +1,78 @@
+Bootstrap: docker
+From: rocker/r-ver:4.4.1
+
+# The image the benchmark's Splatter generation runs in.
+#
+# Built rather than pulled. The account already carries rocker/r-ver-4.4.sif
+# and it cannot be installed into: the image has compilers but not the
+# development headers Bioconductor needs, and it is read only. Nineteen
+# packages went down that way once already. Installing during a build writes
+# into the image while it is still writable, so both halves of that problem
+# disappear at once.
+#
+# Built rather than pulling bioconductor/bioconductor_docker because this
+# cluster is aarch64 and that image is not published for every architecture.
+# rocker/r-ver is multi-arch, so the base resolves on both.
+#
+# The R version is pinned in the From line and the Bioconductor release in
+# %post, so the image is the record of which Splatter produced a dataset --
+# and 10_generate_splatter.R writes the version it actually loaded into
+# generation.json, so the two can be checked against each other.
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # The headers, named rather than pulled in by a metapackage, so that a
+    # build failure names the library it was missing.
+    apt-get install -y --no-install-recommends \
+        libxml2-dev \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        zlib1g-dev \
+        libglpk-dev \
+        libfontconfig1-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libfreetype6-dev \
+        libpng-dev \
+        libtiff5-dev \
+        libjpeg-dev
+    rm -rf /var/lib/apt/lists/*
+
+    R -q -e 'install.packages(c("BiocManager", "jsonlite", "Matrix"), repos = "https://cloud.r-project.org")'
+    R -q -e 'BiocManager::install(version = "3.20", ask = FALSE, update = FALSE)'
+    R -q -e 'BiocManager::install(c("splatter", "SingleCellExperiment", "SummarizedExperiment"), ask = FALSE, update = FALSE)'
+
+    # Fail the build, not the first job that uses it -- and not by loading the
+    # packages, which is a weaker check than it looks. Bioconductor packages
+    # built from source on aarch64 can install cleanly and then misbehave at
+    # run time, so the build runs the actual call the benchmark makes, with
+    # the same arguments, and looks at the object that comes back.
+    R -q -e 'suppressPackageStartupMessages({library(splatter); library(Matrix); library(jsonlite)}); \
+      params <- setParams(newSplatParams(), batchCells = c(50, 50), batch.facLoc = 0, batch.facScale = 0, group.prob = rep(1/5, 5), dropout.type = "none", nGenes = 200, seed = 1); \
+      sim <- splatSimulate(params, method = "groups", verbose = FALSE); \
+      counts <- counts(sim); \
+      stopifnot(dim(counts) == c(200, 100), is.numeric(as.numeric(counts[1, 1])), sum(counts) > 0, length(unique(colData(sim)$Group)) == 5, length(unique(colData(sim)$Batch)) == 2, all(is.finite(rowData(sim)$GeneMean))); \
+      writeMM(as(counts, "CsparseMatrix"), tempfile()); \
+      cat("splatter", as.character(packageVersion("splatter")), "simulated", sum(counts), "counts on", R.version$platform, "\n")'
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    # Inside the image the library is the image's own. A host R_LIBS_USER
+    # pointing at packages compiled against another R would load here and
+    # break in ways that look like Splatter's fault.
+    export R_LIBS_USER=/usr/local/lib/R/site-library
+
+%labels
+    Purpose ConfidenceOT technical benchmark, Splatter generation
+    Base rocker/r-ver:4.4.1
+    Bioconductor 3.20
+
+%help
+    Rscript inside this image has splatter, SingleCellExperiment, Matrix and
+    jsonlite, which is everything benchmark/tacc/10_generate_splatter.R loads.
+
+    Build:   sbatch benchmark/tacc/build_container.slurm
+    Use:     CONFIDENCEOT_RSCRIPT=benchmark/tacc/rscript.sh
