@@ -246,7 +246,7 @@ trim_job=$(submit \
   -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J "cot_trim_$dataset" \
   -o "$result/logs/trim_${dataset}_%j.out" \
   -e "$result/logs/trim_${dataset}_%j.err" \
-  --wrap="$(wrap "python cancer_metastasis/35_trim_manifest_to_gate.py $source_manifest $gate $trimmed")")
+  --wrap="$(wrap "python cancer_metastasis/35_trim_manifest_to_gate.py $source_manifest $trimmed --gate-root $gate --dataset-id $accession")")
 echo "J1 trim        $trim_job -> $trimmed"
 
 # J2. Pseudobulk, arrayed over patients. Every variable set explicitly.

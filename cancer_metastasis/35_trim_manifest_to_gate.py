@@ -17,10 +17,26 @@ What counts as present is the pair having a ``cell_confidence.csv`` under the
 gate root, which is the file ``21_`` reads. A directory alone is not enough: a
 pair whose task died part-way leaves one behind.
 
+``01_build_pair_manifest.py`` scans a whole converted root and emits one
+manifest covering every deposit in it, so the pan-cancer manifest holds 84
+patients across ten cancer types. A single dataset's chain needs its own rows
+out of that, and before the transport has run there is no gate to select them
+by -- hence ``--dataset-id``, which restricts by the manifest's own column and
+needs no gate at all.
+
+The two restrictions compose. Before the transport, pass ``--dataset-id``
+alone. After it, pass the gate root as well, or only the gate root: a gate
+root belongs to one dataset, so selecting on it selects the dataset too.
+
 Usage:
 
+    # before the transport: one dataset out of the pan-cancer manifest
     python cancer_metastasis/35_trim_manifest_to_gate.py \\
-        ORIGINAL_MANIFEST_CSV GATE_ROOT TRIMMED_MANIFEST_CSV
+        PANCANCER_MANIFEST_CSV OUT.csv --dataset-id GSE315534
+
+    # after it: the pairs the gate root can actually supply
+    python cancer_metastasis/35_trim_manifest_to_gate.py \\
+        ORIGINAL_MANIFEST_CSV OUT.csv --gate-root GATE_ROOT
 """
 
 from __future__ import annotations
@@ -36,10 +52,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("manifest_csv", type=Path)
-    parser.add_argument("gate_root", type=Path)
     parser.add_argument("output_csv", type=Path)
+    parser.add_argument("--gate-root", type=Path, default=None,
+                        help="Keep only pairs this completed gate root can "
+                             "supply a gate for")
+    parser.add_argument("--dataset-id", action="append", default=None,
+                        dest="dataset_ids", metavar="GSE",
+                        help="Keep only these dataset_id values; repeatable. "
+                             "Needs no gate, so it works before the transport.")
     parser.add_argument("--scope", default="scope_malignant")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.gate_root is None and not args.dataset_ids:
+        parser.error("pass --gate-root, --dataset-id, or both")
+    return args
 
 
 def gated_pairs(gate_root: Path, scope: str) -> set[str]:
@@ -52,19 +77,37 @@ def gated_pairs(gate_root: Path, scope: str) -> set[str]:
 
 def main() -> None:
     args = parse_args()
-    if not args.gate_root.is_dir():
-        raise FileNotFoundError(f"Gate root does not exist: {args.gate_root}")
     manifest = pd.read_csv(args.manifest_csv)
     if "pair_id" not in manifest.columns:
         raise RuntimeError(f"{args.manifest_csv} has no pair_id column")
 
-    present = gated_pairs(args.gate_root, args.scope)
-    if not present:
-        raise RuntimeError(
-            f"No */{args.scope}/*/cell_confidence.csv under {args.gate_root}. "
-            f"Either the scope is wrong or this is not a completed gate root."
-        )
-    keep = manifest["pair_id"].astype(str).isin(present)
+    keep = pd.Series(True, index=manifest.index)
+    present: set[str] = set()
+    if args.dataset_ids:
+        if "dataset_id" not in manifest.columns:
+            raise RuntimeError(
+                f"{args.manifest_csv} has no dataset_id column, so it cannot "
+                f"be restricted to {args.dataset_ids}")
+        known = sorted(set(manifest["dataset_id"].astype(str)))
+        unknown = [value for value in args.dataset_ids if value not in known]
+        if unknown:
+            # Named and absent is a typo, not an empty dataset, and an empty
+            # result here would look like a dataset with no eligible pairs.
+            raise RuntimeError(
+                f"dataset_id {unknown} not in {args.manifest_csv}; it holds "
+                f"{known}")
+        keep &= manifest["dataset_id"].astype(str).isin(args.dataset_ids)
+    if args.gate_root is not None:
+        if not args.gate_root.is_dir():
+            raise FileNotFoundError(f"Gate root does not exist: {args.gate_root}")
+        present = gated_pairs(args.gate_root, args.scope)
+        if not present:
+            raise RuntimeError(
+                f"No */{args.scope}/*/cell_confidence.csv under "
+                f"{args.gate_root}. Either the scope is wrong or this is not a "
+                f"completed gate root."
+            )
+        keep &= manifest["pair_id"].astype(str).isin(present)
     dropped = manifest.loc[~keep, "pair_id"].astype(str).tolist()
     trimmed = manifest[keep].copy()
     if trimmed.empty:
@@ -76,10 +119,12 @@ def main() -> None:
         # exactly what was dropped and which patients lost pairs, which is a
         # better guard than a number nobody can set right.
         raise RuntimeError(
-            f"No manifest row matched a gated pair under {args.gate_root}. "
-            f"The manifest and the gate root describe different data; check "
-            f"the manifest's dataset_id column against the accession in the "
-            f"gate root's name."
+            f"No manifest row survived. dataset_id filter "
+            f"{args.dataset_ids or 'none'}, gate root "
+            f"{args.gate_root or 'none'}. If a gate root was given, the "
+            f"manifest and the gate root describe different data; check the "
+            f"manifest's dataset_id column against the accession in the gate "
+            f"root's name."
         )
     # pair_index is positional and the array worker strides over rows, so it is
     # renumbered rather than left with gaps that would no longer match.
@@ -106,10 +151,11 @@ def main() -> None:
     fraction = len(trimmed) / len(manifest)
     report = {
         "manifest_csv": str(args.manifest_csv),
-        "gate_root": str(args.gate_root),
+        "gate_root": str(args.gate_root) if args.gate_root else None,
+        "dataset_ids": args.dataset_ids,
         "output_csv": str(args.output_csv),
         "manifest_rows": int(len(manifest)),
-        "gated_pairs_found": int(len(present)),
+        "gated_pairs_found": int(len(present)) if args.gate_root else None,
         "rows_kept": int(len(trimmed)),
         "rows_dropped": int(len(dropped)),
         "retained_fraction": round(fraction, 4),
