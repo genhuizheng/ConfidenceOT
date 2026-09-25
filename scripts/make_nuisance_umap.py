@@ -155,8 +155,10 @@ C_REJECT = "#c4553b"
 NUISANCE = {
     "depth": {
         "title": "sequencing depth",
-        "ideal": "every cell sequenced equally",
-        "affected": "cells sequenced to different depths",
+        # Named for what the panel is rather than for what was done to it, and
+        # in the same words as the benchmark figure: nCount and nFeature.
+        "ideal": "ideal: no nCount variation",
+        "affected": "real: nCount varies",
         "colour_by": "total counts per cell",
         "construction": ("the same depth spread on both sides,\n"
                          "sd(log depth) 0 to 0.9"),
@@ -167,8 +169,8 @@ NUISANCE = {
     },
     "breadth": {
         "title": "low-gene effect",
-        "ideal": "every cell detects the same genes",
-        "affected": "same total counts, different genes detected",
+        "ideal": "ideal: no nFeature variation",
+        "affected": "real: nFeature varies, nCount fixed",
         "colour_by": "genes detected per cell",
         "construction": ("the same breadth spread on both sides,\n"
                          "total counts held at 3,000"),
@@ -289,9 +291,9 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     Each row reads left to right and then down. Two count matrices, one per
     sample, with the perturbation named on the strips above them. Between them
     the object the method actually produces -- the coupling, how much of each
-    primary cell is carried onto each metastatic cell. Below it the two things
+    source cell is carried onto each target cell. Below it the two things
     that get compared: the gate the coupling and its costs induce, one call
-    per primary cell, and the mask that is correct.
+    per source cell, and the mask that is correct.
 
     The coupling and the gate here are schematic. This is the setting, not the
     result: what a real run puts in those two places is the measurement, and
@@ -323,7 +325,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     C_KEEP, C_DROP = "#2f7d4f", "#c4553b"
     panels: dict[tuple[str, str], dict] = {}
     for nuisance in ("depth", "breadth"):
-        for side in ("primary", "metastasis"):
+        for side in ("source", "target"):
             counts = one_population(nuisance, shown_cells, genes, depth_sd,
                                     rng, profile=profile)
             total = counts.sum(axis=1)
@@ -350,9 +352,9 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     truth = np.ones(shown_cells, dtype=bool)
     report: dict = {}
 
-    x_primary, x_meta, matrix_w = 0.100, 0.665, 0.290
+    x_source, x_target, matrix_w = 0.100, 0.665, 0.290
     plan_w = 0.128
-    x_plan = (x_primary + matrix_w + x_meta) / 2 - plan_w / 2
+    x_plan = (x_source + matrix_w + x_target) / 2 - plan_w / 2
     x_gate = x_plan + plan_w / 2 - matrix_w / 2
     with mpl.rc_context(STYLE):
         figure = plt.figure(figsize=(7.2, 8.0))
@@ -363,11 +365,11 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             base = 0.445 * row
             # No subtitle and no restatement of the answer: the title
             # names the variable and the solid ground-truth bar is the answer.
-            figure.text(x_primary - 0.058, 0.972 - base,
+            figure.text(x_source - 0.058, 0.972 - base,
                         f"({chr(97 + row)})  {title}", fontsize=8.6,
                         fontweight="semibold", ha="left", va="top")
 
-            for x0, side in ((x_primary, "primary"), (x_meta, "metastasis")):
+            for x0, side in ((x_source, "source"), (x_target, "target")):
                 panel = panels[(nuisance, side)]
                 figure.text(x0 + matrix_w / 2, 0.936 - base, side, fontsize=7.8,
                             color="#55555a", ha="center", va="bottom")
@@ -385,20 +387,16 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     for spine in strip.spines.values():
                         spine.set_color("#d8d8d2")
                         spine.set_linewidth(0.6)
-                    if x0 == x_primary:
+                    if x0 == x_source:
                         strip.set_ylabel(name, fontsize=7.0, color=colour,
                                          rotation=0, ha="right", va="center",
                                          labelpad=5)
                     low, high = panel[key].min(), panel[key].max()
                     if key == "total" and high - low < 0.10 * high:
-                        # Held fixed by construction: the residual spread is
-                        # Poisson noise on the total, so quoting the extremes
-                        # would read as a range the arm does not have.
-                        strip.text(0.5, 1.45,
-                                   f"{round(panel[key].mean(), -2):,.0f} in "
-                                   "every cell", transform=strip.transAxes,
-                                   fontsize=6.6, ha="center", va="bottom",
-                                   color=colour)
+                        # Held fixed by construction, which the row title
+                        # already says. Printing the mean on a bar whose point
+                        # is that it has no range invited it to be read as one.
+                        pass
                     else:
                         # The cells are sorted, so the ends of the strip are
                         # the ends of the range and no colour bar is needed.
@@ -417,7 +415,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 for spine in heat.spines.values():
                     spine.set_color("#d8d8d2")
                     spine.set_linewidth(0.6)
-                if x0 == x_primary:
+                if x0 == x_source:
                     heat.set_ylabel("genes", fontsize=7.0,
                                     color="#55555a", labelpad=5)
                 heat.set_xlabel(
@@ -435,22 +433,22 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             for spine in plan.spines.values():
                 spine.set_color("#9a9a94")
                 spine.set_linewidth(0.7)
-            plan.set_ylabel("primary cells", fontsize=6.8, color="#55555a",
+            plan.set_ylabel("source cells", fontsize=6.8, color="#55555a",
                             labelpad=4)
-            plan.set_xlabel("metastatic cells", fontsize=6.8, color="#55555a",
+            plan.set_xlabel("target cells", fontsize=6.8, color="#55555a",
                             labelpad=3)
             plan.set_title("OT coupling  $\\pi_{ij}$", fontsize=7.8, pad=3)
             # Clear of the coupling's own y label, which the arrow used to
             # run straight through.
             for x_from, x_to in (
-                    (x_primary + matrix_w + 0.008, x_plan - 0.030),
-                    (x_plan + plan_w + 0.008, x_meta - 0.008)):
+                    (x_source + matrix_w + 0.008, x_plan - 0.030),
+                    (x_plan + plan_w + 0.008, x_target - 0.008)):
                 figure.add_artist(mpl.patches.FancyArrowPatch(
                     (x_from, 0.784 - base), (x_to, 0.784 - base),
                     transform=figure.transFigure, arrowstyle="-|>",
                     mutation_scale=8, linewidth=0.9, color="#9a9a94"))
 
-            # Coupling and costs, down to one call per primary cell, against
+            # Coupling and costs, down to one call per source cell, against
             # the call that is correct.
             for index, (values, label) in enumerate((
                     (returned, "rejection gate"),
@@ -473,7 +471,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     spine.set_color("#d8d8d2")
                     spine.set_linewidth(0.6)
 
-            reference = panels[(nuisance, "primary")]
+            reference = panels[(nuisance, "source")]
             report[title] = {
                 "biology": "one population, identical in both samples",
                 "correct_answer": "reject nothing",
@@ -487,14 +485,14 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                               "rejection follows the nuisance")}
 
         bar = figure.colorbar(image, cax=figure.add_axes(
-            [x_primary, 0.082, 0.135, 0.011]), orientation="horizontal")
+            [x_source, 0.082, 0.135, 0.011]), orientation="horizontal")
         ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
                  if value <= float(np.expm1(top))]
         bar.set_ticks(np.log1p(ticks))
         bar.set_ticklabels([f"{value:,}" for value in ticks])
         bar.ax.tick_params(labelsize=6.5, length=2, pad=1.5)
         bar.outline.set_linewidth(0.5)
-        figure.text(x_primary + 0.150, 0.088, "counts (white = 0)",
+        figure.text(x_source + 0.150, 0.088, "counts (white = 0)",
                     fontsize=7.2, color="#55555a", va="center")
         for index, (colour, text) in enumerate(((C_KEEP, "kept"),
                                                 (C_DROP, "rejected"))):
@@ -508,11 +506,10 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 spine.set_linewidth(0.6)
             figure.text(0.666 + 0.128 * index, 0.088, text, fontsize=7.2,
                         color="#55555a", va="center")
-        # The metrics are definitions, not part of the setting, and they are
-        # written down in BENCHMARK_METRICS.md. Listing them here put four
-        # formulae under a figure whose job is to say what is generated.
-        figure.text(x_primary, 0.030, "coupling and gate are schematic",
-                    fontsize=7.2, color="#8c8c86", va="center", style="italic")
+        # Nothing is written under the legend. The metrics are definitions
+        # and live in BENCHMARK_METRICS.md; that the coupling and the gate are
+        # drawn rather than run belongs in the caption of whatever the figure
+        # is placed in, not inside the figure.
 
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
