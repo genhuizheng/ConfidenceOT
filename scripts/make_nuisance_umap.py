@@ -267,22 +267,28 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
     """The benchmark's input, drawn as the matrix it is.
 
-    A cartoon of dots can only assert that total counts are held fixed. The
-    count matrix shows it: genes down, cells across, cells ordered by the
-    nuisance, with each cell's two totals drawn above the panel they belong to.
+    A cartoon of dots could only assert that total counts are held fixed, and
+    the version that did so encoded the nuisance as dot area drawn from a
+    distribution unconnected to the simulation -- so both rows were the same
+    random numbers and neither showed what it claimed. Everything here is the
+    generated counts: genes down, cells across, cells ordered by the nuisance.
 
-    That ordering is the whole figure. In (a) both totals climb together --
+    Colour does all of it. In the matrix, colour is the count and white is a
+    zero. Above each panel two strips colour every cell by its own nCount and
+    its own nFeature, on one scale across all four panels, so a strip that
+    does not change colour is a variable that does not change.
+
+    That is the figure. In (a) both strips run the full scale together --
     sequence a cell deeper and it detects more genes -- which is why the two
-    are so often treated as one variable. In (b) nCount is a flat line and
-    nFeature still climbs, so the white space is the only thing that changed.
-    Separating them is not pedantry: (b) is the case no depth normalisation
-    can reach, because the totals it would divide by already agree.
+    are so often treated as one variable. In (b) the nCount strip is one flat
+    colour and the nFeature strip still runs, so the white in the matrix is
+    the only thing that changed. Separating them is not pedantry: (b) is the
+    case no depth normalisation can reach, because the totals it would divide
+    by already agree.
 
-    White is a zero, so the white in (b) is the dropout, in the one place it
-    is ever visible: the matrix. Its edge is sharp because the construction is
-    exact and the genes are in expression order, not because real dropout has
-    a boundary; what is real is that the genes a sparse cell loses are the low
-    expressers.
+    The edge of the white is sharp because the construction is exact and the
+    genes are in expression order, not because real dropout has a boundary;
+    what is real is that the genes a sparse cell loses are the low expressers.
 
     The biology is identical in all four panels -- one population, one
     expression profile, both samples -- so every cell has a counterpart and
@@ -313,11 +319,16 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
     top = float(np.percentile(
         np.concatenate([q["matrix"].ravel() for q in panels.values()]), 99.5))
-    count_max = max(float(q["total"].max()) for q in panels.values()) * 1.08
+    # One scale per variable across all four panels. Scaled per panel instead,
+    # the fixed nCount in (b) would be stretched over the full colour map and
+    # its Poisson noise would look like the gradient in (a).
+    limits = {key: (min(float(q[key].min()) for q in panels.values()),
+                    max(float(q[key].max()) for q in panels.values()))
+              for key in ("total", "detected")}
     report: dict = {}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.8, 5.6))
+        figure = plt.figure(figsize=(6.8, 6.2))
         width, x_left = 0.425, 0.075
         for row, (nuisance, title, note) in enumerate((
                 ("depth", "sequencing depth",
@@ -326,7 +337,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 ("breadth", "gene detection and dropout",
                  "total counts held fixed: only the number of genes detected "
                  "changes"))):
-            base = 0.460 * row
+            base = 0.438 * row
             figure.text(x_left - 0.062, 0.985 - base,
                         f"({chr(97 + row)})  {title}", fontsize=8.6,
                         fontweight="semibold", ha="left", va="top")
@@ -341,28 +352,24 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             for column, side in enumerate(("primary", "metastasis")):
                 panel = panels[(nuisance, side)]
                 x0 = x_left + column * (width + 0.035)
-                cell_x = np.arange(len(panel["total"]))
-                figure.text(x0 + width / 2, 0.912 - base, side, fontsize=7.8,
+                figure.text(x0 + width / 2, 0.918 - base, side, fontsize=7.8,
                             color="#55555a", ha="center", va="bottom")
 
-                for index, (key, colour, ceiling, name) in enumerate((
-                        ("total", C_COUNT, count_max, "nCount"),
-                        ("detected", C_FEATURE, float(genes), "nFeature"))):
-                    track = figure.add_axes(
-                        [x0, 0.858 - base - 0.054 * index, width, 0.046])
-                    track.fill_between(cell_x, panel[key], color=colour,
-                                       alpha=0.85, linewidth=0)
-                    track.set_xlim(-0.5, len(cell_x) - 0.5)
-                    track.set_ylim(0, ceiling)
-                    track.set_xticks([])
-                    track.set_yticks([])
-                    for spine in track.spines.values():
-                        spine.set_visible(False)
-                    track.spines["bottom"].set_visible(True)
-                    track.spines["bottom"].set_color("#d8d8d2")
-                    track.spines["bottom"].set_linewidth(0.6)
+                for index, (key, colour, name) in enumerate((
+                        ("total", C_COUNT, "nCount"),
+                        ("detected", C_FEATURE, "nFeature"))):
+                    strip = figure.add_axes(
+                        [x0, 0.862 - base - 0.050 * index, width, 0.024])
+                    strip.imshow(panel[key][None, :], aspect="auto",
+                                 cmap="viridis", vmin=limits[key][0],
+                                 vmax=limits[key][1], interpolation="nearest")
+                    strip.set_xticks([])
+                    strip.set_yticks([])
+                    for spine in strip.spines.values():
+                        spine.set_color("#d8d8d2")
+                        spine.set_linewidth(0.6)
                     if column == 0:
-                        track.set_ylabel(name, fontsize=7.2, color=colour,
+                        strip.set_ylabel(name, fontsize=7.2, color=colour,
                                          rotation=0, ha="right", va="center",
                                          labelpad=6)
                     low, high = panel[key].min(), panel[key].max()
@@ -370,15 +377,22 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                         # Held fixed by construction: the residual spread is
                         # Poisson noise on the total, so quoting the extremes
                         # would read as a range the arm does not have.
-                        span = f"{round(panel[key].mean(), -2):,.0f} in every cell"
-                    elif key == "total":
-                        span = f"{low / 1000:.1f}k to {high / 1000:.1f}k"
+                        strip.text(0.5, 1.30,
+                                   f"{round(panel[key].mean(), -2):,.0f} in "
+                                   "every cell", transform=strip.transAxes,
+                                   fontsize=6.8, ha="center", va="bottom",
+                                   color=colour)
                     else:
-                        span = f"{low:,.0f} to {high:,.0f}"
-                    track.text(0.006, 0.94, span, transform=track.transAxes,
-                               fontsize=6.8, ha="left", va="top", color=colour)
+                        # The cells are sorted, so the two ends of the strip
+                        # are the two ends of the range and no colour bar is
+                        # needed to read it.
+                        for at, value, align in ((0.0, low, "left"),
+                                                 (1.0, high, "right")):
+                            strip.text(at, 1.30, f"{value:,.0f}",
+                                       transform=strip.transAxes, fontsize=6.8,
+                                       ha=align, va="bottom", color=colour)
 
-                heat = figure.add_axes([x0, 0.580 - base, width, 0.218])
+                heat = figure.add_axes([x0, 0.598 - base, width, 0.205])
                 image = heat.imshow(panel["matrix"], aspect="auto",
                                     cmap="Blues", vmin=0.0, vmax=top,
                                     interpolation="nearest")
@@ -408,22 +422,26 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                               "rejection follows the nuisance")}
 
         bar = figure.colorbar(image, cax=figure.add_axes(
-            [x_left, 0.072, 0.20, 0.013]), orientation="horizontal")
+            [x_left, 0.088, 0.18, 0.012]), orientation="horizontal")
         ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
                  if value <= float(np.expm1(top))]
         bar.set_ticks(np.log1p(ticks))
         bar.set_ticklabels([f"{value:,}" for value in ticks])
         bar.ax.tick_params(labelsize=6.5, length=2, pad=1.5)
         bar.outline.set_linewidth(0.5)
-        figure.text(x_left + 0.215, 0.078,
+        figure.text(x_left + 0.195, 0.094,
                     "counts for that gene in that cell; white is a zero, "
                     "the gene was not detected", fontsize=7.4,
                     color="#55555a", va="center")
+        figure.text(x_left, 0.052,
+                    "the strips are that cell's own nCount and nFeature, on "
+                    "one colour scale across all four panels",
+                    fontsize=7.4, color="#55555a", va="center")
         figure.text(x_left, 0.030,
                     "the biology is identical in all four panels -- one "
                     "population, both samples -- so every cell has a "
                     "counterpart", fontsize=7.4, color="#55555a", va="center")
-        figure.text(x_left, 0.006,
+        figure.text(x_left, 0.008,
                     "scored: how many cells are wrongly rejected, and whether "
                     "rejection follows nCount in (a) or nFeature in (b)",
                     fontsize=7.4, color="#8c8c86", va="center", style="italic")
