@@ -65,6 +65,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import ConnectionPatch  # noqa: E402
 
+import sys  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from make_journal_figure import STYLE  # noqa: E402
+
 SCENARIOS = ("S0_clean_movement", "S1_extinction", "S2_emergence",
              "S3_source_outlier", "S4_bifurcation", "S5_abundance_shift")
 
@@ -87,18 +91,14 @@ READING = {
 }
 
 BASE = ("A", "B", "C", "D", "E", "F", "G")
-STYLE = {
-    "figure.dpi": 130, "savefig.dpi": 400, "font.size": 8,
-    "axes.titlesize": 8.5, "axes.labelsize": 7.5,
-    "font.family": "serif", "mathtext.fontset": "cm",
-    "axes.spines.top": False, "axes.spines.right": False,
-}
+# Okabe-Ito, the palette the benchmark figure uses, so the two read as one
+# set of figures and both stay legible to a colourblind reader.
 PALETTE = {
-    "A": "#c0392b", "B": "#2e86c1", "B1": "#2e86c1", "B2": "#5dade2",
-    "C": "#28b463", "D": "#b7950b", "E": "#7d3c98", "F": "#5d6d7e",
-    "G": "#d35400", "O": "#c0392b",
+    "A": "#D55E00", "B": "#0072B2", "B1": "#0072B2", "B2": "#56B4E9",
+    "C": "#009E73", "D": "#E69F00", "E": "#CC79A7", "F": "#999999",
+    "G": "#56B4E9", "O": "#D55E00",
 }
-C_REJECT = "#c0392b"
+C_REJECT = "#c4553b"
 
 
 def parse_args() -> argparse.Namespace:
@@ -760,16 +760,16 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
             for name in sorted(set(population[mask])):
                 rows = mask & (population == name)
                 tint = PALETTE.get(name, "#8a8a84")
-                axes.scatter(local[rows, 0], local[rows, 1], s=58, c=tint,
+                axes.scatter(local[rows, 0], local[rows, 1], s=26, c=tint,
                              linewidths=0, alpha=0.9,
                              zorder=5 if name == subject else 3)
             here = mask & (population == subject)
             if here.sum():
                 centre = local[here].mean(axis=0)
-                axes.scatter([centre[0]], [centre[1]], s=2600,
+                axes.scatter([centre[0]], [centre[1]], s=1500,
                              facecolors="none", edgecolors=colour,
-                             linewidths=2.4, zorder=6)
-                axes.text(centre[0], centre[1], subject, fontsize=17,
+                             linewidths=1.5, zorder=6)
+                axes.text(centre[0], centre[1], subject, fontsize=11,
                           fontweight="bold", ha="center", va="center",
                           color="white", zorder=10,
                           path_effects=[patheffects.withStroke(
@@ -779,11 +779,12 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
                 # missing a cluster, and a missing cluster among six is not
                 # something a reader finds by looking.
                 where = local[population == subject].mean(axis=0)
-                axes.scatter([where[0]], [where[1]], s=2600,
+                axes.scatter([where[0]], [where[1]], s=1500,
                              facecolors="none", edgecolors=C_REJECT,
-                             linewidths=2.4, linestyle=(0, (4, 3)), zorder=6)
+                             linewidths=1.5, linestyle=(0, (3.5, 2.5)),
+                             zorder=6)
                 # Inside the empty ring, greyed: it names what is not there.
-                axes.text(where[0], where[1], subject, fontsize=17,
+                axes.text(where[0], where[1], subject, fontsize=11,
                           fontweight="bold", ha="center", va="center",
                           color=C_REJECT, alpha=0.42, zorder=10)
             axes.set_xlim(limits[0], limits[1])
@@ -791,24 +792,25 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
             axes.set_xticks([])
             axes.set_yticks([])
             for spine in axes.spines.values():
-                spine.set_color("#dcdcd6")
-                spine.set_linewidth(0.7)
+                spine.set_color("#d8d8d2")
+                spine.set_linewidth(0.6)
             if row == 0:
-                axes.text(0.5, 1.045, side, transform=axes.transAxes,
-                          fontsize=10, color="#44444a", ha="center",
-                          va="bottom")
+                axes.text(0.5, 1.02, side, transform=axes.transAxes,
+                          fontsize=7.5, color="#55555a",
+                          ha="center", va="bottom")
 
         panels["source"].text(
-            0.0, 1.115 if row == 0 else 1.02, TITLES[scenario],
-            transform=panels["source"].transAxes, fontsize=10.5,
+            0.0, 1.085 if row == 0 else 1.015,
+            f"({chr(97 + row)})  {TITLES[scenario]}",
+            transform=panels["source"].transAxes, fontsize=8.4,
             fontweight="semibold", ha="left", va="bottom")
         # One arrow, between the panels, for the direction of the question --
         # not one per population, which is the version that produced rails.
         figure.add_artist(ConnectionPatch(
             xyA=(1.008, 0.5), coordsA=panels["source"].transAxes,
             xyB=(-0.008, 0.5), coordsB=panels["target"].transAxes,
-            arrowstyle="-|>", mutation_scale=26, linewidth=2.4,
-            color="#6a6a62"))
+            arrowstyle="-|>", mutation_scale=13, linewidth=1.1,
+            color="#8c8c86"))
         drawn.update(set(population))
         report[scenario] = {
             "subject": subject, "present_on": held_by,
@@ -817,13 +819,13 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
                         f"other side")}
 
     figure.legend(
-        handles=[Line2D([], [], marker="o", linestyle="", markersize=8,
+        handles=[Line2D([], [], marker="o", linestyle="", markersize=6,
                         color=PALETTE.get(name, "#8a8a84"), label=name)
                  for name in sorted(drawn)]
-        + [Line2D([], [], marker="o", linestyle="", markersize=11,
+        + [Line2D([], [], marker="o", linestyle="", markersize=8,
                   markerfacecolor="none", markeredgecolor=C_REJECT,
-                  markeredgewidth=2.0, label="no counterpart")],
-        loc="lower center", ncol=len(drawn) + 1, frameon=False, fontsize=9,
+                  markeredgewidth=1.5, label="no counterpart")],
+        loc="lower center", ncol=len(drawn) + 1, frameon=False, fontsize=7.5,
         bbox_to_anchor=(0.5, -0.012), columnspacing=1.5, handletextpad=0.35)
     return report
 
@@ -849,7 +851,7 @@ def main() -> None:
             else synthesise(scenario, args.n, args.genes, args.seed + index)
             for index, scenario in enumerate(chosen)]
         with mpl.rc_context(STYLE):
-            figure = plt.figure(figsize=(7.4, 3.5 * len(chosen)))
+            figure = plt.figure(figsize=(6.9, 2.9 * len(chosen)))
             grid = figure.add_gridspec(
                 len(chosen), 2, wspace=0.055, hspace=0.14,
                 left=0.010, right=0.990,
