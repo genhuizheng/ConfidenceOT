@@ -52,8 +52,24 @@ fi
 
 # ---- Splatter ---------------------------------------------------------------
 if [[ "$force" == "1" || ! -f "$generated/GENERATION_DONE" ]]; then
-    conda activate "${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}"
-    Rscript "$repo/benchmark/tacc/10_generate_splatter.R" \
+    # The R is whatever CONFIDENCEOT_RSCRIPT names, so a conda
+    # environment, a bind-mounted library and an apptainer image are all
+    # the same to this job. Only the conda route needs the environment
+    # activated, and activating it is harmless for the others.
+    conda activate "${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}" || true
+    # Where install_splatter_dependencies.slurm puts Splatter. Inside a
+    # container this is the bind-mounted path, which is writable where
+    # the image is not.
+    export R_LIBS_USER=${CONFIDENCEOT_R_LIBRARY:-$repo/.r-library}
+    rscript=${CONFIDENCEOT_RSCRIPT:-Rscript}
+    if ! $rscript -e 'quit(status = !requireNamespace("splatter", quietly = TRUE))'; then
+        echo "splatter will not load for: $rscript" >&2
+        echo "  R_LIBS_USER=$R_LIBS_USER" >&2
+        echo "  install it with scripts/tacc/install_splatter_dependencies.slurm," >&2
+        echo "  or point CONFIDENCEOT_RSCRIPT at an R that has it" >&2
+        exit 4
+    fi
+    $rscript "$repo/benchmark/tacc/10_generate_splatter.R" \
         --out "$generated" \
         --n "$n_cells" \
         --replicate "$replicate" \
