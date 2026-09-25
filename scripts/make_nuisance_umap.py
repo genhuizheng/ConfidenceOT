@@ -405,12 +405,8 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 heat.set_xlabel("ordered by nCount", fontsize=6.6,
                                 color="#55555a", labelpad=3)
 
-        figure.text(0.035, 0.570,
-                    "all populations remain matchable at every level",
-                    fontsize=7.6, color=C_KEEP, ha="left", va="top")
-
         # ---- (b) the two ground-truth regimes --------------------------------
-        figure.text(0.035, 0.510, "(b)  evaluation cases", fontsize=8.6,
+        figure.text(0.035, 0.555, "(b)  evaluation cases", fontsize=8.6,
                     fontweight="semibold", ha="left", va="top")
 
         n = 48
@@ -431,10 +427,10 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 ("Case 2: one population unmatched", unmatched_gate,
                  ~unmatched, "reject only that population"))):
             x0 = case_x[column]
-            figure.text(x0, 0.482, title, fontsize=7.8,
+            figure.text(x0, 0.527, title, fontsize=7.8,
                         fontweight="semibold", ha="left", va="top")
             for line, values in enumerate((gate, truth)):
-                y = 0.430 - 0.040 * line
+                y = 0.475 - 0.040 * line
                 strip_row(figure, x0, y, case_w, 0.024,
                           values.astype(float), gate_map)
                 if column == 0:
@@ -442,24 +438,24 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                 ("example gate", "ground truth")[line],
                                 fontsize=7.0, color="#55555a", ha="right",
                                 va="center")
-            figure.text(x0, 0.382, reading, fontsize=7.4,
+            figure.text(x0, 0.427, reading, fontsize=7.4,
                         color=C_KEEP if column == 0 else C_DROP,
                         ha="left", va="top")
 
         # ---- legend ----------------------------------------------------------
         bar = figure.colorbar(image, cax=figure.add_axes(
-            [0.165, 0.305, 0.110, 0.013]), orientation="horizontal")
+            [0.165, 0.350, 0.110, 0.013]), orientation="horizontal")
         ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
                  if value <= float(np.expm1(top))]
         bar.set_ticks(np.log1p(ticks))
         bar.set_ticklabels([f"{value:,}" for value in ticks])
         bar.ax.tick_params(labelsize=6.2, length=2, pad=1.5)
         bar.outline.set_linewidth(0.5)
-        figure.text(0.290, 0.3115, "counts (white = 0)", fontsize=7.0,
+        figure.text(0.290, 0.3565, "counts (white = 0)", fontsize=7.0,
                     color="#55555a", va="center")
         for index, (colour, text) in enumerate(((C_KEEP, "kept"),
                                                 (C_DROP, "rejected"))):
-            swatch = figure.add_axes([0.470 + 0.130 * index, 0.305, 0.018,
+            swatch = figure.add_axes([0.470 + 0.130 * index, 0.350, 0.018,
                                       0.013])
             swatch.set_xticks([])
             swatch.set_yticks([])
@@ -467,13 +463,8 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             for spine in swatch.spines.values():
                 spine.set_color("#d8d8d2")
                 spine.set_linewidth(0.6)
-            figure.text(0.494 + 0.130 * index, 0.3115, text, fontsize=7.0,
+            figure.text(0.494 + 0.130 * index, 0.3565, text, fontsize=7.0,
                         color="#55555a", va="center")
-        figure.text(0.035, 0.272,
-                    "nCount is sequencing depth; nFeature is depth and "
-                    "detection loss together", fontsize=6.8,
-                    color="#8c8c86", ha="left", va="top", style="italic")
-
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
         plt.close(figure)
