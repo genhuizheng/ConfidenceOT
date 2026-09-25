@@ -41,6 +41,10 @@
 set -eo pipefail
 
 dataset=${1:-}
+# Set per arm below, and emptied here so the branch that chooses between
+# them cannot read a value left over from the caller's environment.
+malignant_column=
+annotations=
 case "$dataset" in
   ovarian|prostate|colorectal|headneck) ;;
   *)
@@ -65,13 +69,17 @@ minimum_cells=${MINIMUM_CELLS_PER_STATUS:-10}
 case "$dataset" in
   ovarian)
     accession=GSE180661
-    annotations="Ovarian.cancer.cell"
+    malignant_column=malignant
     source_manifest=$result/manifest/pair_manifest_eligible.csv
     equalised=$result/downsampled_GSE180661_20260914
     patient_array=${PATIENT_ARRAY:-0-7}
     ;;
   prostate)
     accession=GSE271675
+    # The only dataset that cannot use the uniform call: these h5ads come from
+    # a different source and predate it. Its compartment is therefore defined
+    # differently in kind from the other three -- a Methods statement, not a
+    # preference.
     annotations="Epithelial|Basal Epithelial|Neuroendocrine"
     source_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
     equalised=$result/downsampled_GSE271675_20260916
@@ -79,14 +87,14 @@ case "$dataset" in
     ;;
   colorectal)
     accession=GSE225857
-    annotations="Tu01_AREG|Tu02_DEFA5|Tu03_SRRM2|Tu04_RGMB|Tu05_PCNA|Tu06_NKD1|Tu07_MKI67|Tu08_GNG13|Tu09_MUC2|Tu10_COL3A1|Tu11_PLA2G2A"
+    malignant_column=malignant
     source_manifest=$result/author_labeled_replication_GSE181919_GSE225857_rerun_20260912/GSE225857/manifest/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE225857_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
     ;;
   headneck)
     accession=GSE181919
-    annotations="Malignant.cells"
+    malignant_column=malignant
     source_manifest=$result/author_labeled_replication_GSE181919_GSE225857_rerun_20260912/GSE181919/manifest/pair_manifest_malignant_eligible.csv
     equalised=$result/downsampled_GSE181919_$stamp
     patient_array=${PATIENT_ARRAY:-0-1}
@@ -158,7 +166,13 @@ export CONFIDENCEOT_MANIFEST="$trimmed"
 export CONFIDENCEOT_GATE_ROOT="$gate"
 export CONFIDENCEOT_FOUR_STATE_ROOT="$four_state"
 export CONFIDENCEOT_METASTASIS_SIZE_CSV="$size_csv"
-export CONFIDENCEOT_MALIGNANT_ANNOTATIONS="$annotations"
+if [[ -n "${malignant_column:-}" ]]; then
+  export CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column"
+  unset CONFIDENCEOT_MALIGNANT_ANNOTATIONS
+else
+  export CONFIDENCEOT_MALIGNANT_ANNOTATIONS="$annotations"
+  unset CONFIDENCEOT_MALIGNANT_COLUMN
+fi
 # Cap-robustness and origin ranking stay off: the budget is reported rather
 # than enforced, so the cap no longer decides the gate.
 unset CONFIDENCEOT_ROBUSTNESS_CSV CONFIDENCEOT_SENSITIVITY_ROOT
@@ -217,7 +231,13 @@ printf 'gate           %s\n' "$gate"
 printf 'manifest       %s (original)\n' "$source_manifest"
 printf 'trimmed        %s\n' "$trimmed"
 printf 'lesion size    %s\n' "$size_csv"
-printf 'annotations    %s\n' "$annotations"
+if [[ -n "$malignant_column" ]]; then
+  printf 'malignant      %s == malignant   (uniform inferCNV)
+' "$malignant_column"
+else
+  printf 'malignant      cell_type in: %s   (deposit labels)
+' "$annotations"
+fi
 printf 'four_state     %s\n' "$four_state"
 printf 'deg            %s\n' "$deg"
 printf 'gsea           %s\n' "$gsea"

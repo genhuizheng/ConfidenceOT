@@ -155,51 +155,67 @@ reported as such.
 
 ### Which cells are malignant, decided 2026-09-24
 
-**The malignant compartment stays the deposit's own label. It does not move to
-the collection's uniform inferCNV call.**
+**The malignant compartment is the collection's uniform inferCNV call,
+`malignant == "malignant"`, for every dataset whose files carry it.** One rule
+across deposits, replacing the per-deposit lists of the deposit's own
+`cell_type` strings -- one label for ovarian, eleven for colorectal.
 
-The collection now carries `malignant`, one inferCNV rule applied to every
-deposit, and ConfidenceOT can read it -- `02_run_pair.py` and the pseudobulk
-both take `--malignant-column`, the two modes refuse to run together, and each
-run records which rule chose its compartment. It is available and it is not
-the default.
+`02_run_pair.py` and `21_prepare_four_state_malignant_pseudobulk.py` take
+`--malignant-column`; the two modes refuse to run together, and each run
+records `malignant_selector` so a result built on one rule cannot later be
+mistaken for the other.
 
-Measured on the 92 ovarian pairs by
-`37_compare_malignant_definitions.py`: of 215,158 cells the deposit labels
-`Ovarian.cancer.cell`, the uniform call names 135,328, adds **none**, and
-leaves 79,830 out, with a further 38,521 `undetermined`. Jaccard 0.629, and
-135,328/215,158 is 62.9% -- the handoff's own 62.6% recall figure, reproduced
-on this dataset. The uniform call is a strict subset.
+**GSE271675 is the exception and cannot be otherwise.** Its h5ads come from a
+different source and predate the uniform call, so its compartment stays the
+three `cell_type` labels. The malignancy method is therefore not constant
+across all four cancer types, which limits cross-cancer comparison and belongs
+in Methods.
 
-**Neither definition has DNA behind it.** Section 3.1 of the collection's
-progress record, written 2026-09-24 after reading each paper's Methods, says
-GSE180661's label is CellAssign on marker genes, the same tier as GSE225857,
-and that no deposit in the collection has DNA behind its single-cell
-malignancy labels. The premise that SPECTRUM was WGS-anchored survived in that
-document for weeks before the Methods were read. So the 79,830 cells the
-uniform call omits are not false positives being removed; they are cells two
-expression-based methods disagree about, and the validation behind the 62.6%
-figure was itself against another expression-based label.
+**`undetermined` is dropped and counted, never folded.** 233,314 cells across
+the collection were assessed and declined -- no CNV cluster separated from the
+diploid reference, or the sample failed its control. They are the same order as
+the malignant set, so folding them into either side would move a quarter of a
+million cells silently. 38,521 of them are in the ovarian pairs.
 
-**The reason to prefer the deposit's label here is specific to what this
-analysis found.** inferCNV's sensitivity depends on a cell having enough
-expression to resolve a copy-number shift across the genome, so its call is
-biased toward cells with more RNA and more detected genes. The handoff says
-the missing third is "the cells whose CNV signal was weakest". This contrast's
-result is that retained cells are proliferating -- cells with more RNA and more
-detected genes. Adopting a compartment whose selection criterion correlates
-with the outcome variable would add bias in the direction of the finding while
-buying uniformity that does not bring the definition closer to truth, since
-neither side has any. CellAssign is expression-based too, but it rests on a
-handful of lineage markers rather than on genome-wide detection, so its
-dependence on depth is weaker and less directly aligned with the outcome.
+#### What the switch changes, measured before it was made
 
-**What this costs, stated.** The malignant compartment is defined by one rule
-for ovarian, three labels for prostate and eleven for colorectal, so the
-malignancy method is not held constant across cancer types. That is a real
-limitation of any cross-cancer comparison drawn here and belongs in Methods.
-The prostate files come from a different source again and predate the uniform
-call, so they could not use it even if the rest did.
+`37_compare_malignant_definitions.py` over the 92 ovarian pairs: of 215,158
+cells labelled `Ovarian.cancer.cell`, the uniform call names 135,328, adds
+**none**, and leaves 79,830 out. Jaccard 0.629; 135,328/215,158 is 62.9%,
+reproducing the handoff's 62.6% recall figure on this dataset. The call is a
+strict subset, so the compartment shrinks by 37%.
+
+The gates were built on the deposit's labels, so **adopting this requires
+re-running the optimal transport**, and the differential expression of
+2026-09-24 recorded in section 7d of
+`EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md` is superseded by the re-run
+rather than carried forward.
+
+#### The limitation this carries, recorded because it was known in advance
+
+Neither definition has DNA behind it. Section 3.1 of the collection's progress
+record, written 2026-09-24 after reading each paper's Methods, states that
+GSE180661's own label is CellAssign on marker genes -- the same tier as
+GSE225857 -- and that no deposit has DNA behind its single-cell malignancy
+labels. The belief that SPECTRUM was WGS-anchored had survived in that
+document for weeks. The 79,830 omitted cells are therefore cells two
+expression-based methods disagree about, not false positives removed, and the
+62.6% validation was itself against another expression-based label.
+
+inferCNV needs enough expression to resolve a copy-number shift, so its call
+is biased toward cells with more RNA and more detected genes; the handoff
+states the missing third is the cells whose CNV signal was weakest. The
+2026-09-24 contrast found retained cells to be proliferating, which is to say
+cells with more RNA. **A compartment selected on detection sensitivity and an
+outcome about transcriptional output are not independent**, so if the re-run
+reproduces the proliferation result, that agreement is weaker evidence than
+the same result on the marker-based compartment was, and the report must say
+so rather than read the reproduction as confirmation.
+
+The leave-one-patient-out profile and the per-patient overlap columns are
+unaffected by this: they ask whether a result rests on particular patients,
+which is a different question from whether the compartment was selected on a
+correlated property.
 
 ### Inclusion is closed, 2026-09-24
 
