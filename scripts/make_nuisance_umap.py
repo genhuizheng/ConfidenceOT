@@ -148,6 +148,8 @@ def embed(counts: np.ndarray, label: str, seed: int) -> np.ndarray:
                      random_state=seed, verbose=False).fit_transform(joint)
 
 
+C_REJECT = "#c4553b"
+
 NUISANCE = {
     "depth": {
         "title": "sequencing depth",
@@ -263,102 +265,145 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """The arms as a transport problem, because that is what is being tested.
+    """The task definition: what is generated, what is true, what is scored.
 
-    An earlier version drew two point clouds and said the nuisance was on both
-    sides. It never showed the coupling, which is the only thing the method
-    produces and the only thing the benchmark scores. This draws it: source
-    cells on the upper row, target cells on the lower one, a line for every
-    matched pair.
+    An earlier version drew a line between the i-th source cell and the i-th
+    target cell. **There is no such pairing.** The two sides are independent
+    draws from one population, so a source cell has no particular target cell
+    it belongs to, and a line saying otherwise describes a benchmark that does
+    not exist. The ground truth here is a statement about *sets*: every source
+    cell has some valid partner in the target set, or it has none at all.
 
-    Both rows are drawn from one population and both carry the same nuisance,
-    so a complete coupling exists -- every source cell has a target cell it
-    belongs with. The correct answer is therefore to reject nothing, and the
-    failure the arm is built to catch is a method that reads the nuisance as
-    structure and refuses to match across it: the deep cells of one side
-    declining the shallow cells of the other, leaving cells unmatched that
-    have perfectly good partners.
+    Three things a benchmark figure has to carry, and this one carries them as
+    three columns.
 
-    Cells are ordered along each row by the nuisance, so the gradient is
-    visible on both rows and a coupling that respects it would slant while a
-    correct one runs straight across.
+    **Generation.** Colour is biology and size is the technical nuisance, so
+    the two kinds of variable are separable by eye. In the specificity arm
+    there is one population and no biological difference between the sides at
+    all; in the power arm a subpopulation is added to the source only.
+
+    **Ground truth.** Which cells should be rejected, drawn as a ring. Nothing
+    in the specificity arm; exactly the planted cells in the power arm. Both
+    arms are needed and neither is sufficient: a method that never rejects
+    scores perfectly on the first, and one that rejects everything scores
+    perfectly on the recall of the second.
+
+    **Evaluation.** What is computed from the method's output. Rejection is
+    scored per cell against the ring, and technical invariance is scored as
+    the correlation between the gate and the nuisance, which should be zero
+    whatever the arm.
     """
-    shown = 46
+    rng = np.random.default_rng(seed)
+    n = 34
+    planted = 10
     report: dict = {}
+
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.9, 3.3))
-        for row, nuisance in enumerate(("depth", "breadth")):
-            facts = NUISANCE[nuisance]
-            rng = np.random.default_rng(seed + 200 + row)
-            profile = rng.gamma(shape=0.5, scale=3.0, size=genes) + 0.05
-            profile = profile / profile.sum()
-            source = one_population(nuisance, shown, genes, depth_sd, rng,
-                                    profile=profile)
-            target = one_population(nuisance, shown, genes, depth_sd, rng,
-                                    profile=profile)
-
-            def nuisance_of(counts: np.ndarray) -> np.ndarray:
-                return (counts.sum(axis=1) if nuisance == "depth"
-                        else (counts > 0).sum(axis=1)).astype(float)
-
-            # Sorted so the gradient reads along each row. The coupling is
-            # then legible as a shape: straight across if the match ignores
-            # the nuisance, slanting if it does not.
-            source_values = np.sort(nuisance_of(source))
-            target_values = np.sort(nuisance_of(target))
-            bounds = (min(source_values.min(), target_values.min()),
-                      max(source_values.max(), target_values.max()))
-            scale = np.log10(np.asarray(bounds) + 1.0)
-
-            # Tighter rows with a reserved band at the foot: the
-            # closing note, the lower panel's verdict and the second
-            # colour bar were all landing on each other.
-            axes = figure.add_axes([0.015, 0.615 - 0.350 * row,
-                                    0.785, 0.250])
-            axes.set_xlim(-1.5, shown + 0.5)
-            axes.set_ylim(-0.66, 1.52)
+        figure = plt.figure(figsize=(7.1, 3.8))
+        for row, (arm, subtitle) in enumerate((
+                ("specificity", "one population, drawn twice"),
+                ("power", "a subpopulation added to the source only"))):
+            axes = figure.add_axes([0.015, 0.545 - 0.455 * row, 0.62, 0.335])
+            axes.set_xlim(-2.6, 12.4)
+            axes.set_ylim(-1.18, 1.34)
             axes.axis("off")
-            x = np.arange(shown)
-            for index in range(shown):
-                axes.plot([x[index], x[index]], [1.0, 0.0], color="#c6c6c0",
-                          linewidth=0.7, zorder=1)
-            for y, values, side in ((1.0, source_values, "source"),
-                                    (0.0, target_values, "target")):
-                dots = axes.scatter(
-                    x, np.full(shown, y), c=np.log10(values + 1.0), s=34,
-                    cmap="viridis", linewidths=0, zorder=3,
-                    vmin=scale[0], vmax=scale[1])
-                axes.text(-0.9, y, side, fontsize=7.6, ha="right",
-                          va="center", color="#55555a")
-            axes.text(0.0, 1.40, f"({chr(97 + row)})  {facts['title']}",
-                      fontsize=8.4, fontweight="semibold", ha="left",
-                      transform=axes.get_yaxis_transform(which="grid"))
-            axes.text(shown - 0.5, 1.40, facts["construction"].replace("\n", "  "),
-                      fontsize=7.4, ha="right", va="bottom",
-                      color="#b07d2b" if nuisance == "depth" else "#1f6f8b")
-            axes.text(shown * 0.5, -0.62, "every cell matched: reject nothing",
-                      fontsize=7.8, fontweight="bold", color="#2f7d4f",
-                      ha="center", va="bottom")
-            bar = figure.colorbar(
-                dots, ax=axes, fraction=0.035, pad=0.015, aspect=9)
-            bar.set_label(facts["colour_by"], fontsize=7)
-            bar.ax.tick_params(labelsize=6.5)
-            bar.outline.set_linewidth(0.5)
-            report[nuisance] = {"pairs_drawn": shown,
-                                "correct_answer": "reject nothing",
-                                "nuisance_on": "both sides"}
 
-        figure.text(0.015, 0.035,
-                    "Carried by one side only, either spread would be a batch "
-                    "effect between samples: a different problem with its own "
-                    "methods.\nCarried by both, a complete coupling exists, "
-                    "and the failure to catch is a method that reads the "
-                    "gradient as structure and refuses to match across it.",
-                    fontsize=7.4, color="#55555a", va="bottom",
+            for column, side in enumerate(("source", "target")):
+                x0 = 0.6 + 6.2 * column
+                extra = planted if (arm == "power" and side == "source") else 0
+                total = n + extra
+                spread = rng.uniform(-1.0, 1.0, size=(total, 2))
+                spread[:, 0] *= 2.1
+                spread[:, 1] = 0.30 + 0.52 * spread[:, 1]
+                # Size is the technical nuisance; colour is biology. Keeping
+                # them in different channels is the first thing the figure has
+                # to say, because a reader cannot judge a benchmark without
+                # knowing which variation is supposed to be there.
+                sizes = 9.0 + 52.0 * rng.beta(1.6, 2.2, size=total)
+                colours = np.array(["#0072B2"] * n + ["#D55E00"] * extra)
+                axes.scatter(spread[:, 0] + x0, spread[:, 1], s=sizes,
+                             c=colours, linewidths=0, alpha=0.9, zorder=3)
+                if extra:
+                    for index in range(n, total):
+                        axes.scatter([spread[index, 0] + x0], [spread[index, 1]],
+                                     s=sizes[index] + 90, facecolors="none",
+                                     edgecolors=C_REJECT, linewidths=1.1,
+                                     zorder=5)
+                axes.text(x0, 0.95, side, fontsize=7.6, ha="center",
+                          color="#55555a")
+            axes.text(-2.5, 1.14, f"({chr(97 + row)})  {arm} arm",
+                      fontsize=8.4, fontweight="semibold", ha="left")
+            axes.text(-2.5, 0.80, subtitle, fontsize=7.2, ha="left",
+                      color="#55555a")
+
+            truth = ("no cell is rejected" if arm == "specificity"
+                     else f"exactly the {planted} planted cells are rejected")
+            scored = ("false rejection rate" if arm == "specificity"
+                      else "precision, recall, F1 against the ring")
+            axes.text(-2.5, -0.62, "ground truth", fontsize=7.4,
+                      fontweight="semibold", ha="left")
+            axes.text(-2.5, -0.98, truth, fontsize=7.2, ha="left",
+                      color="#2f7d4f" if arm == "specificity" else C_REJECT)
+            axes.text(5.4, -0.62, "scored by", fontsize=7.4,
+                      fontweight="semibold", ha="left")
+            axes.text(5.4, -0.98, scored, fontsize=7.2, ha="left",
+                      color="#55555a")
+            report[arm] = {"ground_truth": truth, "scored_by": scored}
+
+        # Its own 0-1 data coordinates rather than transAxes with clipping
+        # off. Drawn the other way, the markers sat outside the axes as far as
+        # matplotlib was concerned, and bbox_inches="tight" grew the canvas to
+        # contain them -- a figure eleven thousand pixels tall.
+        legend = figure.add_axes([0.655, 0.08, 0.335, 0.80])
+        legend.set_xlim(0, 1)
+        legend.set_ylim(0, 1)
+        legend.axis("off")
+        legend.text(0.0, 0.99, "generation", fontsize=8.4,
+                    fontweight="semibold", va="top")
+        legend.text(0.0, 0.91, "colour is biology", fontsize=7.0,
+                    color="#8c8c86", va="top", style="italic")
+        for y, colour, text in ((0.815, "#0072B2", "the shared population"),
+                                (0.735, "#D55E00", "the planted subpopulation")):
+            legend.scatter([0.04], [y], s=46, c=colour, linewidths=0)
+            legend.text(0.12, y, text, fontsize=7.2, va="center")
+
+        legend.text(0.0, 0.64,
+                    "size is the technical nuisance,\napplied to both sides",
+                    fontsize=7.0, color="#8c8c86", va="top", style="italic",
+                    linespacing=1.6)
+        for y, size, text in ((0.505, 14, "shallow, or few genes"),
+                              (0.425, 58, "deep, or many genes")):
+            legend.scatter([0.04], [y], s=size, c="#8c8c86", linewidths=0)
+            legend.text(0.12, y, text, fontsize=7.2, va="center")
+        legend.text(0.0, 0.345,
+                    "depth sd(log) 0 to 0.9, or\nbreadth at fixed total counts",
+                    fontsize=7.0, color="#8c8c86", va="top", linespacing=1.6)
+
+        legend.text(0.0, 0.215, "ground truth", fontsize=8.4,
+                    fontweight="semibold", va="top")
+        legend.scatter([0.04], [0.135], s=46, facecolors="none",
+                       edgecolors=C_REJECT, linewidths=1.1)
+        legend.text(0.12, 0.135, "should be rejected", fontsize=7.2,
+                    va="center", color=C_REJECT)
+        legend.text(0.0, 0.055,
+                    "There is no cell-to-cell pairing:\nthe sides are "
+                    "independent draws,\nso the truth is which cells have a\n"
+                    "partner in the other set at all.",
+                    fontsize=7.0, color="#8c8c86", va="top", linespacing=1.6)
+
+        figure.text(0.015, 0.012,
+                    "Both arms carry the nuisance, and both are needed: a "
+                    "method that never rejects is perfect on (a), and one "
+                    "that rejects everything is perfect\non (b)'s recall. "
+                    "Technical invariance is scored across both, as the "
+                    "correlation between the gate and the nuisance.",
+                    fontsize=7.2, color="#55555a", va="bottom",
                     linespacing=1.55)
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
         plt.close(figure)
+    report["technical_invariance"] = ("|corr(gate, nuisance)|, scored in both "
+                                      "arms, expected zero")
     return report
 
 
