@@ -24,6 +24,16 @@ Progress_report_20260818/
 progress_report7/
 mouse_embryo/results/
 /mouse_embryo_results/
+# Rendered figures and everything the benchmark writes. The scripts are
+# tracked and reproduce these, so a result in the history is a result
+# that can disagree with the code that claims to have made it.
+/benchmark_results/
+/benchmark_technical/
+figures/**/*.png
+figures/**/*.pdf
+figures/**/*.svg
+figures/**/*.csv
+figures/**/*.json
 tmp/
 /slurm/
 scripts/
