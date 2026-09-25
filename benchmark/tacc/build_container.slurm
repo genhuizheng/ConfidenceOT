@@ -40,16 +40,16 @@ export APPTAINER_CACHEDIR=${APPTAINER_CACHEDIR:-/scratch/10119/ghzheng/apptainer
 export APPTAINER_TMPDIR=${APPTAINER_TMPDIR:-$SCRATCH/apptainer_tmp}
 mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
 
-if [[ "$force" != "1" && -f "$sif" ]]; then
-    echo "$sif already exists; set CONFIDENCEOT_BENCH_FORCE=1 to rebuild"
-    exit 0
-fi
-
 module load tacc-apptainer
 echo "architecture: $(uname -m)"
-echo "building $sif from $definition"
 
-if ! apptainer build --fakeroot "$sif" "$definition"; then
+# An existing image skips the build, not the check. The check is the cheap
+# half and the reason to run this job again at all -- after a fix to the
+# check itself, or to confirm an image someone else left here still works.
+if [[ "$force" != "1" && -f "$sif" ]]; then
+    echo "$sif already exists; checking it. "\
+         "Set CONFIDENCEOT_BENCH_FORCE=1 to rebuild."
+elif ! apptainer build --fakeroot "$sif" "$definition"; then
     echo >&2
     echo "the build failed. Read the message above before choosing:" >&2
     echo "  setgroups / Method http has died  -> apt dropping privileges "\
@@ -60,10 +60,11 @@ if ! apptainer build --fakeroot "$sif" "$definition"; then
     echo "  or keep using the conda library, which already has splatter:" >&2
     echo "  CONFIDENCEOT_R_LIBRARY=$repo/.r-library" >&2
     exit 5
+else
+    echo "built $sif"
 fi
 
 echo
-echo "built $sif"
 
 # The check, against the finished image. Loading the packages is weaker than
 # it looks -- Bioconductor packages built from source on aarch64 can install
