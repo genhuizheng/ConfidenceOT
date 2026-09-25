@@ -87,6 +87,11 @@ scripts/tacc/*
 # is only checkable if its commit does too.
 !/cancer_metastasis/EXPERIMENT_2026-09-23_PREPROCESSING_ARMS.md
 
+# The scoring, tracked apart from the figures that state the setting. A
+# metric agreed in a chat and then read off a plot is a metric that can be
+# chosen after seeing the numbers.
+!/BENCHMARK_METRICS.md
+
 # OS/editor files
 .DS_Store
 Thumbs.db
