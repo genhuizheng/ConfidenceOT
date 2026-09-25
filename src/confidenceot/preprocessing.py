@@ -449,6 +449,7 @@ class Preprocessing:
     minimum_detection_rate: float = 0.0
     n_hvg: int = 2000
     n_pcs: int = 30
+    scale_genes: bool = True
     cost: Cost = "squared_euclidean"
     scale: Scale = "median_sampled_pair"
     scale_sample_pairs: int = 1_000_000
@@ -502,6 +503,11 @@ class Preprocessing:
         if self.label_stem is None and self.normalisation.startswith("rank"):
             stem = f"{stem}{self.rank_top_n}"
         parts = [stem]
+        if not self.scale_genes:
+            # Before the other tags, for the same reason they are ordered as
+            # they are: the parser strips from the end, so a new tag placed
+            # last would change how every existing label is read.
+            parts.append("noscale")
         if self.regress_out:
             # Between the stem and the other two, so existing labels are
             # unchanged and the parser can keep stripping from the end.
@@ -555,11 +561,15 @@ class Preprocessing:
                     f"expected any of {sorted(inverse_tag)}")
             regressed = tuple(inverse_tag[tag] for tag in tags)
             parts = parts[:-1]
+        scale_genes = True
+        if len(parts) > 1 and parts[-1] == "noscale":
+            scale_genes, parts = False, parts[:-1]
         stem = "_".join(parts)
         if not stem:
             raise ValueError(f"label {label!r} names no transform")
         settings: dict[str, Any] = {"cost": cost, "equalise_depth": equalise,
-                                    "regress_out": regressed}
+                                    "regress_out": regressed,
+                                    "scale_genes": scale_genes}
         inverse = {value: key for key, value in _LABEL_STEM.items()}
         rank_stems = tuple(
             value for key, value in _LABEL_STEM.items() if key.startswith("rank")
@@ -613,6 +623,7 @@ class Preprocessing:
             "minimum_detection_rate": self.minimum_detection_rate,
             "n_hvg": self.n_hvg,
             "n_pcs": self.n_pcs,
+            "scale_genes": bool(self.scale_genes),
             "cost": self.cost,
             "scale": self.scale,
             "regress_out": list(self.regress_out),
@@ -778,9 +789,18 @@ class Preprocessing:
             dense = joint[:, selected].toarray().astype(np.float32)
             hvg_note = "top variance after the row transformation"
 
-        dense -= dense.mean(axis=0)
-        std = dense.std(axis=0)
-        dense /= np.where(std > 1e-8, std, 1.0)
+        if self.scale_genes:
+            dense -= dense.mean(axis=0)
+            std = dense.std(axis=0)
+            dense /= np.where(std > 1e-8, std, 1.0)
+            scaling_note = ("genes centered and divided by their standard "
+                            "deviation before PCA")
+        else:
+            # sklearn's PCA subtracts the mean itself, so what this branch
+            # actually drops is the per-gene variance scaling; the centering
+            # still happens, one step later and inside the decomposition.
+            scaling_note = ("no per-gene variance scaling; PCA centers "
+                            "internally")
         from sklearn.decomposition import PCA  # optional dependency
 
         components = min(self.n_pcs, dense.shape[0] - 1, dense.shape[1])
@@ -823,7 +843,7 @@ class Preprocessing:
             "transform": transform,
             "detection_filter": detection_note,
             "joint_hvg": hvg_note,
-            "joint_pca": "centered and gene-scaled PCA",
+            "joint_pca": scaling_note,
             "regression": regression_note,
             "common_gene_n": len(common),
             "hvg_n": int(len(selected)),
