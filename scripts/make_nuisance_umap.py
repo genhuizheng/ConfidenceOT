@@ -59,54 +59,43 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def one_population(nuisance: str, n_cells: int, n_genes: int, depth_sd: float,
-                   rng: np.random.Generator, uniform: bool = False,
-                   profile: np.ndarray | None = None) -> np.ndarray:
-    """One population carrying exactly one nuisance, and nothing else.
+def dropout_weight(profile: np.ndarray) -> np.ndarray:
+    """Per-gene capture loss, tilted towards the low expressers.
 
-    Every cell draws from the same relative expression profile, so a figure
-    built on this has no biology in it at all: whatever structure the
-    embedding shows is the nuisance. One nuisance per population rather than
-    both in one, because a reader looking at a gradient has to be able to say
-    which of the two put it there.
-
-    ``depth``: the totals vary, sd(log depth) 0.9 by default, which is the
-    spread the benchmark uses and about a twenty-fold range end to end. The
-    genes a cell lands on are unrestricted.
-
-    ``breadth``: the totals are **identical** and the cells differ in how many
-    distinct genes those counts fall on. Depth normalisation cannot touch this
-    -- the totals already agree -- which is what makes it a separate problem
-    rather than a symptom of the first.
+    A uniform mask would take the housekeeping genes at the same rate and
+    would not look like dropout. Tilted too steeply, though, it removes almost
+    no counts -- the low expressers carry little of the library -- and the
+    sample comes out with its total intact, which is the fixed-total
+    construction this design exists to avoid. This sits between the two: the
+    top of the distribution loses about half as much as the bottom.
     """
-    # Passed in when two draws have to come from the *same* population.
-    # Drawn afresh on each call, two draws are two different populations, and
-    # an embedding of them separates the sides -- which is a picture of a
-    # mistake rather than of the benchmark arm.
-    if profile is None:
-        profile = rng.gamma(shape=0.5, scale=3.0, size=n_genes) + 0.05
-        profile = profile / profile.sum()
-    order = np.argsort(-profile)
+    return 0.45 + 0.55 / (1.0 + profile / np.median(profile))
 
-    counts = np.zeros((n_cells, n_genes))
-    for index in range(n_cells):
-        if nuisance == "depth":
-            library = (3000.0 if uniform
-                       else 3000.0 * rng.lognormal(0.0, depth_sd))
-            weights = profile
-        else:
-            # The ideal arm holds the nuisance fixed rather than removing the
-            # cells that carry it: what is being shown is the measurement
-            # without the artefact, not a different set of cells.
-            fraction = 0.30 if uniform else float(
-                np.clip(rng.lognormal(np.log(0.30), 0.60), 0.03, 1.0))
-            width = int(fraction * n_genes)
-            weights = np.zeros(n_genes)
-            weights[order[:width]] = profile[order[:width]]
-            weights /= weights.sum()
-            library = 3000.0
-        counts[index] = rng.poisson(weights * library)
+
+def sample_counts(profile: np.ndarray, n_cells: int,
+                  rng: np.random.Generator, *, median_library: float = 3000.0,
+                  depth_sd: float = 0.0, dropout: float = 0.0) -> np.ndarray:
+    """One sample of one population under one observation setting.
+
+    The three knobs are the observation, not the biology: every cell draws
+    from the same ``profile``, so whatever structure an embedding of this
+    shows is the measurement. ``depth_sd`` spreads the library size,
+    ``dropout`` removes counts on top of it, and the two are meant to be used
+    in that order -- dropout is an addition to a depth mismatch, not an
+    alternative to one.
+    """
+    counts = np.array([
+        rng.poisson(profile * median_library * rng.lognormal(0.0, depth_sd))
+        for _ in range(n_cells)], dtype=float)
+    if dropout > 0.0:
+        counts *= rng.random(counts.shape) > dropout * dropout_weight(profile)
     return counts
+
+
+def shared_profile(n_genes: int, rng: np.random.Generator) -> np.ndarray:
+    """One relative expression profile, shared by every cell in a figure."""
+    profile = rng.gamma(shape=0.5, scale=3.0, size=n_genes) + 0.05
+    return profile / profile.sum()
 
 
 def embed(counts: np.ndarray, label: str, seed: int) -> np.ndarray:
@@ -148,17 +137,17 @@ NUISANCE = {
                      "methods. Here both sides carry it, so no cell lacks a\n"
                      "counterpart and the correct answer stays: reject nothing."),
     },
-    "breadth": {
-        "title": "low-gene effect",
-        "ideal": "ideal: no nFeature variation",
-        "affected": "real: nFeature varies",
+    "dropout": {
+        "title": "depth + dropout",
+        "ideal": "ideal: no depth variation, no dropout",
+        "affected": "real: depth varies, plus dropout",
         "colour_by": "genes detected per cell",
-        "construction": ("the same breadth spread on both sides,\n"
-                         "total counts held at 3,000"),
-        "why_both": ("Depth normalisation cannot touch this: the totals\n"
-                     "already agree. It is a separate problem, not a symptom\n"
-                     "of the first, and nothing in the preprocessing\n"
-                     "factorial removes it."),
+        "construction": ("the depth spread of the row above, with\n"
+                         "capture loss applied on top of it"),
+        "why_both": ("The second row is the first row plus dropout, not a\n"
+                     "different axis. Both readouts fall, and detection\n"
+                     "falls further than the total, which is why nFeature\n"
+                     "cannot be treated as a knob of its own."),
     },
 }
 
@@ -206,14 +195,20 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
         figure = plt.figure(figsize=(6.6, 6.0))
         outer = figure.add_gridspec(2, 1, hspace=0.30, left=0.015,
                                     right=0.885, top=0.945, bottom=0.02)
-        for row, nuisance in enumerate(("depth", "breadth")):
+        for row, nuisance in enumerate(("depth", "dropout")):
             facts = NUISANCE[nuisance]
             inner = outer[row].subgridspec(1, 2, wspace=0.05)
             for column, kind in enumerate(("ideal", "affected")):
                 rng = np.random.default_rng(seed + row)
-                spread = depth_sd if kind == "affected" else 0.0
-                counts = one_population(nuisance, cells, genes, spread, rng,
-                                        uniform=kind == "ideal")
+                # Both rows are compared against the same clean ideal, so the
+                # second panel of the second row shows what depth and dropout
+                # do together rather than what dropout adds in isolation.
+                affected = kind == "affected"
+                counts = sample_counts(
+                    shared_profile(genes, rng), cells, rng,
+                    depth_sd=depth_sd if affected else 0.0,
+                    dropout=(0.55 if affected and nuisance == "dropout"
+                             else 0.0))
                 values = (counts.sum(axis=1) if nuisance == "depth"
                           else (counts > 0).sum(axis=1))
                 points = embed(counts, "logcpm", seed)
@@ -279,17 +274,12 @@ def degradation_levels(n_cells: int, n_genes: int,
     is; a uniform mask would take the housekeeping genes at the same rate and
     would not look like anything.
     """
-    profile = rng.gamma(shape=0.5, scale=3.0, size=n_genes) + 0.05
-    profile = profile / profile.sum()
-    loss = 0.45 + 0.55 / (1.0 + profile / np.median(profile))
+    profile = shared_profile(n_genes, rng)
 
     def sample(median_library: float, dropout: float) -> np.ndarray:
-        counts = np.array([
-            rng.poisson(profile * median_library * rng.lognormal(0.0, 0.35))
-            for _ in range(n_cells)], dtype=float)
-        if dropout > 0.0:
-            counts *= rng.random(counts.shape) > dropout * loss[None, :]
-        return counts
+        return sample_counts(profile, n_cells, rng,
+                             median_library=median_library,
+                             depth_sd=0.35, dropout=dropout)
 
     return profile, {
         "reference source": sample(3000.0, 0.0),
