@@ -111,9 +111,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replicate", type=int, default=1)
     parser.add_argument("--genes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7300)
-    parser.add_argument("--umap-min-dist", type=float, default=0.6,
-                        help="Higher packs each cluster less tightly and "
-                             "leaves less empty field between them")
+    parser.add_argument("--umap-min-dist", type=float, default=2.2,
+                        help="How loosely each cluster is packed; must stay "
+                             "below --umap-spread")
+    parser.add_argument("--umap-neighbors", type=int, default=150,
+                        help="Higher keeps more global structure, which pulls "
+                             "the clusters towards each other")
+    parser.add_argument("--umap-spread", type=float, default=2.6,
+                        help="The scale the embedding is laid out on; larger "
+                             "with a matching min-dist gives fat clusters "
+                             "close together instead of tight ones far apart")
     parser.add_argument("--scenarios", default=None,
                         help="Comma-separated subset, e.g. "
                              "S0_clean_movement,S1_extinction,S2_emergence")
@@ -255,7 +262,8 @@ def load_splatter(root: Path, scenario: str, n: int, replicate: int
 
 
 def embed(counts: np.ndarray, seed: int, representation: str = "logcpm",
-          min_dist: float = 0.3) -> np.ndarray:
+          min_dist: float = 0.3, n_neighbors: int = 30,
+          spread: float = 1.0) -> np.ndarray:
     """One joint embedding of both sides, through the standard route.
 
     log CPM, top-variance genes, gene scaling, PCA, then UMAP. The scaling step
@@ -285,7 +293,8 @@ def embed(counts: np.ndarray, seed: int, representation: str = "logcpm",
     dense = dense / np.where(deviation > 1e-8, deviation, 1.0)
     components = PCA(n_components=min(30, dense.shape[0] - 1, dense.shape[1]),
                      random_state=seed).fit_transform(dense)
-    return umap.UMAP(n_neighbors=30, min_dist=min_dist, random_state=seed,
+    return umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist,
+                     spread=spread, random_state=seed,
                      verbose=False).fit_transform(components)
 
 
@@ -687,7 +696,8 @@ SUBJECT = {
 
 
 def draw_shared(figure, grid, scenarios, loaded, seed: int,
-                min_dist: float = 0.6) -> dict:
+                min_dist: float = 2.2, n_neighbors: int = 150,
+                spread: float = 2.6) -> dict:
     """Source on the left, target on the right, one row per scenario.
 
     The two panels share one embedding, which is what makes them comparable:
@@ -712,13 +722,21 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
     for block in loaded:
         offsets.append((cursor, cursor + block[0].shape[0]))
         cursor += block[0].shape[0]
-    points = embed(counts, seed, min_dist=min_dist)
+    points = embed(counts, seed, min_dist=min_dist,
+                   n_neighbors=n_neighbors, spread=spread)
 
-    margin = 0.045 * max(np.ptp(points[:, 0]), np.ptp(points[:, 1]))
-    limits = (points[:, 0].min() - margin, points[:, 0].max() + margin,
-              points[:, 1].min() - margin, points[:, 1].max() + margin)
+    # Limits per row, not for the whole figure. The embedding is shared, so a
+    # scenario without G still had to reserve the band where G sits, and that
+    # band was a third of every panel it does not appear in. Within a row the
+    # two panels keep one frame, which is what the comparison needs; between
+    # rows they do not have to, because nothing is compared across rows.
+    def row_limits(block: np.ndarray) -> tuple[float, float, float, float]:
+        pad = 0.035 * max(np.ptp(block[:, 0]), np.ptp(block[:, 1]))
+        return (block[:, 0].min() - pad, block[:, 0].max() + pad,
+                block[:, 1].min() - pad, block[:, 1].max() + pad)
 
     report: dict = {}
+    drawn: set = set()
     for row, scenario in enumerate(scenarios):
         lo, hi = offsets[row]
         local, meta = points[lo:hi], loaded[row][1]
@@ -726,6 +744,7 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
         population = meta["population"].to_numpy()
         subject = SUBJECT.get(scenario)
         colour = PALETTE.get(subject, C_REJECT)
+        limits = row_limits(local)
         held_by = "source" if subject in set(population[source]) else "target"
 
         panels = {}
@@ -733,32 +752,31 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
                                                ("target", ~source))):
             axes = figure.add_subplot(grid[row, column])
             panels[side] = axes
-            rest = mask & (population != subject)
-            axes.scatter(local[rest, 0], local[rest, 1], s=13, c="#cfcfc8",
-                         linewidths=0, zorder=2)
+            # Every population in its own colour and labelled, the way an
+            # annotated embedding is normally read. Greying the rest made the
+            # panel a diagram about one cluster; the question is which of
+            # several populations has no counterpart, and that needs the
+            # others visible as populations rather than as background.
+            for name in sorted(set(population[mask])):
+                rows = mask & (population == name)
+                tint = PALETTE.get(name, "#8a8a84")
+                axes.scatter(local[rows, 0], local[rows, 1], s=58, c=tint,
+                             linewidths=0, alpha=0.9,
+                             zorder=5 if name == subject else 3)
             here = mask & (population == subject)
             if here.sum():
-                axes.scatter(local[here, 0], local[here, 1], s=26, c=colour,
-                             linewidths=0, zorder=5)
                 centre = local[here].mean(axis=0)
-                axes.text(centre[0], centre[1] + 2.0, subject, fontsize=11,
-                          fontweight="bold", ha="center", va="bottom",
-                          color=colour, zorder=9,
-                          path_effects=[patheffects.withStroke(
-                              linewidth=3.0, foreground="white")])
+                axes.scatter([centre[0]], [centre[1]], s=2600,
+                             facecolors="none", edgecolors=colour,
+                             linewidths=2.4, zorder=6)
             else:
                 # The vacated position. Without the mark the panel is simply
                 # missing a cluster, and a missing cluster among six is not
                 # something a reader finds by looking.
                 where = local[population == subject].mean(axis=0)
-                axes.scatter([where[0]], [where[1]], s=620, facecolors="none",
-                             edgecolors=C_REJECT, linewidths=2.0,
-                             linestyle=(0, (3, 2)), zorder=6)
-                axes.text(where[0], where[1] + 2.0,
-                          f"no {subject}", fontsize=10.5, fontweight="bold",
-                          ha="center", va="bottom", color=C_REJECT, zorder=9,
-                          path_effects=[patheffects.withStroke(
-                              linewidth=3.0, foreground="white")])
+                axes.scatter([where[0]], [where[1]], s=2600,
+                             facecolors="none", edgecolors=C_REJECT,
+                             linewidths=2.4, linestyle=(0, (4, 3)), zorder=6)
             axes.set_xlim(limits[0], limits[1])
             axes.set_ylim(limits[2], limits[3])
             axes.set_xticks([])
@@ -782,11 +800,22 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
             xyB=(-0.008, 0.5), coordsB=panels["target"].transAxes,
             arrowstyle="-|>", mutation_scale=26, linewidth=2.4,
             color="#6a6a62"))
+        drawn.update(set(population))
         report[scenario] = {
             "subject": subject, "present_on": held_by,
             "cells": int((population == subject).sum()),
             "reading": (f"{subject} is in the {held_by} and absent from the "
                         f"other side")}
+
+    figure.legend(
+        handles=[Line2D([], [], marker="o", linestyle="", markersize=8,
+                        color=PALETTE.get(name, "#8a8a84"), label=name)
+                 for name in sorted(drawn)]
+        + [Line2D([], [], marker="o", linestyle="", markersize=11,
+                  markerfacecolor="none", markeredgecolor=C_REJECT,
+                  markeredgewidth=2.0, label="no counterpart")],
+        loc="lower center", ncol=len(drawn) + 1, frameon=False, fontsize=9,
+        bbox_to_anchor=(0.5, -0.012), columnspacing=1.5, handletextpad=0.35)
     return report
 
 
@@ -815,10 +844,13 @@ def main() -> None:
             grid = figure.add_gridspec(
                 len(chosen), 2, wspace=0.055, hspace=0.14,
                 left=0.010, right=0.990,
-                top=1 - 0.085 / len(chosen), bottom=0.015)
+                top=1 - 0.085 / len(chosen), bottom=0.075)
             report["shared_embedding"] = draw_shared(
-                figure, grid, chosen, loaded, args.seed, args.umap_min_dist)
-            report["umap_min_dist"] = args.umap_min_dist
+                figure, grid, chosen, loaded, args.seed, args.umap_min_dist,
+                args.umap_neighbors, args.umap_spread)
+            report["umap"] = {"min_dist": args.umap_min_dist,
+                              "n_neighbors": args.umap_neighbors,
+                              "spread": args.umap_spread}
             for suffix in ("png", "pdf"):
                 figure.savefig(args.out / f"scenario_umap.{suffix}",
                                bbox_inches="tight")
