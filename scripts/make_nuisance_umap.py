@@ -265,164 +265,157 @@ def schematic_coupling(grid: int, rng: np.random.Generator) -> np.ndarray:
     return plan
 
 
+def degradation_levels(n_cells: int, n_genes: int,
+                       rng: np.random.Generator) -> tuple[np.ndarray, dict]:
+    """One reference sample and three targets, each worse than the last.
+
+    The three levels are stages of the same degradation, not independent
+    axes. Level 1 moves the library size and lets detection follow it. Level 2
+    keeps that shift and drops counts on top, so both readouts fall further --
+    which is what dropout does, and why the earlier framing of a
+    detection-only arm at a fixed total was wrong.
+
+    Dropout is weighted towards the low expressers, the way real capture loss
+    is; a uniform mask would take the housekeeping genes at the same rate and
+    would not look like anything.
+    """
+    profile = rng.gamma(shape=0.5, scale=3.0, size=n_genes) + 0.05
+    profile = profile / profile.sum()
+    loss = 0.45 + 0.55 / (1.0 + profile / np.median(profile))
+
+    def sample(median_library: float, dropout: float) -> np.ndarray:
+        counts = np.array([
+            rng.poisson(profile * median_library * rng.lognormal(0.0, 0.35))
+            for _ in range(n_cells)], dtype=float)
+        if dropout > 0.0:
+            counts *= rng.random(counts.shape) > dropout * loss[None, :]
+        return counts
+
+    return profile, {
+        "reference source": sample(3000.0, 0.0),
+        "matched": sample(3000.0, 0.0),
+        "depth mismatch": sample(1350.0, 0.0),
+        "depth + dropout": sample(1350.0, 0.55),
+    }
+
+
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """The benchmark as a pipeline: counts, coupling, gate, answer.
+    """The benchmark setting: one reference sample against three targets.
 
-    Each row reads left to right and then down. Two count matrices, one per
-    sample, with the perturbation named on the strips above them. Between them
-    the object the method actually produces -- the coupling, how much of each
-    source cell is carried onto each target cell. Below it the two things
-    that get compared: the gate the coupling and its costs induce, one call
-    per source cell, and the mask that is correct -- in two cases. In one the
-    same populations are in both samples, so the correct decision is to keep
-    every cell. In the other a population is missing from the target, and the
-    correct decision is to reject only that population. One case without the
-    other is a task that can be passed by never rejecting, or by rejecting
-    everything.
+    Technical degradation arrives in stages -- matched observation, a
+    sequencing-depth mismatch, and that mismatch with dropout on top -- rather
+    than as two axes that can be varied independently. nCount is a direct
+    readout of sequencing depth; nFeature is a downstream readout of both
+    depth and the extra detection loss, which is why the realised ratio under
+    each column is printed for both and why neither is called a knob.
 
-    The coupling and the gate here are schematic. This is the setting, not the
-    result: what a real run puts in those two places is the measurement, and
-    it belongs in a figure of its own, with the real n x n plan and both axes
-    ordered by the nuisance.
+    The source is drawn once and shared, so the three gate strips are the same
+    cells in the same order and a reader can watch rejections appear as the
+    measurement gets worse. The coupling and the gates are drawn, not run.
 
-    The perturbations stay as they were. In (a) both strips run the full scale
-    together -- sequence a cell deeper and it detects more genes. In (b) the
-    nCount strip is one flat colour and the nFeature strip still runs, so the
-    white in the matrix is the only thing that changed, and no depth
-    normalisation can reach it because the totals it would divide by already
-    agree.
-
-    The biology is identical in all four matrices -- one population, one
-    expression profile, both samples -- so every cell has a counterpart and
-    the ground-truth mask is solid: reject nothing.
+    The biology is identical in all four samples, so the correct answer is the
+    same at every level and the ground-truth bar spans all three.
     """
     rng = np.random.default_rng(seed)
     shown_cells, shown_genes, grid = 40, 60, 40
-    profile = rng.gamma(shape=0.5, scale=3.0, size=genes) + 0.05
-    profile = profile / profile.sum()
-    # One profile for the whole figure, so the gene order is the same in all
-    # four matrices. Every sixteenth gene by expression rather than a band off
-    # the top: the genes a sparse cell loses are the low expressers, so a band
-    # off the top would show none of it.
+    profile, samples = degradation_levels(shown_cells, genes, rng)
     gene_order = np.argsort(-profile)[:shown_genes * 16:16]
 
     C_COUNT, C_FEATURE = "#b07d2b", "#1f6f8b"
     C_KEEP, C_DROP = "#2f7d4f", "#c4553b"
-    panels: dict[tuple[str, str], dict] = {}
-    for nuisance in ("depth", "breadth"):
-        for side in ("source", "target"):
-            counts = one_population(nuisance, shown_cells, genes, depth_sd,
-                                    rng, profile=profile)
-            total = counts.sum(axis=1)
-            detected = (counts > 0).sum(axis=1)
-            order = np.argsort(total if nuisance == "depth" else detected)
-            panels[(nuisance, side)] = {
-                "matrix": np.log1p(counts[np.ix_(order, gene_order)]).T,
-                "total": total[order], "detected": detected[order]}
+    panels: dict[str, dict] = {}
+    for name, counts in samples.items():
+        total = counts.sum(axis=1)
+        detected = (counts > 0).sum(axis=1)
+        order = np.argsort(total)
+        panels[name] = {
+            "matrix": np.log1p(counts[np.ix_(order, gene_order)]).T,
+            "total": total[order], "detected": detected[order]}
 
+    reference = panels["reference source"]
     top = float(np.percentile(
         np.concatenate([q["matrix"].ravel() for q in panels.values()]), 99.5))
-    # One scale per variable across all four matrices. Scaled per matrix
-    # instead, the fixed nCount in (b) would be stretched over the full colour
-    # map and its Poisson noise would look like the gradient in (a).
     limits = {key: (min(float(q[key].min()) for q in panels.values()),
                     max(float(q[key].max()) for q in panels.values()))
               for key in ("total", "detected")}
-    # An illustrative disagreement, not a measurement: a method that follows
-    # the nuisance rejects at the low end of the ordering, so that is where
-    # the schematic puts it. Without any disagreement the two strips would be
-    # the same solid bar and the comparison would not be legible.
-    returned = np.ones(shown_cells, dtype=bool)
-    returned[[0, 1, 2, 4, 5, 7, 10, 15]] = False
-    truth = np.ones(shown_cells, dtype=bool)
-    # A population with no counterpart is a fact about the biology, so its
-    # cells sit wherever the nuisance ordering happens to put them. Scattered
-    # is what a real unmatched population looks like against this axis, and it
-    # is what distinguishes it from a gate that has followed the nuisance and
-    # rejects at one end.
-    unmatched = np.zeros(shown_cells, dtype=bool)
-    unmatched[rng.choice(shown_cells, 9, replace=False)] = True
-    truth_unmatched = ~unmatched
-    returned_unmatched = truth_unmatched.copy()
-    returned_unmatched[[1, 4]] = False
-    returned_unmatched[int(np.flatnonzero(unmatched)[0])] = True
+    # Illustrative gates, not measurements: a method that follows the
+    # measurement rejects at the shallow end of its own ordering, and it does
+    # so more as the target degrades. The source cells are shared, so the
+    # three strips are directly comparable cell by cell.
+    gates = {"matched": 0, "depth mismatch": 5, "depth + dropout": 11}
+
+    levels = ("matched", "depth mismatch", "depth + dropout")
+    column_w, column_x = 0.185, (0.115, 0.328, 0.541, 0.754)
     report: dict = {}
 
-    x_source, x_target, matrix_w = 0.100, 0.665, 0.290
-    plan_w = 0.128
-    x_plan = (x_source + matrix_w + x_target) / 2 - plan_w / 2
-    case_x, case_w = (0.200, 0.590), 0.360
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(7.2, 8.0))
-        for row, (nuisance, title) in enumerate((
-                ("depth", "sequencing depth (nCount)"),
-                ("breadth",
-                 "gene detection (nFeature), nCount held fixed"))):
-            base = 0.400 * row
-            # No subtitle and no restatement of the answer: the title
-            # names the variable and the solid ground-truth bar is the answer.
-            figure.text(x_source - 0.058, 0.972 - base,
-                        f"({chr(97 + row)})  {title}", fontsize=8.6,
-                        fontweight="semibold", ha="left", va="top")
+        figure = plt.figure(figsize=(7.6, 7.2))
+        for index, name in enumerate(("reference source",) + levels):
+            panel, x0 = panels[name], column_x[index]
+            figure.text(x0 + column_w / 2, 0.975, name, fontsize=8.0,
+                        fontweight="semibold" if index else "normal",
+                        color="#2b2b2b" if index else "#55555a",
+                        ha="center", va="top")
+            if index:
+                # Measured, not set. Printing both ratios is what says that
+                # detection is not being held anywhere.
+                for line, key in enumerate(("total", "detected")):
+                    ratio = (np.median(panel[key])
+                             / np.median(reference[key]))
+                    figure.text(
+                        x0 + column_w / 2, 0.950 - 0.022 * line,
+                        f"{'nCount' if key == 'total' else 'nFeature'}"
+                        f"  x{ratio:.2f}", fontsize=7.0,
+                        color=C_COUNT if key == "total" else C_FEATURE,
+                        ha="center", va="top")
+                report[name] = {
+                    "nCount_ratio": round(float(
+                        np.median(panel["total"]) / np.median(reference["total"])), 3),
+                    "nFeature_ratio": round(float(
+                        np.median(panel["detected"]) / np.median(reference["detected"])), 3)}
 
-            for x0, side in ((x_source, "source"), (x_target, "target")):
-                panel = panels[(nuisance, side)]
-                figure.text(x0 + matrix_w / 2, 0.936 - base, side, fontsize=7.8,
-                            color="#55555a", ha="center", va="bottom")
-
-                for index, (key, colour, name) in enumerate((
-                        ("total", C_COUNT, "nCount"),
-                        ("detected", C_FEATURE, "nFeature"))):
-                    strip = figure.add_axes(
-                        [x0, 0.898 - base - 0.036 * index, matrix_w, 0.014])
-                    strip.imshow(panel[key][None, :], aspect="auto",
-                                 cmap="viridis", vmin=limits[key][0],
-                                 vmax=limits[key][1], interpolation="nearest")
-                    strip.set_xticks([])
-                    strip.set_yticks([])
-                    for spine in strip.spines.values():
-                        spine.set_color("#d8d8d2")
-                        spine.set_linewidth(0.6)
-                    if x0 == x_source:
-                        strip.set_ylabel(name, fontsize=7.0, color=colour,
-                                         rotation=0, ha="right", va="center",
-                                         labelpad=5)
-                    low, high = panel[key].min(), panel[key].max()
-                    if key == "total" and high - low < 0.10 * high:
-                        # Held fixed by construction, which the row title
-                        # already says. Printing the mean on a bar whose point
-                        # is that it has no range invited it to be read as one.
-                        pass
-                    else:
-                        # The cells are sorted, so the ends of the strip are
-                        # the ends of the range and no colour bar is needed.
-                        for at, value, align in ((0.0, low, "left"),
-                                                 (1.0, high, "right")):
-                            strip.text(at, 1.45, f"{value:,.0f}",
-                                       transform=strip.transAxes, fontsize=6.6,
-                                       ha=align, va="bottom", color=colour)
-
-                heat = figure.add_axes([x0, 0.726 - base, matrix_w, 0.115])
-                image = heat.imshow(panel["matrix"], aspect="auto",
-                                    cmap="Blues", vmin=0.0, vmax=top,
-                                    interpolation="nearest")
-                heat.set_xticks([])
-                heat.set_yticks([])
-                for spine in heat.spines.values():
+            for line, (key, colour, label) in enumerate((
+                    ("total", C_COUNT, "nCount"),
+                    ("detected", C_FEATURE, "nFeature"))):
+                strip = figure.add_axes(
+                    [x0, 0.898 - 0.026 * line, column_w, 0.015])
+                strip.imshow(panel[key][None, :], aspect="auto", cmap="viridis",
+                             vmin=limits[key][0], vmax=limits[key][1],
+                             interpolation="nearest")
+                strip.set_xticks([])
+                strip.set_yticks([])
+                for spine in strip.spines.values():
                     spine.set_color("#d8d8d2")
                     spine.set_linewidth(0.6)
-                if x0 == x_source:
-                    heat.set_ylabel("genes", fontsize=7.0,
-                                    color="#55555a", labelpad=5)
-                heat.set_xlabel(
-                    f"ordered by "
-                    f"{'nCount' if nuisance == 'depth' else 'nFeature'}",
-                    fontsize=7.0, color="#55555a", labelpad=3)
+                if index == 0:
+                    strip.set_ylabel(label, fontsize=7.2, color=colour,
+                                     rotation=0, ha="right", va="center",
+                                     labelpad=6)
 
-            # The object the method produces, between the two samples it is
-            # built from.
-            plan = figure.add_axes([x_plan, 0.726 - base, plan_w, 0.115])
+            heat = figure.add_axes([x0, 0.718, column_w, 0.144])
+            image = heat.imshow(panel["matrix"], aspect="auto", cmap="Blues",
+                                vmin=0.0, vmax=top, interpolation="nearest")
+            heat.set_xticks([])
+            heat.set_yticks([])
+            for spine in heat.spines.values():
+                spine.set_color("#d8d8d2")
+                spine.set_linewidth(0.6)
+            if index == 0:
+                heat.set_ylabel("expression", fontsize=7.2, color="#55555a",
+                                labelpad=6)
+                # Left-aligned and narrow: centred, it ran into the
+                # coupling's rotated y label in the column beside it.
+                figure.text(x0, 0.655,
+                            "one source,\nshared by\nall three levels",
+                            fontsize=7.2, color="#55555a", ha="left",
+                            va="top", linespacing=1.5)
+            heat.set_xlabel("ordered by nCount", fontsize=6.8,
+                            color="#55555a", labelpad=3)
+
+        for index, name in enumerate(levels):
+            x0 = column_x[index + 1]
+            plan = figure.add_axes([x0, 0.489, column_w, 0.195])
             plan.imshow(schematic_coupling(grid, rng), cmap="Greys",
                         aspect="auto", interpolation="bicubic")
             plan.set_xticks([])
@@ -430,90 +423,58 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             for spine in plan.spines.values():
                 spine.set_color("#9a9a94")
                 spine.set_linewidth(0.7)
-            plan.set_ylabel("source cells", fontsize=6.8, color="#55555a",
-                            labelpad=4)
-            plan.set_xlabel("target cells", fontsize=6.8, color="#55555a",
-                            labelpad=3)
-            plan.set_title("OT coupling  $\\pi_{ij}$", fontsize=7.8, pad=3)
-            # Clear of the coupling's own y label, which the arrow used to
-            # run straight through.
-            for x_from, x_to in (
-                    (x_source + matrix_w + 0.008, x_plan - 0.030),
-                    (x_plan + plan_w + 0.008, x_target - 0.008)):
-                figure.add_artist(mpl.patches.FancyArrowPatch(
-                    (x_from, 0.784 - base), (x_to, 0.784 - base),
-                    transform=figure.transFigure, arrowstyle="-|>",
-                    mutation_scale=8, linewidth=0.9, color="#9a9a94"))
+            if index == 0:
+                plan.set_ylabel("OT coupling  $\\pi$\nsource x target",
+                                fontsize=7.2, color="#55555a", labelpad=6,
+                                linespacing=1.5)
 
-            # Coupling and costs, down to one call per source cell, against
-            # the call that is correct -- in the two cases the perturbation
-            # above has to be read against. Without the second column a method
-            # that never rejects would be right about everything on the page.
-            figure.add_artist(mpl.patches.FancyArrowPatch(
-                (x_plan + plan_w / 2, 0.708 - base),
-                (x_plan + plan_w / 2, 0.688 - base),
-                transform=figure.transFigure, arrowstyle="-|>",
-                mutation_scale=7, linewidth=0.9, color="#9a9a94"))
-            for index, label in enumerate(("gate (schematic)", "ground truth")):
-                figure.text(case_x[0] - 0.012, 0.657 - base - 0.042 * index,
-                            label, fontsize=7.0, color="#55555a", ha="right",
-                            va="center")
-            # Two layers, because they are two different statements. The
-            # header says what is in the samples; the line above the mask says
-            # what the correct decision is. Run together as one phrase, a
-            # reader cannot tell which part is the setting and which part is
-            # the answer being scored against.
-            for column, (header, decision, pair) in enumerate((
-                    ("the same populations in source and target",
-                     "keep every cell", (returned, truth)),
-                    ("one population is missing from the target",
-                     "reject only that population",
-                     (returned_unmatched, truth_unmatched)))):
-                figure.text(case_x[column] + case_w / 2, 0.682 - base, header,
-                            fontsize=7.0, color="#55555a", ha="center",
-                            va="top")
-                figure.text(case_x[column] + case_w / 2, 0.627 - base,
-                            decision, fontsize=7.0, color="#55555a",
-                            ha="center", va="bottom")
-                for index, values in enumerate(pair):
-                    gate = figure.add_axes(
-                        [case_x[column], 0.648 - base - 0.042 * index,
-                         case_w, 0.018])
-                    gate.imshow(values[None, :], aspect="auto",
-                                cmap=mpl.colors.ListedColormap([C_DROP, C_KEEP]),
-                                vmin=0, vmax=1, interpolation="nearest")
-                    gate.set_xticks([])
-                    gate.set_yticks([])
-                    for spine in gate.spines.values():
-                        spine.set_color("#d8d8d2")
-                        spine.set_linewidth(0.6)
+            keep = np.ones(shown_cells, dtype=bool)
+            if gates[name]:
+                keep[:gates[name]] = False
+            gate = figure.add_axes([x0, 0.428, column_w, 0.018])
+            gate.imshow(keep[None, :], aspect="auto",
+                        cmap=mpl.colors.ListedColormap([C_DROP, C_KEEP]),
+                        vmin=0, vmax=1, interpolation="nearest")
+            gate.set_xticks([])
+            gate.set_yticks([])
+            for spine in gate.spines.values():
+                spine.set_color("#d8d8d2")
+                spine.set_linewidth(0.6)
+            if index == 0:
+                gate.set_ylabel("example gate", fontsize=7.2, color="#55555a",
+                                rotation=0, ha="right", va="center",
+                                labelpad=6)
 
-            reference = panels[(nuisance, "source")]
-            report[title] = {
-                "biology": "one population, identical in both samples",
-                "correct_answer": "reject nothing",
-                "nCount_range": [float(reference["total"].min()),
-                                 float(reference["total"].max())],
-                "nFeature_range": [int(reference["detected"].min()),
-                                   int(reference["detected"].max())],
-                "coupling": "schematic, Sinkhorn-scaled noise",
-                "gate": "schematic, an illustrative disagreement",
-                "scored_by": ("fraction wrongly rejected, and whether "
-                              "rejection follows the nuisance")}
+        span_x = column_x[1]
+        span_w = column_x[3] + column_w - span_x
+        figure.text(span_x, 0.392, "ground truth", fontsize=7.2,
+                    color="#55555a", va="bottom")
+        truth = figure.add_axes([span_x, 0.366, span_w, 0.020])
+        truth.imshow(np.ones((1, shown_cells * 3)), aspect="auto",
+                     cmap=mpl.colors.ListedColormap([C_KEEP]),
+                     interpolation="nearest")
+        truth.set_xticks([])
+        truth.set_yticks([])
+        for spine in truth.spines.values():
+            spine.set_color("#d8d8d2")
+            spine.set_linewidth(0.6)
+        figure.text(span_x + span_w / 2, 0.340,
+                    "all biological populations remain matchable at every level",
+                    fontsize=7.4, color="#2f7d4f", ha="center", va="top")
 
         bar = figure.colorbar(image, cax=figure.add_axes(
-            [x_source, 0.150, 0.135, 0.011]), orientation="horizontal")
+            [column_x[0], 0.286, 0.125, 0.011]), orientation="horizontal")
         ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
                  if value <= float(np.expm1(top))]
         bar.set_ticks(np.log1p(ticks))
         bar.set_ticklabels([f"{value:,}" for value in ticks])
         bar.ax.tick_params(labelsize=6.5, length=2, pad=1.5)
         bar.outline.set_linewidth(0.5)
-        figure.text(x_source + 0.150, 0.156, "counts (white = 0)",
+        figure.text(column_x[0] + 0.140, 0.292, "counts (white = 0)",
                     fontsize=7.2, color="#55555a", va="center")
         for index, (colour, text) in enumerate(((C_KEEP, "kept"),
                                                 (C_DROP, "rejected"))):
-            swatch = figure.add_axes([0.640 + 0.128 * index, 0.150, 0.020,
+            swatch = figure.add_axes([0.600 + 0.120 * index, 0.286, 0.018,
                                       0.011])
             swatch.set_xticks([])
             swatch.set_yticks([])
@@ -521,12 +482,13 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             for spine in swatch.spines.values():
                 spine.set_color("#d8d8d2")
                 spine.set_linewidth(0.6)
-            figure.text(0.666 + 0.128 * index, 0.156, text, fontsize=7.2,
+            figure.text(0.624 + 0.120 * index, 0.292, text, fontsize=7.2,
                         color="#55555a", va="center")
-        # Nothing is written under the legend. The metrics are definitions
-        # and live in BENCHMARK_METRICS.md; that the coupling and the gate are
-        # drawn rather than run belongs in the caption of whatever the figure
-        # is placed in, not inside the figure.
+        figure.text(column_x[0], 0.256,
+                    "nCount reads out sequencing depth; nFeature reads out "
+                    "both depth and the extra detection loss, so they are not "
+                    "independent axes", fontsize=7.2, color="#8c8c86",
+                    va="center", style="italic")
 
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
