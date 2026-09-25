@@ -263,88 +263,95 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """How the arms are built, in the same language the other figures use.
+    """The arms as a transport problem, because that is what is being tested.
 
-    Source on the left, target on the right, one shared embedding so a cell's
-    position means the same thing in both. Both sides are drawn from the same
-    population and both carry the same nuisance, so every cell has a
-    counterpart and the correct answer is to reject nothing.
+    An earlier version drew two point clouds and said the nuisance was on both
+    sides. It never showed the coupling, which is the only thing the method
+    produces and the only thing the benchmark scores. This draws it: source
+    cells on the upper row, target cells on the lower one, a line for every
+    matched pair.
 
-    That is the whole content, and it is said by what is *not* drawn. In the
-    scenario figure a ring marks a population with no counterpart; here the
-    gradient is plainly present and no ring appears anywhere, which is the
-    distinction the arms exist to test -- a method may not treat a nuisance
-    both sides share as though it were a missing population.
+    Both rows are drawn from one population and both carry the same nuisance,
+    so a complete coupling exists -- every source cell has a target cell it
+    belongs with. The correct answer is therefore to reject nothing, and the
+    failure the arm is built to catch is a method that reads the nuisance as
+    structure and refuses to match across it: the deep cells of one side
+    declining the shallow cells of the other, leaving cells unmatched that
+    have perfectly good partners.
 
-    Applied to one side only this would be a batch effect between samples,
-    which is a different problem with its own methods, and the arm would no
-    longer have "reject nothing" as its answer.
+    Cells are ordered along each row by the nuisance, so the gradient is
+    visible on both rows and a coupling that respects it would slant while a
+    correct one runs straight across.
     """
+    shown = 46
     report: dict = {}
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.6, 6.0))
-        outer = figure.add_gridspec(2, 1, hspace=0.30, left=0.015,
-                                    right=0.885, top=0.945, bottom=0.02)
+        figure = plt.figure(figsize=(6.9, 3.9))
         for row, nuisance in enumerate(("depth", "breadth")):
             facts = NUISANCE[nuisance]
-            rng = np.random.default_rng(seed + 100 + row)
-            # One population, then two independent draws from it, each
-            # carrying the nuisance in the same way. The profile is drawn once
-            # and shared: two draws that each invent their own profile are two
-            # different populations, and the embedding separates them.
-            shared = rng.gamma(shape=0.5, scale=3.0, size=genes) + 0.05
-            shared = shared / shared.sum()
-            source = one_population(nuisance, cells // 2, genes, depth_sd, rng,
-                                    profile=shared)
-            target = one_population(nuisance, cells // 2, genes, depth_sd, rng,
-                                    profile=shared)
-            counts = np.vstack([source, target])
-            is_source = np.arange(len(counts)) < len(source)
-            values = (counts.sum(axis=1) if nuisance == "depth"
-                      else (counts > 0).sum(axis=1))
-            points = embed(counts, "logcpm", seed)
-            colour = np.log10(values + 1.0)
-            limits = (points[:, 0].min(), points[:, 0].max(),
-                      points[:, 1].min(), points[:, 1].max())
-            pad = 0.04 * max(limits[1] - limits[0], limits[3] - limits[2])
+            rng = np.random.default_rng(seed + 200 + row)
+            profile = rng.gamma(shape=0.5, scale=3.0, size=genes) + 0.05
+            profile = profile / profile.sum()
+            source = one_population(nuisance, shown, genes, depth_sd, rng,
+                                    profile=profile)
+            target = one_population(nuisance, shown, genes, depth_sd, rng,
+                                    profile=profile)
 
-            inner = outer[row].subgridspec(1, 2, wspace=0.05)
-            for column, (side, mask) in enumerate((("source", is_source),
-                                                   ("target", ~is_source))):
-                axes = figure.add_subplot(inner[0, column])
-                axes.scatter(points[~mask, 0], points[~mask, 1], s=7,
-                             c="#ececE6", linewidths=0, zorder=1)
-                dots = axes.scatter(points[mask, 0], points[mask, 1],
-                                    c=colour[mask], s=11, cmap="viridis",
-                                    linewidths=0, zorder=3,
-                                    vmin=colour.min(), vmax=colour.max())
-                axes.set_xlim(limits[0] - pad, limits[1] + pad)
-                axes.set_ylim(limits[2] - pad, limits[3] + pad)
-                axes.set_xticks([])
-                axes.set_yticks([])
-                for spine in axes.spines.values():
-                    spine.set_color("#d8d8d2")
-                    spine.set_linewidth(0.6)
-                axes.set_title(side, loc="center", fontsize=8,
-                               color="#55555a", pad=4)
-                if column == 1:
-                    bar = figure.colorbar(dots, ax=axes, fraction=0.055,
-                                          pad=0.025)
-                    bar.set_label(facts["colour_by"], fontsize=7)
-                    bar.ax.tick_params(labelsize=6.5)
-                    bar.outline.set_linewidth(0.5)
-                else:
-                    axes.text(0.0, 1.14,
-                              f"({chr(97 + row)})  {facts['title']}",
-                              transform=axes.transAxes, fontsize=8.4,
-                              fontweight="semibold", ha="left", va="bottom")
-            report[nuisance] = {
-                "source_cells": int(is_source.sum()),
-                "target_cells": int((~is_source).sum()),
-                "correct_answer": "reject nothing",
-                "shared": ("both sides carry the nuisance, so every cell has "
-                           "a counterpart"),
-            }
+            def nuisance_of(counts: np.ndarray) -> np.ndarray:
+                return (counts.sum(axis=1) if nuisance == "depth"
+                        else (counts > 0).sum(axis=1)).astype(float)
+
+            # Sorted so the gradient reads along each row. The coupling is
+            # then legible as a shape: straight across if the match ignores
+            # the nuisance, slanting if it does not.
+            source_values = np.sort(nuisance_of(source))
+            target_values = np.sort(nuisance_of(target))
+            bounds = (min(source_values.min(), target_values.min()),
+                      max(source_values.max(), target_values.max()))
+            scale = np.log10(np.asarray(bounds) + 1.0)
+
+            axes = figure.add_axes([0.015, 0.545 - 0.495 * row, 0.80, 0.335])
+            axes.set_xlim(-1.5, shown + 0.5)
+            axes.set_ylim(-0.55, 1.62)
+            axes.axis("off")
+            x = np.arange(shown)
+            for index in range(shown):
+                axes.plot([x[index], x[index]], [1.0, 0.0], color="#c6c6c0",
+                          linewidth=0.7, zorder=1)
+            for y, values, side in ((1.0, source_values, "source"),
+                                    (0.0, target_values, "target")):
+                dots = axes.scatter(
+                    x, np.full(shown, y), c=np.log10(values + 1.0), s=34,
+                    cmap="viridis", linewidths=0, zorder=3,
+                    vmin=scale[0], vmax=scale[1])
+                axes.text(-0.9, y, side, fontsize=7.6, ha="right",
+                          va="center", color="#55555a")
+            axes.text(0.0, 1.50, f"({chr(97 + row)})  {facts['title']}",
+                      fontsize=8.4, fontweight="semibold", ha="left",
+                      transform=axes.get_yaxis_transform(which="grid"))
+            axes.text(shown * 0.5, 1.30, facts["construction"].replace("\n", "  "),
+                      fontsize=7.4, ha="center", va="bottom",
+                      color="#b07d2b" if nuisance == "depth" else "#1f6f8b")
+            axes.text(shown * 0.5, -0.50, "every cell matched: reject nothing",
+                      fontsize=8, fontweight="bold", color="#2f7d4f",
+                      ha="center", va="bottom")
+            bar = figure.colorbar(
+                dots, ax=axes, fraction=0.035, pad=0.015, aspect=9)
+            bar.set_label(facts["colour_by"], fontsize=7)
+            bar.ax.tick_params(labelsize=6.5)
+            bar.outline.set_linewidth(0.5)
+            report[nuisance] = {"pairs_drawn": shown,
+                                "correct_answer": "reject nothing",
+                                "nuisance_on": "both sides"}
+
+        figure.text(0.015, 0.02,
+                    "Carried by one side only, either spread would be a batch "
+                    "effect between samples: a different problem with its own "
+                    "methods.\nCarried by both, a complete coupling exists, "
+                    "and the failure to catch is a method that reads the "
+                    "gradient as structure and refuses to match across it.",
+                    fontsize=7.4, color="#55555a", va="bottom",
+                    linespacing=1.55)
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
         plt.close(figure)
