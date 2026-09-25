@@ -265,122 +265,168 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """Two technical conditions, one biology, and nothing to reject in either.
+    """The benchmark's input, drawn as the matrix it is.
 
-    The previous version made (b) a cell type present in the primary and
-    absent from the metastasis. That is a biological question -- can the
-    method find a population with no counterpart -- and it is the one the
-    scenario figure asks. Putting it here meant this figure tested two
-    different things and neither of them was the low-gene effect.
+    A cartoon of dots can only assert that total counts are held fixed. The
+    count matrix shows it: genes down, cells across, cells ordered by the
+    nuisance, with each cell's two totals drawn above the panel they belong to.
 
-    Both rows are technical. The biology is identical on both sides and in
-    both rows: the same cell types, in the same proportions, with no
-    population missing anywhere. Only the measurement differs, and the correct
-    answer in both is to reject nothing. A cell that was sequenced shallowly,
-    or in which few genes were detected, is the same cell biologically and
-    must still find its match.
+    That ordering is the whole figure. In (a) both totals climb together --
+    sequence a cell deeper and it detects more genes -- which is why the two
+    are so often treated as one variable. In (b) nCount is a flat line and
+    nFeature still climbs, so the white space is the only thing that changed.
+    Separating them is not pedantry: (b) is the case no depth normalisation
+    can reach, because the totals it would divide by already agree.
 
-    The two are separated because they are separate variables:
+    White is a zero, so the white in (b) is the dropout, in the one place it
+    is ever visible: the matrix. Its edge is sharp because the construction is
+    exact and the genes are in expression order, not because real dropout has
+    a boundary; what is real is that the genes a sparse cell loses are the low
+    expressers.
 
-    * **nCount**, the library size, is what row (a) varies.
-    * **nFeature**, how many genes were detected at all, is what row (b)
-      varies -- **with total counts held fixed**, so that a rejection in (b)
-      cannot be attributed to depth. Vary both at once and the arm cannot say
-      which one drove the failure, which is why the earlier single "cell size"
-      legend was not good enough.
-
-    Dropout is the third name for the same region of this space -- the zeros,
-    the signal that is missing rather than small -- and it rides with nFeature
-    here: a cell detecting fewer genes at the same depth is a cell with more
-    zeros.
+    The biology is identical in all four panels -- one population, one
+    expression profile, both samples -- so every cell has a counterpart and
+    the correct answer in both rows is to reject nothing.
     """
     rng = np.random.default_rng(seed)
-    n = 40
+    shown_cells, shown_genes = 64, 110
+    profile = rng.gamma(shape=0.5, scale=3.0, size=genes) + 0.05
+    profile = profile / profile.sum()
+    # One profile for the whole figure, so the gene order is the same in all
+    # four panels and they can be read against each other. Every eighth gene
+    # by expression rather than the top 110: the genes a sparse cell loses are
+    # the low expressers, so a band taken off the top would show none of it.
+    gene_order = np.argsort(-profile)[:shown_genes * 8:8]
+
+    C_COUNT, C_FEATURE = "#b07d2b", "#1f6f8b"
+    panels: dict[tuple[str, str], dict] = {}
+    for nuisance in ("depth", "breadth"):
+        for side in ("primary", "metastasis"):
+            counts = one_population(nuisance, shown_cells, genes, depth_sd,
+                                    rng, profile=profile)
+            total = counts.sum(axis=1)
+            detected = (counts > 0).sum(axis=1)
+            order = np.argsort(total if nuisance == "depth" else detected)
+            panels[(nuisance, side)] = {
+                "matrix": np.log1p(counts[np.ix_(order, gene_order)]).T,
+                "total": total[order], "detected": detected[order]}
+
+    top = float(np.percentile(
+        np.concatenate([q["matrix"].ravel() for q in panels.values()]), 99.5))
+    count_max = max(float(q["total"].max()) for q in panels.values()) * 1.08
     report: dict = {}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.9, 3.4))
-        for row, (title, note, extreme, scored) in enumerate((
-                ("sequencing depth",
-                 "cells differ in library size (nCount)",
-                 "the shallowest cells",
-                 "how many cells are wrongly rejected, and whether\n"
-                 "rejection tracks nCount"),
-                ("gene detection and dropout",
-                 "total counts held fixed; cells differ in how many\n"
-                 "genes are detected (nFeature), so in how many zeros",
-                 "the sparsest cells",
-                 "how many cells are wrongly rejected, and whether\n"
-                 "rejection tracks nFeature"))):
-            axes = figure.add_axes([0.015, 0.555 - 0.480 * row, 0.60, 0.350])
-            axes.set_xlim(-2.7, 12.4)
-            axes.set_ylim(-1.35, 1.72)
-            axes.axis("off")
+        figure = plt.figure(figsize=(6.8, 5.6))
+        width, x_left = 0.425, 0.075
+        for row, (nuisance, title, note) in enumerate((
+                ("depth", "sequencing depth",
+                 "cells differ in library size, and a deeper cell also "
+                 "detects more genes"),
+                ("breadth", "gene detection and dropout",
+                 "total counts held fixed: only the number of genes detected "
+                 "changes"))):
+            base = 0.460 * row
+            figure.text(x_left - 0.062, 0.985 - base,
+                        f"({chr(97 + row)})  {title}", fontsize=8.6,
+                        fontweight="semibold", ha="left", va="top")
+            figure.text(x_left - 0.062, 0.959 - base, note, fontsize=7.4,
+                        ha="left", va="top", color="#55555a")
+            # Beside the title rather than in a column of its own: the same
+            # sentence under both rows was six lines of text saying one thing.
+            figure.text(0.985, 0.985 - base, "correct answer: reject nothing",
+                        fontsize=8.0, fontweight="bold", color="#2f7d4f",
+                        ha="right", va="top")
 
             for column, side in enumerate(("primary", "metastasis")):
-                x0 = 0.6 + 6.2 * column
-                spread = rng.uniform(-1.0, 1.0, size=(n, 2))
-                spread[:, 0] *= 2.1
-                spread[:, 1] = 0.30 + 0.34 * spread[:, 1]
-                sizes = 8.0 + 54.0 * rng.beta(1.5, 2.2, size=n)
-                # One biology: every cell is the same kind, on both sides.
-                axes.scatter(spread[:, 0] + x0, spread[:, 1], s=sizes,
-                             c="#0072B2", linewidths=0, alpha=0.9, zorder=3)
-                # The cells a method is most likely to get wrong, marked as
-                # what they are: cells that must still match.
-                for index in np.argsort(sizes)[:4]:
-                    axes.scatter([spread[index, 0] + x0], [spread[index, 1]],
-                                 s=125, facecolors="none",
-                                 edgecolors="#2f7d4f", linewidths=1.1,
-                                 linestyle=(0, (3, 2)), zorder=5)
-                axes.text(x0, -0.22, side, fontsize=7.6, ha="center",
-                          color="#55555a")
+                panel = panels[(nuisance, side)]
+                x0 = x_left + column * (width + 0.035)
+                cell_x = np.arange(len(panel["total"]))
+                figure.text(x0 + width / 2, 0.912 - base, side, fontsize=7.8,
+                            color="#55555a", ha="center", va="bottom")
 
-            axes.text(-2.6, 1.58, f"({chr(97 + row)})  {title}", fontsize=8.4,
-                      fontweight="semibold", ha="left")
-            axes.text(-2.6, 1.36, note, fontsize=7.4, ha="left", va="top",
-                      color="#b07d2b" if row == 0 else "#1f6f8b",
-                      linespacing=1.5)
-            axes.text(-2.6, -0.62, "reject nothing", fontsize=8,
-                      fontweight="bold", ha="left", color="#2f7d4f")
-            axes.text(-2.6, -0.86, scored, fontsize=7.4, ha="left", va="top",
-                      color="#55555a", linespacing=1.5)
-            report[title] = {"biology": "identical on both sides",
-                             "varies": note.replace("\n", " "),
-                             "correct_answer": "reject nothing",
-                             "scored_by": scored.replace("\n", " ")}
+                for index, (key, colour, ceiling, name) in enumerate((
+                        ("total", C_COUNT, count_max, "nCount"),
+                        ("detected", C_FEATURE, float(genes), "nFeature"))):
+                    track = figure.add_axes(
+                        [x0, 0.858 - base - 0.054 * index, width, 0.046])
+                    track.fill_between(cell_x, panel[key], color=colour,
+                                       alpha=0.85, linewidth=0)
+                    track.set_xlim(-0.5, len(cell_x) - 0.5)
+                    track.set_ylim(0, ceiling)
+                    track.set_xticks([])
+                    track.set_yticks([])
+                    for spine in track.spines.values():
+                        spine.set_visible(False)
+                    track.spines["bottom"].set_visible(True)
+                    track.spines["bottom"].set_color("#d8d8d2")
+                    track.spines["bottom"].set_linewidth(0.6)
+                    if column == 0:
+                        track.set_ylabel(name, fontsize=7.2, color=colour,
+                                         rotation=0, ha="right", va="center",
+                                         labelpad=6)
+                    low, high = panel[key].min(), panel[key].max()
+                    if key == "total" and high - low < 0.10 * high:
+                        # Held fixed by construction: the residual spread is
+                        # Poisson noise on the total, so quoting the extremes
+                        # would read as a range the arm does not have.
+                        span = f"{round(panel[key].mean(), -2):,.0f} in every cell"
+                    elif key == "total":
+                        span = f"{low / 1000:.1f}k to {high / 1000:.1f}k"
+                    else:
+                        span = f"{low:,.0f} to {high:,.0f}"
+                    track.text(0.006, 0.94, span, transform=track.transAxes,
+                               fontsize=6.8, ha="left", va="top", color=colour)
 
-        legend = figure.add_axes([0.645, 0.13, 0.345, 0.76])
-        legend.set_xlim(0, 1)
-        legend.set_ylim(0, 1)
-        legend.axis("off")
-        legend.scatter([0.045], [0.95], s=46, c="#0072B2", linewidths=0)
-        legend.text(0.14, 0.95, "a cell; every cell is the same", fontsize=7.6,
-                    va="center")
-        legend.text(0.14, 0.86, "kind, in both samples", fontsize=7.6,
-                    va="center")
-        legend.scatter([0.045], [0.73], s=90, facecolors="none",
-                       edgecolors="#2f7d4f", linewidths=1.1,
-                       linestyle=(0, (3, 2)))
-        legend.text(0.14, 0.73, "must still match", fontsize=7.6, va="center",
-                    color="#2f7d4f")
-        y = 0.56
-        for text in ("cell size is the measurement,",
-                     "not the biology:",
-                     "(a) nCount, the library size",
-                     "(b) nFeature, the genes detected,",
-                     "      with nCount held fixed"):
-            legend.text(0.0, y, text, fontsize=7.4, color="#55555a",
-                        va="center")
-            y -= 0.095
-        y -= 0.06
-        for text in ("kept apart because a cell can be",
-                     "deeply sequenced and still detect",
-                     "few genes: more zeros at the same",
-                     "library size is the dropout case"):
-            legend.text(0.0, y, text, fontsize=7.4, color="#8c8c86",
-                        va="center", style="italic")
-            y -= 0.095
+                heat = figure.add_axes([x0, 0.580 - base, width, 0.218])
+                image = heat.imshow(panel["matrix"], aspect="auto",
+                                    cmap="Blues", vmin=0.0, vmax=top,
+                                    interpolation="nearest")
+                heat.set_xticks([])
+                heat.set_yticks([])
+                for spine in heat.spines.values():
+                    spine.set_color("#d8d8d2")
+                    spine.set_linewidth(0.6)
+                if column == 0:
+                    heat.set_ylabel(f"{shown_genes} genes\nranked by expression",
+                                    fontsize=7.0, color="#55555a",
+                                    labelpad=6, linespacing=1.5)
+                heat.set_xlabel(
+                    f"{shown_cells} cells of this sample, ordered by "
+                    f"{'nCount' if nuisance == 'depth' else 'nFeature'}",
+                    fontsize=7.2, color="#55555a", labelpad=3)
+
+            reference = panels[(nuisance, "primary")]
+            report[title] = {
+                "biology": "one population, identical in both samples",
+                "correct_answer": "reject nothing",
+                "nCount_range": [float(reference["total"].min()),
+                                 float(reference["total"].max())],
+                "nFeature_range": [int(reference["detected"].min()),
+                                   int(reference["detected"].max())],
+                "scored_by": ("fraction wrongly rejected, and whether "
+                              "rejection follows the nuisance")}
+
+        bar = figure.colorbar(image, cax=figure.add_axes(
+            [x_left, 0.072, 0.20, 0.013]), orientation="horizontal")
+        ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
+                 if value <= float(np.expm1(top))]
+        bar.set_ticks(np.log1p(ticks))
+        bar.set_ticklabels([f"{value:,}" for value in ticks])
+        bar.ax.tick_params(labelsize=6.5, length=2, pad=1.5)
+        bar.outline.set_linewidth(0.5)
+        figure.text(x_left + 0.215, 0.078,
+                    "counts for that gene in that cell; white is a zero, "
+                    "the gene was not detected", fontsize=7.4,
+                    color="#55555a", va="center")
+        figure.text(x_left, 0.030,
+                    "the biology is identical in all four panels -- one "
+                    "population, both samples -- so every cell has a "
+                    "counterpart", fontsize=7.4, color="#55555a", va="center")
+        figure.text(x_left, 0.006,
+                    "scored: how many cells are wrongly rejected, and whether "
+                    "rejection follows nCount in (a) or nFeature in (b)",
+                    fontsize=7.4, color="#8c8c86", va="center", style="italic")
 
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
