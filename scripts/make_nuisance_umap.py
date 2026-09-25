@@ -299,11 +299,12 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     report: dict = {}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(7.1, 3.8))
+        figure = plt.figure(figsize=(7.1, 4.1))
         for row, (arm, subtitle) in enumerate((
                 ("specificity", "one population, drawn twice"),
                 ("power", "a subpopulation added to the source only"))):
-            axes = figure.add_axes([0.015, 0.545 - 0.455 * row, 0.62, 0.335])
+            axes = figure.add_axes([0.015, 0.600 - 0.430 * row,
+                                    0.625, 0.330])
             axes.set_xlim(-2.6, 12.4)
             axes.set_ylim(-1.18, 1.34)
             axes.axis("off")
@@ -329,12 +330,12 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                      s=sizes[index] + 90, facecolors="none",
                                      edgecolors=C_REJECT, linewidths=1.1,
                                      zorder=5)
-                axes.text(x0, 0.95, side, fontsize=7.6, ha="center",
+                axes.text(x0, 0.88, side, fontsize=7.6, ha="center",
                           color="#55555a")
-            axes.text(-2.5, 1.14, f"({chr(97 + row)})  {arm} arm",
+            axes.text(-2.5, 1.16, f"({chr(97 + row)})  {arm} arm",
                       fontsize=8.4, fontweight="semibold", ha="left")
-            axes.text(-2.5, 0.80, subtitle, fontsize=7.2, ha="left",
-                      color="#55555a")
+            axes.text(12.3, 1.17, subtitle, fontsize=7.2,
+                      ha="right", va="baseline", color="#55555a")
 
             truth = ("no cell is rejected" if arm == "specificity"
                      else f"exactly the {planted} planted cells are rejected")
@@ -354,7 +355,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
         # off. Drawn the other way, the markers sat outside the axes as far as
         # matplotlib was concerned, and bbox_inches="tight" grew the canvas to
         # contain them -- a figure eleven thousand pixels tall.
-        legend = figure.add_axes([0.655, 0.08, 0.335, 0.80])
+        legend = figure.add_axes([0.665, 0.17, 0.325, 0.76])
         legend.set_xlim(0, 1)
         legend.set_ylim(0, 1)
         legend.axis("off")
@@ -391,14 +392,15 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     "partner in the other set at all.",
                     fontsize=7.0, color="#8c8c86", va="top", linespacing=1.6)
 
-        figure.text(0.015, 0.012,
-                    "Both arms carry the nuisance, and both are needed: a "
-                    "method that never rejects is perfect on (a), and one "
-                    "that rejects everything is perfect\non (b)'s recall. "
-                    "Technical invariance is scored across both, as the "
-                    "correlation between the gate and the nuisance.",
-                    fontsize=7.2, color="#55555a", va="bottom",
-                    linespacing=1.55)
+        figure.text(
+            0.015, 0.012,
+            "Both arms carry the nuisance and both are needed: a method "
+            "that never rejects is perfect on (a),\n"
+            "and one that rejects everything is perfect on (b)'s recall. "
+            "Technical invariance is\n"
+            "scored across both, as the correlation between the gate and "
+            "the nuisance.",
+            fontsize=7.2, color="#55555a", va="bottom", linespacing=1.55)
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
         plt.close(figure)
