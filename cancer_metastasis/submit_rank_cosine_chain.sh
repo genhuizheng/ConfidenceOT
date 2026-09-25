@@ -199,7 +199,9 @@ if ! [[ "$array_n" =~ ^[0-9]+$ ]] || (( array_n < 1 )); then
   echo "Could not read an array size from OT_ARRAY='$array'" >&2
   exit 2
 fi
-required=$((array_n + 3))
+split_n=0
+if [[ -z "$prostate_manifest" ]]; then split_n=1; fi
+required=$((array_n + 3 + split_n))
 in_queue=0
 if [[ -z "${DRY_RUN:-}" ]]; then
   in_queue=$(squeue -u "$USER" -h -r 2>/dev/null | wc -l | tr -d ' ')
@@ -237,6 +239,24 @@ submit() {
 
 cd "$repo"
 mkdir -p "$result/logs"
+
+# J0. One dataset out of the pan-cancer manifest. Without it the equalisation
+# reads all 243 pairs across twelve deposits and writes them into a root named
+# after one -- which fails nothing, since every stage downstream just reads
+# what the manifest says, and would be discovered only by noticing that a
+# three-pair dataset produced a hundred-pair gate.
+dataset_manifest=$source_manifest
+split_job=""
+if [[ -z "$prostate_manifest" ]]; then
+  dataset_manifest=$result/manifest_by_dataset/${accession}_${stamp}.csv
+  mkdir -p "$(dirname "$dataset_manifest")"
+  split_job=$(submit \
+    -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J "cot_split_$dataset" \
+    -o "$result/logs/split_${dataset}_%j.out" \
+    -e "$result/logs/split_${dataset}_%j.err" \
+    --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/35_trim_manifest_to_gate.py $source_manifest $dataset_manifest --dataset-id $accession")
+  echo "J0 split       $split_job -> $dataset_manifest"
+fi
 
 # J1. Equalisation, only when its output is absent. A present manifest is
 # treated as authoritative: it is the thing every later stage reads.
@@ -326,11 +346,15 @@ else
     echo "J1 equalise    skipped, $preprocessing has no _ds stage"
     echo "J1 counts      original, $manifest"
   else
-  equalise_job=$(submit \
+  split_dependency=()
+  if [[ -n "$split_job" ]]; then
+    split_dependency=(--dependency=afterok:"$split_job")
+  fi
+  equalise_job=$(submit "${split_dependency[@]}" \
     -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J "cot_ds_$dataset" \
     -o "$result/logs/ds_${dataset}_%j.out" \
     -e "$result/logs/ds_${dataset}_%j.err" \
-    --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/27_downsample_counts.py $source_manifest $equalised $(printf '%q ' "${annotation_args[@]}")--target-quantile $target_quantile --minimum-total-counts 0 --minimum-detected-genes 0 --maximum-mitochondrial-percent 100")
+    --wrap="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/27_downsample_counts.py $dataset_manifest $equalised $(printf '%q ' "${annotation_args[@]}")--target-quantile $target_quantile --minimum-total-counts 0 --minimum-detected-genes 0 --maximum-mitochondrial-percent 100")
   echo "J1 equalise    $equalise_job -> $equalised"
   fi
 fi
@@ -406,6 +430,8 @@ echo
 printf 'dataset        %s (%s)\n' "$dataset" "$accession"
 printf 'preprocessing  %s\n' "$preprocessing"
 printf 'counts         %s\n' "${equalise_stage:+equalised, $equalised}${equalise_stage:-original}"
+printf 'source         %s\n' "$source_manifest"
+printf 'dataset split  %s\n' "$dataset_manifest"
 printf 'manifest       %s\n' "$manifest"
 printf 'ot             %s\n' "$ot"
 printf 'diagnostics    %s\n' "$diagnostics"
