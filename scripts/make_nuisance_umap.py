@@ -345,11 +345,17 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                        edgecolors=C_REJECT, linewidths=1.1)
         legend.text(0.14, y, "no counterpart in the metastasis", fontsize=7.6,
                     va="center", color=C_REJECT)
-        y -= 0.21
-        for text in ("cell size: sequencing depth, or how many",
-                     "genes were detected in that cell",
+        y -= 0.19
+        for text in ("cell size: sequencing depth",
                      "both samples carry the same spread"):
             legend.text(0.0, y, text, fontsize=7.4, color="#55555a",
+                        va="center")
+            y -= 0.10
+        y -= 0.07
+        for text in ("each case is run a second time with",
+                     "nFeature spread instead, at fixed depth:",
+                     "a separate problem, not the same one"):
+            legend.text(0.0, y, text, fontsize=7.4, color="#1f6f8b",
                         va="center")
             y -= 0.10
         y -= 0.10
