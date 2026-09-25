@@ -22,6 +22,14 @@ From: rocker/r-ver:4.4.1
 %post
     set -e
     export DEBIAN_FRONTEND=noninteractive
+
+    # apt's download method drops privileges to the _apt user before it
+    # fetches anything, and setgroups is not permitted inside the user
+    # namespace a fakeroot build runs in, so apt-get update dies with
+    # "Method http has died unexpectedly" and an exit code that looks like a
+    # network failure. Telling apt to stay root is the documented way out.
+    printf 'APT::Sandbox::User "root";\n' > /etc/apt/apt.conf.d/99-no-sandbox
+
     apt-get update
     # The headers, named rather than pulled in by a metapackage, so that a
     # build failure names the library it was missing.

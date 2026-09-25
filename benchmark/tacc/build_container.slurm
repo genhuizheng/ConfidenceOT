@@ -51,8 +51,11 @@ echo "building $sif from $definition"
 
 if ! apptainer build --fakeroot "$sif" "$definition"; then
     echo >&2
-    echo "the build failed. If the message was about fakeroot, this account "\
-         "does not have it configured; the alternatives are:" >&2
+    echo "the build failed. Read the message above before choosing:" >&2
+    echo "  setgroups / Method http has died  -> apt dropping privileges "\
+         "inside the namespace; %post already disables its sandbox, so this "\
+         "would mean the fix did not apply" >&2
+    echo "  fakeroot not configured           -> use one of:" >&2
     echo "  apptainer build --remote $sif $definition   # needs a sylabs token" >&2
     echo "  or keep using the conda library, which already has splatter:" >&2
     echo "  CONFIDENCEOT_R_LIBRARY=$repo/.r-library" >&2
