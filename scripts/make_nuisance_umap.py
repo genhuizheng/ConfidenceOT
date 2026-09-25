@@ -289,35 +289,10 @@ def degradation_levels(n_cells: int, n_genes: int,
     }
 
 
-def block_row(figure, x0: float, y: float, width: float, height: float,
-              labels: tuple[str, ...], present: tuple[bool, ...],
-              accent: int, neutral: str, highlight: str) -> None:
-    """One sample as a row of population blocks, present or absent.
-
-    Presence, not geometry: a filled block is a population this sample has and
-    an outlined one is a population it does not. The population that differs
-    keeps the same colour in both states, so the eye follows one block from
-    filled to outlined rather than hunting for what changed.
-    """
-    pitch = width + 0.006
-    for index, (label, here) in enumerate(zip(labels, present)):
-        colour = highlight if index == accent else neutral
-        axes = figure.add_axes([x0 + index * pitch, y, width, height])
-        axes.set_xticks([])
-        axes.set_yticks([])
-        axes.set_facecolor(colour if here else "none")
-        for spine in axes.spines.values():
-            spine.set_color(colour)
-            spine.set_linewidth(1.0 if index == accent else 0.7)
-        axes.text(0.5, 0.5, label, transform=axes.transAxes, fontsize=7.0,
-                  ha="center", va="center",
-                  color="white" if here else colour)
-
-
 def strip_row(figure, x0: float, y: float, width: float, height: float,
               values: np.ndarray, cmap, vmin: float = 0.0,
               vmax: float = 1.0) -> None:
-    """One horizontal track, drawn the same way for every row of panel (c)."""
+    """One horizontal track, drawn the same way everywhere it appears."""
     axes = figure.add_axes([x0, y, width, height])
     axes.imshow(values[None, :], aspect="auto", cmap=cmap, vmin=vmin,
                 vmax=vmax, interpolation="nearest")
@@ -330,18 +305,19 @@ def strip_row(figure, x0: float, y: float, width: float, height: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """One framework, two settings, and the OT pipeline drawn once.
+    """The setting, and the two answers it is scored against.
 
-    (a) is technical: the biology is unchanged and only the measurement
-    degrades, in stages, because nCount and nFeature are not separable axes.
-    (b) is biological: the measurement is matched and a population is present
-    on one side only. (c) is the pipeline both of them enter, with the two
-    ground truths it is scored against.
+    (a) defines the technical setting: one source against three targets, each
+    measured worse than the last. Degradation arrives in stages because nCount
+    and nFeature are not separable -- moving the library size moves detection
+    with it, and dropout moves both again.
 
-    The panels share a vocabulary rather than repeating each other. The full
-    source -> coupling -> gate -> ground truth chain is drawn once, in (c).
-    The accent colour means one thing throughout: the population that exists
-    on one side only, and the cells that belong to it.
+    (b) is not a second pipeline drawn over again. It is the pair of
+    ground-truth regimes the same framework is evaluated under: one where the
+    biology is shared and nothing should be rejected, and one where a
+    population exists on one side only and just those cells should be. The
+    example gates are drawn, not run; they are there so the comparison has
+    something to compare against.
     """
     rng = np.random.default_rng(seed)
     shown_cells, shown_genes = 40, 60
@@ -349,7 +325,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     gene_order = np.argsort(-profile)[:shown_genes * 16:16]
 
     C_COUNT, C_FEATURE = "#b07d2b", "#1f6f8b"
-    C_KEEP, C_DROP, C_NEUTRAL = "#2f7d4f", "#c4553b", "#8d9aa5"
+    C_KEEP, C_DROP = "#2f7d4f", "#c4553b"
     panels: dict[str, dict] = {}
     for name, counts in samples.items():
         total = counts.sum(axis=1)
@@ -368,22 +344,21 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
     levels = ("matched", "depth mismatch", "depth + dropout")
     column_w, column_x = 0.185, (0.165, 0.370, 0.575, 0.780)
-    left, right = 0.165, 0.965
     report: dict = {}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(7.6, 9.2))
+        figure = plt.figure(figsize=(7.6, 6.6))
 
-        # ---- (a) technical degradation -------------------------------------
-        figure.text(0.035, 0.985, "(a)  technical degradation", fontsize=8.6,
+        # ---- (a) the technical setting --------------------------------------
+        figure.text(0.035, 0.983, "(a)  technical degradation", fontsize=8.6,
                     fontweight="semibold", ha="left", va="top")
-        figure.text(0.035, 0.967,
+        figure.text(0.035, 0.960,
                     "the biology is unchanged; only the measurement degrades",
                     fontsize=7.4, color="#55555a", ha="left", va="top")
 
         for index, name in enumerate(("reference source",) + levels):
             panel, x0 = panels[name], column_x[index]
-            figure.text(x0 + column_w / 2, 0.941, name, fontsize=7.8,
+            figure.text(x0 + column_w / 2, 0.926, name, fontsize=7.8,
                         fontweight="semibold" if index else "normal",
                         color="#2b2b2b" if index else "#55555a",
                         ha="center", va="top")
@@ -391,7 +366,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 for line, key in enumerate(("total", "detected")):
                     ratio = np.median(panel[key]) / np.median(reference[key])
                     figure.text(
-                        x0 + column_w / 2, 0.921 - 0.017 * line,
+                        x0 + column_w / 2, 0.902 - 0.022 * line,
                         f"{'nCount' if key == 'total' else 'nFeature'}"
                         f"  x{ratio:.2f}", fontsize=6.8,
                         color=C_COUNT if key == "total" else C_FEATURE,
@@ -406,7 +381,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     ("total", C_COUNT, "nCount"),
                     ("detected", C_FEATURE, "nFeature"))):
                 strip = figure.add_axes(
-                    [x0, 0.878 - 0.024 * line, column_w, 0.014])
+                    [x0, 0.845 - 0.030 * line, column_w, 0.018])
                 strip.imshow(panel[key][None, :], aspect="auto", cmap="viridis",
                              vmin=limits[key][0], vmax=limits[key][1],
                              interpolation="nearest")
@@ -420,7 +395,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                      rotation=0, ha="right", va="center",
                                      labelpad=6)
 
-            heat = figure.add_axes([x0, 0.716, column_w, 0.130])
+            heat = figure.add_axes([x0, 0.596, column_w, 0.194])
             image = heat.imshow(panel["matrix"], aspect="auto", cmap="Blues",
                                 vmin=0.0, vmax=top, interpolation="nearest")
             heat.set_xticks([])
@@ -431,135 +406,84 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             if index == 0:
                 heat.set_ylabel("expression", fontsize=7.0, color="#55555a",
                                 labelpad=6)
-                figure.text(x0, 0.694, "one source, shared by all three levels",
+                figure.text(x0, 0.563, "one source, shared by all three levels",
                             fontsize=6.8, color="#55555a", ha="left", va="top")
             heat.set_xlabel("ordered by nCount", fontsize=6.6,
                             color="#55555a", labelpad=3)
 
-        figure.text(0.035, 0.672,
-                    "all biological populations remain matchable across "
-                    "technical degradation levels",
-                    fontsize=7.4, color=C_KEEP, ha="left", va="top")
+        figure.text(0.035, 0.535,
+                    "all biological populations remain matchable at every "
+                    "level", fontsize=7.6, color=C_KEEP, ha="left", va="top")
 
-        # ---- (b) biological non-correspondence -----------------------------
-        figure.text(0.035, 0.636, "(b)  biological non-correspondence",
-                    fontsize=8.6, fontweight="semibold", ha="left", va="top")
-        figure.text(0.035, 0.618,
-                    "the measurement is matched; the biology itself differs",
-                    fontsize=7.4, color="#55555a", ha="left", va="top")
-
-        block_w, block_h = 0.042, 0.024
-        for scenario, x0, labels, source_has, target_has, accent in (
-                ("population lost", left, tuple("ABCDEF"),
-                 (True,) * 6, (False,) + (True,) * 5, 0),
-                ("population emerged", 0.575, tuple("ABCDEFG"),
-                 (True,) * 6 + (False,), (True,) * 7, 6)):
-            span = len(labels) * (block_w + 0.006) - 0.006
-            figure.text(x0 + span / 2, 0.606, scenario, fontsize=7.8,
-                        fontweight="semibold", ha="center", va="top")
-            for line, present in enumerate((source_has, target_has)):
-                y = 0.560 - 0.030 * line
-                block_row(figure, x0, y, block_w, block_h, labels, present,
-                          accent, C_NEUTRAL, C_DROP)
-                if x0 == left:
-                    figure.text(left - 0.010, y + block_h / 2,
-                                ("source", "target")[line], fontsize=7.0,
-                                color="#55555a", ha="right", va="center")
-
-        figure.text(0.035, 0.502,
-                    "one population is present on one side only; all others "
-                    "are shared", fontsize=7.4, color=C_DROP, ha="left",
-                    va="top")
-
-        # ---- (c) shared OT evaluation --------------------------------------
-        figure.text(0.035, 0.466, "(c)  shared OT evaluation", fontsize=8.6,
+        # ---- (b) the two ground-truth regimes --------------------------------
+        figure.text(0.035, 0.480, "(b)  evaluation cases", fontsize=8.6,
                     fontweight="semibold", ha="left", va="top")
-        figure.text(right, 0.466, "cells ordered by population", fontsize=7.0,
-                    color="#8c8c86", ha="right", va="top")
 
         n = 48
-        width = right - left
-        solid = mpl.colors.ListedColormap([C_NEUTRAL])
+        case_w, case_x = 0.380, (0.165, 0.585)
         gate_map = mpl.colors.ListedColormap([C_DROP, C_KEEP])
         unmatched = np.zeros(n, dtype=bool)
-        unmatched[8:16] = True          # one population, contiguous
+        unmatched[8:16] = True          # one population, cells sit together
 
-        strip_row(figure, left, 0.436, width, 0.016, np.ones(n), solid)
-        strip_row(figure, left, 0.412, width, 0.016, np.ones(n), solid)
-        # A coupling is a matrix, so the icon stays two-dimensional; it is
-        # small enough not to read as a result, which a full square would.
-        icon = figure.add_axes([left, 0.3835, 0.020, 0.0165])
-        icon.imshow(schematic_coupling(16, rng), cmap="Greys", aspect="auto",
-                    interpolation="bicubic")
-        icon.set_xticks([])
-        icon.set_yticks([])
-        for spine in icon.spines.values():
-            spine.set_color("#9a9a94")
-            spine.set_linewidth(0.7)
-        strip_row(figure, left + 0.026, 0.3835, width - 0.026, 0.0165,
-                  rng.random(n), "Greys", 0.0, 1.4)
-        strip_row(figure, left, 0.356, width, 0.016,
-                  np.linspace(0.05, 0.95, n), "Greys", 0.0, 1.0)
-        gate = np.ones(n, dtype=bool)
-        gate[6:15] = False              # overlapping, but not the same set
-        strip_row(figure, left, 0.332, width, 0.016, gate.astype(float),
-                  gate_map)
-        for line, label in enumerate((
-                "source", "target", "OT coupling  $\\pi$",
-                "decision cost", "gate (example)")):
-            y = (0.444, 0.420, 0.3915, 0.364, 0.340)[line]
-            figure.text(left - 0.010, y, label, fontsize=7.0, color="#55555a",
-                        ha="right", va="center")
+        shared_gate = np.ones(n, dtype=bool)
+        shared_gate[[2, 3, 29, 41]] = False
+        unmatched_gate = ~unmatched
+        unmatched_gate[[6, 7]] = False
+        unmatched_gate[15] = True
 
-        figure.text(0.5 * (left + right), 0.310,
-                    "compare with ground truth", fontsize=7.4,
-                    color="#55555a", ha="center", va="top")
-        for line, (values, note) in enumerate((
-                (np.ones(n, dtype=bool), "from (a):  no cell should be rejected"),
-                (~unmatched,
-                 "from (b):  reject only cells from the unmatched population"))):
-            y = 0.278 - 0.046 * line
-            strip_row(figure, left, y, width, 0.016, values.astype(float),
-                      gate_map)
-            figure.text(left, y - 0.005, note, fontsize=7.0, color="#55555a",
+        for column, (title, gate, truth, reading) in enumerate((
+                ("Case 1: all populations shared", shared_gate,
+                 np.ones(n, dtype=bool), "no cell should be rejected"),
+                ("Case 2: one population unmatched", unmatched_gate,
+                 ~unmatched,
+                 "reject only cells from the unmatched population"))):
+            x0 = case_x[column]
+            figure.text(x0, 0.452, title, fontsize=7.8,
+                        fontweight="semibold", ha="left", va="top")
+            for line, values in enumerate((gate, truth)):
+                y = 0.400 - 0.040 * line
+                strip_row(figure, x0, y, case_w, 0.024,
+                          values.astype(float), gate_map)
+                if column == 0:
+                    figure.text(x0 - 0.010, y + 0.012,
+                                ("example gate", "ground truth")[line],
+                                fontsize=7.0, color="#55555a", ha="right",
+                                va="center")
+            figure.text(x0, 0.348, reading, fontsize=7.4,
+                        color=C_KEEP if column == 0 else C_DROP,
                         ha="left", va="top")
-        figure.text(left - 0.010, 0.263, "ground truth", fontsize=7.0,
-                    color="#55555a", ha="right", va="center")
-        figure.text(0.035, 0.200,
-                    "different benchmark settings, the same OT pipeline, "
-                    "different ground truths", fontsize=7.4, color="#55555a",
+
+        figure.text(0.035, 0.300,
+                    "two ground-truth regimes are evaluated: all shared, and "
+                    "one unmatched", fontsize=7.6, color="#55555a",
                     ha="left", va="top")
 
-        # ---- legend ---------------------------------------------------------
+        # ---- legend ----------------------------------------------------------
         bar = figure.colorbar(image, cax=figure.add_axes(
-            [left, 0.160, 0.110, 0.010]), orientation="horizontal")
+            [0.165, 0.245, 0.110, 0.013]), orientation="horizontal")
         ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
                  if value <= float(np.expm1(top))]
         bar.set_ticks(np.log1p(ticks))
         bar.set_ticklabels([f"{value:,}" for value in ticks])
         bar.ax.tick_params(labelsize=6.2, length=2, pad=1.5)
         bar.outline.set_linewidth(0.5)
-        figure.text(left + 0.125, 0.165, "counts (white = 0)", fontsize=7.0,
+        figure.text(0.290, 0.2515, "counts (white = 0)", fontsize=7.0,
                     color="#55555a", va="center")
         for index, (colour, text) in enumerate(((C_KEEP, "kept"),
-                                                (C_DROP, "rejected"),
-                                                (C_NEUTRAL, "present"))):
-            swatch = figure.add_axes([0.470 + 0.130 * index, 0.160, 0.016,
-                                      0.010])
+                                                (C_DROP, "rejected"))):
+            swatch = figure.add_axes([0.470 + 0.130 * index, 0.245, 0.018,
+                                      0.013])
             swatch.set_xticks([])
             swatch.set_yticks([])
             swatch.set_facecolor(colour)
             for spine in swatch.spines.values():
                 spine.set_color("#d8d8d2")
                 spine.set_linewidth(0.6)
-            figure.text(0.492 + 0.130 * index, 0.165, text, fontsize=7.0,
+            figure.text(0.494 + 0.130 * index, 0.2515, text, fontsize=7.0,
                         color="#55555a", va="center")
-        figure.text(0.035, 0.135,
-                    "the gate is called on both sides; one is shown",
-                    fontsize=6.8, color="#8c8c86", ha="left", va="top")
-        figure.text(0.035, 0.118,
-                    "nCount reflects sequencing depth; nFeature reflects "
-                    "depth and detection loss together", fontsize=6.8,
+        figure.text(0.035, 0.210,
+                    "nCount reflects sequencing depth; nFeature reflects both "
+                    "depth and additional detection loss", fontsize=6.8,
                     color="#8c8c86", ha="left", va="top", style="italic")
 
         for suffix in ("png", "pdf"):
