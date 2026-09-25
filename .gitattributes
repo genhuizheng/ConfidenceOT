@@ -1,0 +1,4 @@
+# These run on the cluster. A CRLF checkout makes bash read `in` and stop.
+*.sh text eol=lf
+*.slurm text eol=lf
+*.R text eol=lf
