@@ -293,7 +293,11 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     the object the method actually produces -- the coupling, how much of each
     source cell is carried onto each target cell. Below it the two things
     that get compared: the gate the coupling and its costs induce, one call
-    per source cell, and the mask that is correct.
+    per source cell, and the mask that is correct -- in two cases. In one the
+    biology is shared on both sides, so every cell stays matchable and the
+    mask is solid. In the other a population has no counterpart, and only its
+    cells should be rejected. One case without the other is a task that can be
+    passed by never rejecting, or by rejecting everything.
 
     The coupling and the gate here are schematic. This is the setting, not the
     result: what a real run puts in those two places is the measurement, and
@@ -350,19 +354,30 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     returned = np.ones(shown_cells, dtype=bool)
     returned[[0, 1, 2, 4, 5, 7, 10, 15]] = False
     truth = np.ones(shown_cells, dtype=bool)
+    # A population with no counterpart is a fact about the biology, so its
+    # cells sit wherever the nuisance ordering happens to put them. Scattered
+    # is what a real unmatched population looks like against this axis, and it
+    # is what distinguishes it from a gate that has followed the nuisance and
+    # rejects at one end.
+    unmatched = np.zeros(shown_cells, dtype=bool)
+    unmatched[rng.choice(shown_cells, 9, replace=False)] = True
+    truth_unmatched = ~unmatched
+    returned_unmatched = truth_unmatched.copy()
+    returned_unmatched[[1, 4]] = False
+    returned_unmatched[int(np.flatnonzero(unmatched)[0])] = True
     report: dict = {}
 
     x_source, x_target, matrix_w = 0.100, 0.665, 0.290
     plan_w = 0.128
     x_plan = (x_source + matrix_w + x_target) / 2 - plan_w / 2
-    x_gate = x_plan + plan_w / 2 - matrix_w / 2
+    case_x, case_w = (0.200, 0.590), 0.360
     with mpl.rc_context(STYLE):
         figure = plt.figure(figsize=(7.2, 8.0))
         for row, (nuisance, title) in enumerate((
                 ("depth", "sequencing depth (nCount)"),
                 ("breadth",
                  "gene detection (nFeature), nCount held fixed"))):
-            base = 0.445 * row
+            base = 0.400 * row
             # No subtitle and no restatement of the answer: the title
             # names the variable and the solid ground-truth bar is the answer.
             figure.text(x_source - 0.058, 0.972 - base,
@@ -449,27 +464,37 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     mutation_scale=8, linewidth=0.9, color="#9a9a94"))
 
             # Coupling and costs, down to one call per source cell, against
-            # the call that is correct.
-            for index, (values, label) in enumerate((
-                    (returned, "rejection gate"),
-                    (truth, "ground truth"))):
-                y = 0.640 - base - 0.072 * index
-                figure.add_artist(mpl.patches.FancyArrowPatch(
-                    (x_plan + plan_w / 2, y + 0.066),
-                    (x_plan + plan_w / 2, y + 0.042),
-                    transform=figure.transFigure, arrowstyle="-|>",
-                    mutation_scale=7, linewidth=0.9, color="#9a9a94"))
-                figure.text(x_plan + plan_w / 2, y + 0.036, label, fontsize=7.0,
-                            color="#55555a", ha="center", va="top")
-                gate = figure.add_axes([x_gate, y, matrix_w, 0.018])
-                gate.imshow(values[None, :], aspect="auto",
-                            cmap=mpl.colors.ListedColormap([C_DROP, C_KEEP]),
-                            vmin=0, vmax=1, interpolation="nearest")
-                gate.set_xticks([])
-                gate.set_yticks([])
-                for spine in gate.spines.values():
-                    spine.set_color("#d8d8d2")
-                    spine.set_linewidth(0.6)
+            # the call that is correct -- in the two cases the perturbation
+            # above has to be read against. Without the second column a method
+            # that never rejects would be right about everything on the page.
+            figure.add_artist(mpl.patches.FancyArrowPatch(
+                (x_plan + plan_w / 2, 0.708 - base),
+                (x_plan + plan_w / 2, 0.688 - base),
+                transform=figure.transFigure, arrowstyle="-|>",
+                mutation_scale=7, linewidth=0.9, color="#9a9a94"))
+            for index, label in enumerate(("gate (schematic)", "ground truth")):
+                figure.text(case_x[0] - 0.012, 0.651 - base - 0.038 * index,
+                            label, fontsize=7.0, color="#55555a", ha="right",
+                            va="center")
+            for column, (header, pair) in enumerate((
+                    ("all populations shared", (returned, truth)),
+                    ("one population has no counterpart",
+                     (returned_unmatched, truth_unmatched)))):
+                figure.text(case_x[column] + case_w / 2, 0.682 - base, header,
+                            fontsize=7.0, color="#55555a", ha="center",
+                            va="top")
+                for index, values in enumerate(pair):
+                    gate = figure.add_axes(
+                        [case_x[column], 0.642 - base - 0.038 * index,
+                         case_w, 0.018])
+                    gate.imshow(values[None, :], aspect="auto",
+                                cmap=mpl.colors.ListedColormap([C_DROP, C_KEEP]),
+                                vmin=0, vmax=1, interpolation="nearest")
+                    gate.set_xticks([])
+                    gate.set_yticks([])
+                    for spine in gate.spines.values():
+                        spine.set_color("#d8d8d2")
+                        spine.set_linewidth(0.6)
 
             reference = panels[(nuisance, "source")]
             report[title] = {
@@ -485,18 +510,18 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                               "rejection follows the nuisance")}
 
         bar = figure.colorbar(image, cax=figure.add_axes(
-            [x_source, 0.082, 0.135, 0.011]), orientation="horizontal")
+            [x_source, 0.150, 0.135, 0.011]), orientation="horizontal")
         ticks = [value for value in (0, 1, 3, 10, 30, 100, 300)
                  if value <= float(np.expm1(top))]
         bar.set_ticks(np.log1p(ticks))
         bar.set_ticklabels([f"{value:,}" for value in ticks])
         bar.ax.tick_params(labelsize=6.5, length=2, pad=1.5)
         bar.outline.set_linewidth(0.5)
-        figure.text(x_source + 0.150, 0.088, "counts (white = 0)",
+        figure.text(x_source + 0.150, 0.156, "counts (white = 0)",
                     fontsize=7.2, color="#55555a", va="center")
         for index, (colour, text) in enumerate(((C_KEEP, "kept"),
                                                 (C_DROP, "rejected"))):
-            swatch = figure.add_axes([0.640 + 0.128 * index, 0.082, 0.020,
+            swatch = figure.add_axes([0.640 + 0.128 * index, 0.150, 0.020,
                                       0.011])
             swatch.set_xticks([])
             swatch.set_yticks([])
@@ -504,7 +529,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             for spine in swatch.spines.values():
                 spine.set_color("#d8d8d2")
                 spine.set_linewidth(0.6)
-            figure.text(0.666 + 0.128 * index, 0.088, text, fontsize=7.2,
+            figure.text(0.666 + 0.128 * index, 0.156, text, fontsize=7.2,
                         color="#55555a", va="center")
         # Nothing is written under the legend. The metrics are definitions
         # and live in BENCHMARK_METRICS.md; that the coupling and the gate are
