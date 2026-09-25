@@ -265,44 +265,49 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """The task: what is generated, what is true, what is scored.
+    """The task, in the words of the experiment it is for.
 
-    Named the way the scenarios are named. "Specificity arm" and "power arm"
-    are the statistics of the thing and say nothing about what is in the
-    dishes; the two cases are a pair where every population is on both sides,
-    and a pair where one population is in the source and not the target.
+    Not "specificity arm", "power arm" or "planted subpopulation": those are
+    the statistics and the simulator, and neither says what is in the sample.
+    The experiment is a patient's primary tumour and their matched metastasis,
+    so the two cases are a pair where every cell type is in both, and a pair
+    where one cell type is in the primary and not the metastasis -- a subclone
+    that did not seed.
 
-    Colour is biology and size is the technical nuisance, so which variation
-    is meant to be there is separable by eye. A ring marks the cells that
-    should be rejected. What is scored is written under each row.
+    Colour says where a cell's type is found. Size says how deeply the cell
+    was sequenced, or how many genes it detected; both samples carry the same
+    spread, so it is a property of the measurement and not of the tumour. A
+    ring marks cells with no counterpart in the other sample, which is what
+    the method has to find.
 
-    No line joins a source cell to a target cell, because none of them are
-    joined: the sides are independent draws, and the truth is whether a cell
-    has any partner in the other side at all, not which one.
+    No line joins one cell to another. The two samples are separate
+    dissociations, so a primary cell has no particular metastatic cell it
+    corresponds to, and the question is whether its type is present there at
+    all.
 
-    Both rows are needed. A method that never rejects is right about the first
-    and a method that rejects everything is right about the second's recall,
-    so either alone defines a task that can be passed without doing anything.
+    Both rows are needed: a method that never rejects is right about the
+    first, and one that rejects everything is right about the second's recall.
     """
     rng = np.random.default_rng(seed)
-    n, planted = 34, 10
+    n, absent = 34, 10
     report: dict = {}
 
     with mpl.rc_context(STYLE):
         figure = plt.figure(figsize=(6.9, 3.2))
         for row, (title, truth, scored) in enumerate((
-                ("every population on both sides", "reject nothing",
-                 "false rejection rate"),
-                ("one population missing from the target",
-                 f"reject those {planted} cells", "precision and recall"))):
-            axes = figure.add_axes([0.015, 0.545 - 0.455 * row, 0.63, 0.365])
+                ("every cell type is in both samples", "reject nothing",
+                 "how many cells are wrongly rejected"),
+                ("one cell type is in the primary only",
+                 f"reject those {absent} cells",
+                 "how many are found, and how many others are hit"))):
+            axes = figure.add_axes([0.015, 0.545 - 0.455 * row, 0.60, 0.365])
             axes.set_xlim(-2.7, 12.4)
-            axes.set_ylim(-0.95, 1.30)
+            axes.set_ylim(-1.10, 1.30)
             axes.axis("off")
 
-            for column, side in enumerate(("source", "target")):
+            for column, side in enumerate(("primary", "metastasis")):
                 x0 = 0.6 + 6.2 * column
-                extra = planted if (row == 1 and side == "source") else 0
+                extra = absent if (row == 1 and side == "primary") else 0
                 total = n + extra
                 spread = rng.uniform(-1.0, 1.0, size=(total, 2))
                 spread[:, 0] *= 2.1
@@ -322,39 +327,37 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                       fontweight="semibold", ha="left")
             axes.text(-2.6, -0.62, truth, fontsize=8, fontweight="bold",
                       ha="left", color="#2f7d4f" if row == 0 else C_REJECT)
-            axes.text(12.3, -0.62, scored, fontsize=7.6, ha="right",
+            axes.text(-2.6, -0.88, scored, fontsize=7.4, ha="left",
                       color="#55555a")
-            report[title] = {"ground_truth": truth, "scored_by": scored}
+            report[title] = {"correct_answer": truth, "scored_by": scored}
 
-        legend = figure.add_axes([0.675, 0.13, 0.315, 0.74])
+        legend = figure.add_axes([0.645, 0.13, 0.345, 0.74])
         legend.set_xlim(0, 1)
         legend.set_ylim(0, 1)
         legend.axis("off")
         y = 0.95
-        for colour, text in (("#0072B2", "population on both sides"),
-                             ("#D55E00", "population on one side")):
-            legend.scatter([0.05], [y], s=46, c=colour, linewidths=0)
-            legend.text(0.15, y, text, fontsize=7.6, va="center")
+        for colour, text in (("#0072B2", "cell type found in both samples"),
+                             ("#D55E00", "cell type found in the primary only")):
+            legend.scatter([0.045], [y], s=46, c=colour, linewidths=0)
+            legend.text(0.14, y, text, fontsize=7.6, va="center")
             y -= 0.125
-        legend.scatter([0.05], [y], s=46, facecolors="none",
+        legend.scatter([0.045], [y], s=46, facecolors="none",
                        edgecolors=C_REJECT, linewidths=1.1)
-        legend.text(0.15, y, "should be rejected", fontsize=7.6, va="center",
-                    color=C_REJECT)
-        y -= 0.20
-        legend.text(0.0, y, "cell size: how deeply it was sequenced,",
-                    fontsize=7.4, color="#55555a", va="center")
+        legend.text(0.14, y, "no counterpart in the metastasis", fontsize=7.6,
+                    va="center", color=C_REJECT)
+        y -= 0.21
+        for text in ("cell size: sequencing depth, or how many",
+                     "genes were detected in that cell",
+                     "both samples carry the same spread"):
+            legend.text(0.0, y, text, fontsize=7.4, color="#55555a",
+                        va="center")
+            y -= 0.10
         y -= 0.10
-        legend.text(0.0, y, "or how many genes it detected", fontsize=7.4,
-                    color="#55555a", va="center")
-        y -= 0.10
-        legend.text(0.0, y, "both sides carry the same spread", fontsize=7.4,
-                    color="#55555a", va="center")
-        y -= 0.19
-        legend.text(0.0, y, "no cell is paired to a particular cell",
-                    fontsize=7.4, color="#8c8c86", va="center", style="italic")
-        y -= 0.10
-        legend.text(0.0, y, "on the other side", fontsize=7.4,
-                    color="#8c8c86", va="center", style="italic")
+        for text in ("the two samples are separate dissociations,",
+                     "so no cell corresponds to one particular cell"):
+            legend.text(0.0, y, text, fontsize=7.4, color="#8c8c86",
+                        va="center", style="italic")
+            y -= 0.10
 
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
