@@ -265,105 +265,122 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                      seed: int) -> dict:
-    """The task, in the words of the experiment it is for.
+    """Two technical conditions, one biology, and nothing to reject in either.
 
-    Not "specificity arm", "power arm" or "planted subpopulation": those are
-    the statistics and the simulator, and neither says what is in the sample.
-    The experiment is a patient's primary tumour and their matched metastasis,
-    so the two cases are a pair where every cell type is in both, and a pair
-    where one cell type is in the primary and not the metastasis -- a subclone
-    that did not seed.
+    The previous version made (b) a cell type present in the primary and
+    absent from the metastasis. That is a biological question -- can the
+    method find a population with no counterpart -- and it is the one the
+    scenario figure asks. Putting it here meant this figure tested two
+    different things and neither of them was the low-gene effect.
 
-    Colour says where a cell's type is found. Size says how deeply the cell
-    was sequenced, or how many genes it detected; both samples carry the same
-    spread, so it is a property of the measurement and not of the tumour. A
-    ring marks cells with no counterpart in the other sample, which is what
-    the method has to find.
+    Both rows are technical. The biology is identical on both sides and in
+    both rows: the same cell types, in the same proportions, with no
+    population missing anywhere. Only the measurement differs, and the correct
+    answer in both is to reject nothing. A cell that was sequenced shallowly,
+    or in which few genes were detected, is the same cell biologically and
+    must still find its match.
 
-    No line joins one cell to another. The two samples are separate
-    dissociations, so a primary cell has no particular metastatic cell it
-    corresponds to, and the question is whether its type is present there at
-    all.
+    The two are separated because they are separate variables:
 
-    Both rows are needed: a method that never rejects is right about the
-    first, and one that rejects everything is right about the second's recall.
+    * **nCount**, the library size, is what row (a) varies.
+    * **nFeature**, how many genes were detected at all, is what row (b)
+      varies -- **with total counts held fixed**, so that a rejection in (b)
+      cannot be attributed to depth. Vary both at once and the arm cannot say
+      which one drove the failure, which is why the earlier single "cell size"
+      legend was not good enough.
+
+    Dropout is the third name for the same region of this space -- the zeros,
+    the signal that is missing rather than small -- and it rides with nFeature
+    here: a cell detecting fewer genes at the same depth is a cell with more
+    zeros.
     """
     rng = np.random.default_rng(seed)
-    n, absent = 34, 10
+    n = 40
     report: dict = {}
 
     with mpl.rc_context(STYLE):
-        figure = plt.figure(figsize=(6.9, 3.2))
-        for row, (title, truth, scored) in enumerate((
-                ("every cell type is in both samples", "reject nothing",
-                 "how many cells are wrongly rejected"),
-                ("one cell type is in the primary only",
-                 f"reject those {absent} cells",
-                 "how many are found, and how many others are hit"))):
-            axes = figure.add_axes([0.015, 0.545 - 0.455 * row, 0.60, 0.365])
+        figure = plt.figure(figsize=(6.9, 3.4))
+        for row, (title, note, extreme, scored) in enumerate((
+                ("sequencing depth",
+                 "cells differ in library size (nCount)",
+                 "the shallowest cells",
+                 "how many cells are wrongly rejected, and whether\n"
+                 "rejection tracks nCount"),
+                ("gene detection and dropout",
+                 "total counts held fixed; cells differ in how many\n"
+                 "genes are detected (nFeature), so in how many zeros",
+                 "the sparsest cells",
+                 "how many cells are wrongly rejected, and whether\n"
+                 "rejection tracks nFeature"))):
+            axes = figure.add_axes([0.015, 0.555 - 0.480 * row, 0.60, 0.350])
             axes.set_xlim(-2.7, 12.4)
-            axes.set_ylim(-1.10, 1.30)
+            axes.set_ylim(-1.35, 1.72)
             axes.axis("off")
 
             for column, side in enumerate(("primary", "metastasis")):
                 x0 = 0.6 + 6.2 * column
-                extra = absent if (row == 1 and side == "primary") else 0
-                total = n + extra
-                spread = rng.uniform(-1.0, 1.0, size=(total, 2))
+                spread = rng.uniform(-1.0, 1.0, size=(n, 2))
                 spread[:, 0] *= 2.1
-                spread[:, 1] = 0.44 + 0.44 * spread[:, 1]
-                sizes = 9.0 + 52.0 * rng.beta(1.6, 2.2, size=total)
-                colours = np.array(["#0072B2"] * n + ["#D55E00"] * extra)
+                spread[:, 1] = 0.30 + 0.34 * spread[:, 1]
+                sizes = 8.0 + 54.0 * rng.beta(1.5, 2.2, size=n)
+                # One biology: every cell is the same kind, on both sides.
                 axes.scatter(spread[:, 0] + x0, spread[:, 1], s=sizes,
-                             c=colours, linewidths=0, alpha=0.9, zorder=3)
-                for index in range(n, total):
+                             c="#0072B2", linewidths=0, alpha=0.9, zorder=3)
+                # The cells a method is most likely to get wrong, marked as
+                # what they are: cells that must still match.
+                for index in np.argsort(sizes)[:4]:
                     axes.scatter([spread[index, 0] + x0], [spread[index, 1]],
-                                 s=sizes[index] + 95, facecolors="none",
-                                 edgecolors=C_REJECT, linewidths=1.1, zorder=5)
+                                 s=125, facecolors="none",
+                                 edgecolors="#2f7d4f", linewidths=1.1,
+                                 linestyle=(0, (3, 2)), zorder=5)
                 axes.text(x0, -0.22, side, fontsize=7.6, ha="center",
                           color="#55555a")
 
-            axes.text(-2.6, 1.14, f"({chr(97 + row)})  {title}", fontsize=8.4,
+            axes.text(-2.6, 1.58, f"({chr(97 + row)})  {title}", fontsize=8.4,
                       fontweight="semibold", ha="left")
-            axes.text(-2.6, -0.62, truth, fontsize=8, fontweight="bold",
-                      ha="left", color="#2f7d4f" if row == 0 else C_REJECT)
-            axes.text(-2.6, -0.88, scored, fontsize=7.4, ha="left",
-                      color="#55555a")
-            report[title] = {"correct_answer": truth, "scored_by": scored}
+            axes.text(-2.6, 1.36, note, fontsize=7.4, ha="left", va="top",
+                      color="#b07d2b" if row == 0 else "#1f6f8b",
+                      linespacing=1.5)
+            axes.text(-2.6, -0.62, "reject nothing", fontsize=8,
+                      fontweight="bold", ha="left", color="#2f7d4f")
+            axes.text(-2.6, -0.86, scored, fontsize=7.4, ha="left", va="top",
+                      color="#55555a", linespacing=1.5)
+            report[title] = {"biology": "identical on both sides",
+                             "varies": note.replace("\n", " "),
+                             "correct_answer": "reject nothing",
+                             "scored_by": scored.replace("\n", " ")}
 
-        legend = figure.add_axes([0.645, 0.13, 0.345, 0.74])
+        legend = figure.add_axes([0.645, 0.13, 0.345, 0.76])
         legend.set_xlim(0, 1)
         legend.set_ylim(0, 1)
         legend.axis("off")
-        y = 0.95
-        for colour, text in (("#0072B2", "cell type found in both samples"),
-                             ("#D55E00", "cell type found in the primary only")):
-            legend.scatter([0.045], [y], s=46, c=colour, linewidths=0)
-            legend.text(0.14, y, text, fontsize=7.6, va="center")
-            y -= 0.125
-        legend.scatter([0.045], [y], s=46, facecolors="none",
-                       edgecolors=C_REJECT, linewidths=1.1)
-        legend.text(0.14, y, "no counterpart in the metastasis", fontsize=7.6,
-                    va="center", color=C_REJECT)
-        y -= 0.19
-        for text in ("cell size: sequencing depth",
-                     "both samples carry the same spread"):
+        legend.scatter([0.045], [0.95], s=46, c="#0072B2", linewidths=0)
+        legend.text(0.14, 0.95, "a cell; every cell is the same", fontsize=7.6,
+                    va="center")
+        legend.text(0.14, 0.86, "kind, in both samples", fontsize=7.6,
+                    va="center")
+        legend.scatter([0.045], [0.73], s=90, facecolors="none",
+                       edgecolors="#2f7d4f", linewidths=1.1,
+                       linestyle=(0, (3, 2)))
+        legend.text(0.14, 0.73, "must still match", fontsize=7.6, va="center",
+                    color="#2f7d4f")
+        y = 0.56
+        for text in ("cell size is the measurement,",
+                     "not the biology:",
+                     "(a) nCount, the library size",
+                     "(b) nFeature, the genes detected,",
+                     "      with nCount held fixed"):
             legend.text(0.0, y, text, fontsize=7.4, color="#55555a",
                         va="center")
-            y -= 0.10
-        y -= 0.07
-        for text in ("each case is run a second time with",
-                     "nFeature spread instead, at fixed depth:",
-                     "a separate problem, not the same one"):
-            legend.text(0.0, y, text, fontsize=7.4, color="#1f6f8b",
-                        va="center")
-            y -= 0.10
-        y -= 0.10
-        for text in ("the two samples are separate dissociations,",
-                     "so no cell corresponds to one particular cell"):
+            y -= 0.095
+        y -= 0.06
+        for text in ("kept apart because a cell can be",
+                     "deeply sequenced and still detect",
+                     "few genes: more zeros at the same",
+                     "library size is the dropout case"):
             legend.text(0.0, y, text, fontsize=7.4, color="#8c8c86",
                         va="center", style="italic")
-            y -= 0.10
+            y -= 0.095
 
         for suffix in ("png", "pdf"):
             figure.savefig(out / f"benchmark.{suffix}", bbox_inches="tight")
