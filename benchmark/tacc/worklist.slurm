@@ -39,7 +39,7 @@ import pandas as pd
 
 root, out, *labels = sys.argv[1:]
 rows = []
-for manifest in sorted(Path(root).glob("conditions/*/*/manifest.csv")):
+for manifest in sorted(Path(root).glob("conditions/*/*/*/manifest.csv")):
     table = pd.read_csv(manifest)
     for index, row in table.iterrows():
         for label in labels:

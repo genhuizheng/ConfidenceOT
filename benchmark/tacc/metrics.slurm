@@ -31,9 +31,10 @@ root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_tech
 mkdir -p "$root/metrics"
 
 shopt -s nullglob
-for manifest in "$root"/conditions/*/*/manifest.csv; do
-    replicate_dir=$(dirname "$manifest")
-    tag=$(basename "$(dirname "$replicate_dir")")_$(basename "$replicate_dir")
+for manifest in "$root"/conditions/*/*/*/manifest.csv; do
+    level_dir=$(dirname "$manifest")
+    replicate_dir=$(dirname "$level_dir")
+    tag=$(basename "$(dirname "$replicate_dir")")_$(basename "$replicate_dir")_$(basename "$level_dir")
     for run_root in "$root"/runs/*; do
         [[ -d "$run_root" ]] || continue
         preprocessing=$(basename "$run_root")

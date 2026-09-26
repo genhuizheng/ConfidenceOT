@@ -91,7 +91,10 @@ if [[ "$stage" == "container" ]]; then
 fi
 
 # ---- stage 1: generation and construction -----------------------------------
-generation_tasks=$(( ${#size_array[@]} * replicates ))
+# One task per (size, replicate, technical level): the levels are
+# independent realizations, so each is generated on its own.
+levels=3
+generation_tasks=$(( ${#size_array[@]} * replicates * levels ))
 generation_id=""
 if [[ "$stage" == "all" || "$stage" == "generate" ]]; then
     required=$(( generation_tasks + 2 ))
@@ -109,10 +112,10 @@ if [[ "$stage" == "all" || "$stage" == "generate" ]]; then
 fi
 
 # ---- stage 2: number the work, then solve -----------------------------------
-# The unit count is deterministic: three technical levels times three
-# biological cases per replicate, times the configurations.
+# The unit count is deterministic: three biological cases per generated
+# technical condition, times the configurations.
 worklist=$root/worklist.csv
-pairs=$(( ${#size_array[@]} * replicates * 9 ))
+pairs=$(( ${#size_array[@]} * replicates * levels * 3 ))
 units=$(( pairs * ${#preprocessing_array[@]} ))
 chunks=$(( (units + chunk - 1) / chunk ))
 (( chunks < 1 )) && chunks=1

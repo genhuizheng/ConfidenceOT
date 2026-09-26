@@ -9,21 +9,24 @@
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_technical/logs/gen_%A_%a.out
 #SBATCH -e /scratch/10119/ghzheng/OT_project/benchmark_technical/logs/gen_%A_%a.err
 #
-# Splatter generation and condition construction for one (N, replicate).
+# Splatter generation and condition construction for one
+# (size, replicate, technical level).
 #
-# Both stages live in one task because the second is minutes and the first is
-# what costs: splitting them would double the queue slots for no gain, and the
-# 40-job submission limit is the binding constraint here.
+# One task per level, not per replicate: the three levels are independent
+# realizations of the same biological parameters, each with its own seed, so
+# none of them reuses another's counts. Deriving them from a single draw made
+# part of the difference between levels a difference in the same cells, and
+# left L2 defined as L1 with more dropout rather than as a condition of its
+# own.
 #
-# The array index is decoded against the size list and the replicate count, so
-# resubmitting one index reruns exactly one replicate. Anything already
-# carrying its completion flag is skipped unless CONFIDENCEOT_BENCH_FORCE=1.
+# The array index decodes to (size, replicate, level), so resubmitting one
+# index reruns exactly one condition. Anything already carrying its completion
+# flag is skipped unless CONFIDENCEOT_BENCH_FORCE=1.
 
-# No set -u. TACC's module files and conda's shell functions read
-# variables they do not define -- module load tacc-apptainer sources a
-# completion script that reads BASH_COMPLETION_DEBUG -- and under set -u
-# that kills the job in seconds with nothing in the log. Every expansion
-# below carries its own default.
+# No set -u. TACC's module files and conda's shell functions read variables
+# they do not define -- module load tacc-apptainer sources a completion script
+# that reads BASH_COMPLETION_DEBUG -- and under set -u that kills the job in
+# seconds with nothing in the log. Every expansion below carries its default.
 set -eo pipefail
 source /home1/10119/ghzheng/.bashrc
 
@@ -32,69 +35,85 @@ root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_tech
 sizes=(${CONFIDENCEOT_BENCH_SIZES:-1000 5000 10000})
 replicates=${CONFIDENCEOT_BENCH_REPLICATES:-5}
 theta=${CONFIDENCEOT_BENCH_THETA:-0.50}
-dropout=${CONFIDENCEOT_BENCH_DROPOUT:-0.55}
+dropout_mid=${CONFIDENCEOT_BENCH_DROPOUT_MID:--1.0}
 rank_top_n=${CONFIDENCEOT_BENCH_RANK_TOP_N:-256}
+base_seed=${CONFIDENCEOT_BENCH_SEED:-20260925}
 force=${CONFIDENCEOT_BENCH_FORCE:-0}
-task=${SLURM_ARRAY_TASK_ID:?Submit as an array over sizes x replicates}
+task=${SLURM_ARRAY_TASK_ID:?Submit as an array over sizes x replicates x levels}
 
-size_index=$(( task / replicates ))
-replicate=$(( task % replicates + 1 ))
+levels=(L0_matched L1_depth L2_depth_dropout)
+per_size=$(( replicates * ${#levels[@]} ))
+size_index=$(( task / per_size ))
+within=$(( task % per_size ))
+replicate=$(( within / ${#levels[@]} + 1 ))
+level_index=$(( within % ${#levels[@]} ))
 if (( size_index >= ${#sizes[@]} )); then
     echo "task $task is past the end of the size list" >&2
     exit 2
 fi
 n_cells=${sizes[$size_index]}
+level=${levels[$level_index]}
 
-generated=$root/generated/N${n_cells}/rep${replicate}
-conditions=$root/conditions/N${n_cells}/rep${replicate}
+# Distinct per (replicate, level), so the levels are independent draws and the
+# number in generation.json is the number that was used.
+seed=$(( base_seed + 1000 * replicate + 137 * level_index ))
+
+generated=$root/generated/N${n_cells}/rep${replicate}/${level}
+conditions=$root/conditions/N${n_cells}/rep${replicate}/${level}
 mkdir -p "$root/logs" "$generated" "$conditions"
 
 if [[ "$force" != "1" && -f "$conditions/CONSTRUCTION_DONE" ]]; then
-    echo "N=$n_cells rep=$replicate already built; skipping"
+    echo "N=$n_cells rep=$replicate $level already built; skipping"
     exit 0
 fi
 
 # ---- Splatter ---------------------------------------------------------------
 if [[ "$force" == "1" || ! -f "$generated/GENERATION_DONE" ]]; then
-    # The R is whatever CONFIDENCEOT_RSCRIPT names, so a conda
-    # environment, a bind-mounted library and an apptainer image are all
-    # the same to this job. Only the conda route needs the environment
-    # activated, and activating it is harmless for the others.
+    # The R is whatever CONFIDENCEOT_RSCRIPT names, so a conda environment, a
+    # bind-mounted library and an apptainer image are all the same to this
+    # job. Only the conda route needs the environment activated, and
+    # activating it is harmless for the others.
     conda activate "${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}" || true
-    # Where install_splatter_dependencies.slurm puts Splatter. Inside a
-    # container this is the bind-mounted path, which is writable where
-    # the image is not.
     export R_LIBS_USER=${CONFIDENCEOT_R_LIBRARY:-$repo/.r-library}
     rscript=${CONFIDENCEOT_RSCRIPT:-Rscript}
     if ! $rscript -e 'quit(status = !requireNamespace("splatter", quietly = TRUE))'; then
         echo "splatter will not load for: $rscript" >&2
         echo "  R_LIBS_USER=$R_LIBS_USER" >&2
-        echo "  install it with scripts/tacc/install_splatter_dependencies.slurm," >&2
+        echo "  build the image with benchmark/tacc/build_container.slurm," >&2
         echo "  or point CONFIDENCEOT_RSCRIPT at an R that has it" >&2
         exit 4
     fi
+
+    # Only the dropout level asks Splatter for dropout, and it asks for it on
+    # the target batch alone.
+    dropout_flag=()
+    [[ "$level" == "L2_depth_dropout" ]] && \
+        dropout_flag=(--dropout-mid-target "$dropout_mid")
+
     $rscript "$repo/benchmark/tacc/10_generate_splatter.R" \
         --out "$generated" \
         --n "$n_cells" \
         --replicate "$replicate" \
+        --level "$level" \
         --groups "${CONFIDENCEOT_BENCH_GROUPS:-5}" \
-        --seed "${CONFIDENCEOT_BENCH_SEED:-20260925}" \
+        --seed "$seed" \
+        "${dropout_flag[@]}" \
         ${CONFIDENCEOT_BENCH_ESTIMATE_FROM:+--estimate-from "$CONFIDENCEOT_BENCH_ESTIMATE_FROM"}
-    conda deactivate
+    conda deactivate || true
 else
-    echo "generation already present for N=$n_cells rep=$replicate"
+    echo "generation already present for N=$n_cells rep=$replicate $level"
 fi
 
-# ---- levels and cases -------------------------------------------------------
+# ---- the three biological cases ---------------------------------------------
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
 python "$repo/benchmark/20_build_conditions.py" \
     --generated "$generated" \
     --out "$conditions" \
     --n-cells "$n_cells" \
     --replicate "$replicate" \
+    --level "$level" \
     --theta "$theta" \
-    --dropout "$dropout" \
     --rank-top-n "$rank_top_n" \
-    --seed "${CONFIDENCEOT_BENCH_SEED:-20260925}"
+    --seed "$base_seed"
 
-echo "done N=$n_cells rep=$replicate"
+echo "done N=$n_cells rep=$replicate $level"

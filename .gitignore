@@ -92,6 +92,9 @@ scripts/tacc/*
 # metric agreed in a chat and then read off a plot is a metric that can be
 # chosen after seeing the numbers.
 !/BENCHMARK_METRICS.md
+# What is generated and what each condition means, beside the code that
+# makes it.
+!/benchmark/DESIGN.md
 
 # What lives in the schematic folder and the command that rebuilds each one.
 # The images themselves stay untracked; the scripts are what is tracked.
