@@ -17,6 +17,14 @@
 # is missing -- is a race whose losers read a half-written file. Twenty
 # minutes of one slot buys a numbering that a resubmitted chunk can be trusted
 # to reproduce.
+#
+# It covers the sizes it was given, not everything on disk. submit.sh sizes
+# the chunk array from --sizes, so a list that quietly included a size the
+# invocation was not about would leave the tail of it uncovered -- the array
+# would run to the end of its chunks and stop, and the remainder would look
+# like work that had simply not been reached yet. The sizes go into the file
+# name for the same reason: two runs on two partitions must not share one
+# list, or the second renumbers the units the first is still solving.
 
 # No set -u. TACC's module files and conda's shell functions read
 # variables they do not define -- module load tacc-apptainer sources a
@@ -30,17 +38,26 @@ conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}
 worklist=${CONFIDENCEOT_BENCH_WORKLIST:-$root/worklist.csv}
 labels=${CONFIDENCEOT_BENCH_PREPROCESSING:?Set CONFIDENCEOT_BENCH_PREPROCESSING}
+sizes=${CONFIDENCEOT_BENCH_SIZES:-1000 5000 10000}
 
-python - "$root" "$worklist" $labels <<'PY'
+python - "$root" "$worklist" "$sizes" $labels <<'PY'
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-root, out, *labels = sys.argv[1:]
+root, out, sizes, *labels = sys.argv[1:]
+wanted = {int(size) for size in sizes.split()}
 rows = []
+skipped = set()
 for manifest in sorted(Path(root).glob("conditions/*/*/*/manifest.csv")):
     table = pd.read_csv(manifest)
+    # Filtered on the column rather than on the directory name: the manifest
+    # is what the solver reads, so it is what decides.
+    present = int(table["n_cells"].iloc[0])
+    if present not in wanted:
+        skipped.add(present)
+        continue
     for index, row in table.iterrows():
         for label in labels:
             rows.append({"manifest": str(manifest), "pair_index": int(index),
@@ -55,4 +72,6 @@ frame.to_csv(staging, index=False)
 staging.replace(out)
 print(f"work list: {len(frame)} units, {frame['pair_id'].nunique()} pairs, "
       f"{len(labels)} configurations -> {out}")
+if skipped:
+    print(f"left out {sorted(skipped)}, which this invocation is not about")
 PY

@@ -138,7 +138,10 @@ fi
 # biological cases per generated condition, times the configurations.
 levels=3
 generation_tasks=$(( ${#size_array[@]} * replicates * levels ))
-worklist=$root/worklist.csv
+# One list per size set. Two invocations on two partitions would otherwise
+# write the same file, and the second would renumber the units the first is
+# still working through.
+worklist=$root/worklist_${sizes// /_}.csv
 pairs=$(( ${#size_array[@]} * replicates * levels * 3 ))
 units=$(( pairs * ${#preprocessing_array[@]} ))
 chunks=$(( (units + chunk - 1) / chunk ))
@@ -196,7 +199,7 @@ if [[ "$stage" == "all" || "$stage" == "ot" ]]; then
         depend=(--dependency=afterok:"$generation_id")
     list_id=$(submit "work list ($units units)" \
         "${depend[@]}" "${where[@]}" \
-        --export=ALL,CONFIDENCEOT_BENCH_ROOT="$root",CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_BENCH_WORKLIST="$worklist",CONFIDENCEOT_BENCH_PREPROCESSING="$preprocessing" \
+        --export=ALL,CONFIDENCEOT_BENCH_ROOT="$root",CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_BENCH_WORKLIST="$worklist",CONFIDENCEOT_BENCH_PREPROCESSING="$preprocessing",CONFIDENCEOT_BENCH_SIZES="$sizes" \
         "$repo/benchmark/tacc/worklist.slurm")
 
     depend=()
@@ -225,7 +228,8 @@ echo "sizes       $sizes"
 echo "replicates  $replicates"
 echo "preprocess  ${#preprocessing_array[@]} configurations"
 echo "chunk       $chunk units per array task"
-echo "jobs        $generation_tasks generation + $chunks OT + 2"
+echo "jobs        $generation_tasks generation + $chunks OT + 2 for the whole chain"
+echo "worklist    $worklist"
 echo "partition   ${partition:-the default in each script (gg)}"
 echo "device      ${device:-the default in ot_array.slurm (cpu)}"
 echo "time        ${limit:-24:00:00, the default in ot_array.slurm}"
