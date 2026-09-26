@@ -75,7 +75,14 @@ if [[ "$force" == "1" || ! -f "$generated/GENERATION_DONE" ]]; then
     # activating it is harmless for the others.
     conda activate "${CONFIDENCEOT_R_ENV:-/scratch/10119/ghzheng/conda_envs/infercnv_r}" || true
     export R_LIBS_USER=${CONFIDENCEOT_R_LIBRARY:-$repo/.r-library}
-    rscript=${CONFIDENCEOT_RSCRIPT:-Rscript}
+    # The container by default, because it is the route that was built and
+    # verified here: splatter.def ends by running the same splatSimulate call
+    # this job makes. Plain Rscript resolves to the conda R, where splatter
+    # does not load at all, and the bind-mounted .r-library holds a splatter
+    # compiled against a different R. Either of those is still selectable by
+    # setting CONFIDENCEOT_RSCRIPT; neither should be what happens by
+    # default.
+    rscript=${CONFIDENCEOT_RSCRIPT:-$repo/benchmark/tacc/rscript.sh}
     if ! $rscript -e 'quit(status = !requireNamespace("splatter", quietly = TRUE))'; then
         echo "splatter will not load for: $rscript" >&2
         echo "  R_LIBS_USER=$R_LIBS_USER" >&2
