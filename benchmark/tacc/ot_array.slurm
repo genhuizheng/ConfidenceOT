@@ -3,8 +3,8 @@
 #SBATCH -p gg
 #SBATCH -N 1
 #SBATCH -n 1
-#SBATCH -c 16
-#SBATCH -t 12:00:00
+#SBATCH -c 72
+#SBATCH -t 24:00:00
 #SBATCH -A MCB26031
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_technical/logs/ot_%A_%a.out
 #SBATCH -e /scratch/10119/ghzheng/OT_project/benchmark_technical/logs/ot_%A_%a.err
@@ -41,7 +41,12 @@ root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_tech
 worklist=${CONFIDENCEOT_BENCH_WORKLIST:-$root/worklist.csv}
 chunk=${SLURM_ARRAY_TASK_ID:?Submit as a chunk array}
 chunk_size=${CONFIDENCEOT_BENCH_CHUNK:-24}
-device=${CONFIDENCEOT_BENCH_DEVICE:-cuda}
+# CPU by default: the GPU queue here is a long wait for a solve that
+# runs on cores anyway. Null calibration fits ten matrices per cost on
+# the grid, which is the expensive part and the part --workers
+# parallelises, so the core count and the workers go together.
+device=${CONFIDENCEOT_BENCH_DEVICE:-cpu}
+workers=${CONFIDENCEOT_BENCH_WORKERS:-8}
 force=${CONFIDENCEOT_BENCH_FORCE:-0}
 
 total=$(( $(wc -l < "$worklist") - 1 ))
@@ -84,6 +89,7 @@ for (( unit = start; unit < stop; unit++ )); do
         --tolerance 1e-4 \
         --save-coupling --save-pairing-edges \
         --device "$device" \
+        --workers "$workers" \
         --seed "${CONFIDENCEOT_BENCH_SEED:-20260925}" \
         || echo "  unit $unit FAILED; leaving it for a resubmission"
 done
