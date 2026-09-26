@@ -187,8 +187,14 @@ if absent:
 
 summary = (pooled.groupby(["side", "block", "preprocessing"])[readouts]
            .median().reset_index())
-summary.insert(0, "pairs_n", pooled.groupby(
-    ["side", "block", "preprocessing"]).size().to_numpy())
+group = pooled.groupby(["side", "block", "preprocessing"])
+summary.insert(0, "pairs_n", group.size().to_numpy())
+# The medians weight every pair alike, and the manifest is trimmed at
+# emptiness rather than at a round number, so some pairs carry a gate over a
+# handful of cells. These two columns are what makes that visible instead of
+# dissolved into the median.
+summary["n_cells_median"] = group["n_cells"].median().to_numpy()
+summary["n_cells_min"] = group["n_cells"].min().to_numpy()
 summary.to_csv(root / "diagnostics" / "factorial_gate_summary.csv", index=False)
 
 # The same medians per deposit. Three quarters of the pairs come from one of
@@ -196,8 +202,10 @@ summary.to_csv(root / "diagnostics" / "factorial_gate_summary.csv", index=False)
 # only way to see whether an arm behaves differently elsewhere is to look.
 by_deposit = (pooled.groupby(["side", "deposit", "preprocessing"])[readouts]
               .median().reset_index())
-by_deposit.insert(0, "pairs_n", pooled.groupby(
-    ["side", "deposit", "preprocessing"]).size().to_numpy())
+deposit_group = pooled.groupby(["side", "deposit", "preprocessing"])
+by_deposit.insert(0, "pairs_n", deposit_group.size().to_numpy())
+by_deposit["n_cells_median"] = deposit_group["n_cells"].median().to_numpy()
+by_deposit["n_cells_min"] = deposit_group["n_cells"].min().to_numpy()
 by_deposit.to_csv(
     root / "diagnostics" / "factorial_gate_summary_by_deposit.csv", index=False)
 

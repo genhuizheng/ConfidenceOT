@@ -75,6 +75,11 @@ malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
 annotation_spec=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
 calibration_null=${CONFIDENCEOT_CALIBRATION_NULL:-within_side_split}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
+# Must match what the manifest was trimmed at. Left at the runner's
+# default of 20 against a manifest trimmed at 1, the small pairs are
+# submitted and refused, which is the failure the trim existed to
+# remove.
+minimum_scope_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-1}
 # CPU because gg has no GPU, and because the solve runs on cores anyway. The
 # null calibration fits several matrices per cost across the grid, which is
 # the expensive part and the part --workers parallelises, so the core count
@@ -146,6 +151,7 @@ echo "worker      $worker of $workers, striding $pairs manifest rows"
 echo "manifest    $manifest"
 echo "output      $output_root"
 echo "scope       $scope, null $calibration_null, device $device"
+echo "minimum     $minimum_scope_cells cells per side"
 
 skip=(--skip-completed)
 [[ "$force" == "1" ]] && skip=()
@@ -177,6 +183,7 @@ for (( index = worker; index < pairs; index += workers )); do
         --preprocessing "$label" \
         --calibration-null "$calibration_null" \
         --max-observed-cells-per-side "$maximum_observed_cells" \
+        --minimum-scope-cells "$minimum_scope_cells" \
         --null-calibration-replicates 5 \
         --null-validation-replicates 5 \
         --calibration-grid-size 5 \

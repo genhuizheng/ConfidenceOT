@@ -57,6 +57,7 @@ malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
 budget_tag=${CONFIDENCEOT_FACTORIAL_BUDGET_TAG:-budget_0.95}
 block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
 annotations=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
+minimum_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-1}
 device=${CONFIDENCEOT_DEVICE:-cpu}
 partition=""
 limit=""
@@ -83,6 +84,7 @@ while (( $# )); do
         --scope) scope=$2; shift 2 ;;
         --block) block=$2; shift 2 ;;
         --annotations) annotations=$2; shift 2 ;;
+        --minimum-cells) minimum_cells=$2; shift 2 ;;
         --device) device=$2; shift 2 ;;
         --force) force=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -197,7 +199,7 @@ if [[ "$stage" == "all" || "$stage" == "ot" ]]; then
     ot_id=$(submit "OT ($block: ${#label_array[@]} labels x $workers workers)" \
         --array=0-$(( tasks - 1 )) \
         "${depend[@]}" "${where[@]}" "${wall[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
         "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm")
 fi
 
@@ -221,6 +223,7 @@ echo "workers     $workers per label"
 echo "jobs        $tasks OT + 2 for the whole chain"
 echo "scope       $scope, budget tag $budget_tag"
 echo "block       $block"
+echo "minimum     $minimum_cells cells per side (must match the trim)"
 echo "compartment ${annotations:-uniform call $malignant_column==$malignant_value}"
 echo "rank cut    ${rank_cut:-none in this set}"
 echo "partition   ${partition:-the default in each script (gg)}"
