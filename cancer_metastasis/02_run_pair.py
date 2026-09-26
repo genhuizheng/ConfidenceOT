@@ -300,6 +300,13 @@ def main() -> None:
              "from a real correspondence",
     )
     parser.add_argument(
+        "--allow-precomputed", action="store_true",
+        help="Permit a label whose transform is 'precomputed', which means "
+             "the counts are used as the representation. Off by default "
+             "because an unrecognised stem resolves to it, so a typo would "
+             "otherwise run a configuration nobody asked for",
+    )
+    parser.add_argument(
         "--fixed-rejection-cost", type=float,
         help="Skip null calibration and use this positive rejection cost",
     )
@@ -327,6 +334,14 @@ def main() -> None:
     args = parser.parse_args()
     args.equalise_depth_upstream = False
     args.regress_out = ()
+    # True unless a --preprocessing label says otherwise, which is the only
+    # way to ask for the gene-wise variance scaling to be skipped.
+    args.scale_genes = True
+    # A label whose stem this library does not own carries it, and the label
+    # cannot be rebuilt without it. Three fields have now been added to
+    # Preprocessing and forwarded late; the label assertion below caught all
+    # three, which is what it is for.
+    args.label_stem = None
     args.regress_on_ranks = True
     if args.preprocessing is not None:
         named = [name for name, value in (("--representation", args.representation),
@@ -343,10 +358,12 @@ def main() -> None:
             configuration = Preprocessing.from_label(args.preprocessing)
         except ValueError as error:
             parser.error(f"--preprocessing {args.preprocessing!r}: {error}")
-        if configuration.normalisation == "precomputed":
+        if configuration.normalisation == "precomputed" and not args.allow_precomputed:
             # An unrecognised stem becomes 'precomputed', which on raw counts
             # means "use them as the representation" -- a silently wrong answer
-            # rather than an error. A typo must not reach that.
+            # rather than an error. A typo must not reach that. A benchmark
+            # that wants counts as a factor level says so with
+            # --allow-precomputed, which a typo will not.
             parser.error(
                 f"--preprocessing {args.preprocessing!r} names a transform "
                 f"this script cannot compute. It builds the representation "
@@ -357,6 +374,8 @@ def main() -> None:
         args.representation = configuration.normalisation
         args.rank_top_n = configuration.rank_top_n
         args.cost = configuration.cost
+        args.scale_genes = configuration.scale_genes
+        args.label_stem = configuration.label_stem
         args.equalise_depth_upstream = configuration.equalise_depth
         args.regress_out = configuration.regress_out
         args.regress_on_ranks = configuration.regress_on_ranks
@@ -502,6 +521,8 @@ def main() -> None:
         minimum_detection_rate=args.minimum_detection_rate, cost=args.cost,
         equalise_depth=args.equalise_depth_upstream,
         regress_out=args.regress_out, regress_on_ranks=args.regress_on_ranks,
+        scale_genes=args.scale_genes, label_stem=args.label_stem,
+        allow_precomputed=args.allow_precomputed,
     )
     # The label is what the output directory is named after and what every
     # later stage reads the run as. Unpacking a configuration into separate

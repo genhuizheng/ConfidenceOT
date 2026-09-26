@@ -64,7 +64,14 @@ for (( unit = start; unit < stop; unit++ )); do
         continue
     fi
     echo "  unit $unit  $pair_id  $preprocessing"
+    # The raw levels of the factorial resolve to the 'precomputed' transform,
+    # which 02_run_pair.py refuses unless asked, because an unrecognised stem
+    # resolves to it too and a typo must not silently run the counts as the
+    # representation. Asking here is deliberate; a typo still fails.
+    allow=()
+    [[ "$preprocessing" == raw* ]] && allow=(--allow-precomputed)
     python "$repo/cancer_metastasis/02_run_pair.py" \
+        "${allow[@]}" \
         --manifest "$manifest" \
         --pair-index "$pair_index" \
         --output-root "$output" \

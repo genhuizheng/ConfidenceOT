@@ -473,6 +473,7 @@ def prepare_joint_representation(
     minimum_detection_rate: float = 0.0, residual_theta: float = 100.0,
     cost: str = "squared_euclidean", equalise_depth: bool = False,
     regress_out: Sequence[str] = (), regress_on_ranks: bool = True,
+    scale_genes: bool = True, allow_precomputed: bool = False,
     label_stem: str | None = None,
 ):
     """Joint representation of one pair, from two AnnData objects.
@@ -512,10 +513,14 @@ def prepare_joint_representation(
     declared kind, which puts the two sides of one joint PCA on different
     scales. That was permissive where it should not have been.
     """
-    if representation not in REPRESENTATIONS:
+    # 'precomputed' means "use the values as they are", which on counts is a
+    # legitimate factor level and on a typo is a silently wrong answer. It is
+    # reachable only when a caller says so.
+    accepted = REPRESENTATIONS + (("precomputed",) if allow_precomputed else ())
+    if representation not in accepted:
         raise ValueError(
             f"Unknown representation {representation!r}; expected one of "
-            f"{REPRESENTATIONS}"
+            f"{accepted}"
         )
     source_kind, target_kind = expression_kind(source), expression_kind(target)
     if source_kind != target_kind:
@@ -532,6 +537,7 @@ def prepare_joint_representation(
         equalise_depth=equalise_depth,
         n_hvg=n_hvg,
         n_pcs=n_pcs,
+        scale_genes=scale_genes,
         cost=cost,
         regress_out=tuple(regress_out),
         regress_on_ranks=regress_on_ranks,
