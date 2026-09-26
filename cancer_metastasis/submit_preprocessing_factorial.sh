@@ -53,7 +53,10 @@ ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos"}
 workers=2
 scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-malignant}
 malignant_column=${CONFIDENCEOT_MALIGNANT_COLUMN:-malignant}
+malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
 budget_tag=${CONFIDENCEOT_FACTORIAL_BUDGET_TAG:-budget_0.95}
+block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
+annotations=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
 device=${CONFIDENCEOT_DEVICE:-cpu}
 partition=""
 limit=""
@@ -78,6 +81,8 @@ while (( $# )); do
         --manifest) manifest=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --scope) scope=$2; shift 2 ;;
+        --block) block=$2; shift 2 ;;
+        --annotations) annotations=$2; shift 2 ;;
         --device) device=$2; shift 2 ;;
         --force) force=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -176,11 +181,8 @@ fi
 # ---- J1: the rank cut is a gate, not a report -------------------------------
 audit_id=""
 if [[ "$stage" == "all" || "$stage" == "audit" ]] && [[ -n "$rank_cut" ]]; then
-    scope_args=(--analysis-scope "$scope")
-    [[ "$scope" == "malignant" ]] && \
-        scope_args+=(--malignant-column "$malignant_column")
-    audit_id=$(submit "rank-cut audit at $rank_cut" "${where[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_AUDIT_MANIFEST="$manifest",CONFIDENCEOT_AUDIT_RANK_TOP_N="$rank_cut",CONFIDENCEOT_AUDIT_SCOPE="$scope",CONFIDENCEOT_AUDIT_MALIGNANT_COLUMN="$malignant_column" \
+    audit_id=$(submit "rank-cut audit at $rank_cut ($block)" "${where[@]}" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_AUDIT_MANIFEST="$manifest",CONFIDENCEOT_AUDIT_RANK_TOP_N="$rank_cut",CONFIDENCEOT_AUDIT_SCOPE="$scope",CONFIDENCEOT_AUDIT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_AUDIT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_AUDIT_OUT="$result/logs/rank_cut_audit_${block}_${rank_cut}.csv" \
         "$repo/cancer_metastasis/tacc_rank_cut_audit.slurm")
 elif [[ -z "$rank_cut" ]]; then
     echo "no rank arm in this set; the cut audit is skipped" >&2
@@ -192,10 +194,10 @@ if [[ "$stage" == "all" || "$stage" == "ot" ]]; then
     depend=()
     [[ -n "$audit_id" && "$audit_id" != "DRYRUN" ]] && \
         depend=(--dependency=afterok:"$audit_id")
-    ot_id=$(submit "OT (${#label_array[@]} labels x $workers workers)" \
+    ot_id=$(submit "OT ($block: ${#label_array[@]} labels x $workers workers)" \
         --array=0-$(( tasks - 1 )) \
         "${depend[@]}" "${where[@]}" "${wall[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations" \
         "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm")
 fi
 
@@ -218,6 +220,8 @@ echo "labels      ${#label_array[@]}"
 echo "workers     $workers per label"
 echo "jobs        $tasks OT + 2 for the whole chain"
 echo "scope       $scope, budget tag $budget_tag"
+echo "block       $block"
+echo "compartment ${annotations:-uniform call $malignant_column==$malignant_value}"
 echo "rank cut    ${rank_cut:-none in this set}"
 echo "partition   ${partition:-the default in each script (gg)}"
 echo "device      $device"

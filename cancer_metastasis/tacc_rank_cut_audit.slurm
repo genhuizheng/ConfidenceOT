@@ -38,6 +38,7 @@ rank_top_n=${CONFIDENCEOT_AUDIT_RANK_TOP_N:?Set CONFIDENCEOT_AUDIT_RANK_TOP_N}
 scope=${CONFIDENCEOT_AUDIT_SCOPE:-malignant}
 malignant_column=${CONFIDENCEOT_AUDIT_MALIGNANT_COLUMN:-malignant}
 malignant_value=${CONFIDENCEOT_AUDIT_MALIGNANT_VALUE:-malignant}
+annotation_spec=${CONFIDENCEOT_AUDIT_INCLUDE_ANNOTATIONS:-}
 max_fraction_short=${CONFIDENCEOT_AUDIT_MAX_FRACTION_SHORT:-0.01}
 out=${CONFIDENCEOT_AUDIT_OUT:-$result/logs/rank_cut_audit_${rank_top_n}.csv}
 
@@ -46,10 +47,20 @@ export PYTHONPATH="$repo/src${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED=1
 mkdir -p "$result/logs"
 
+# Scoped exactly as the transport will be, because the cut is audited
+# against the matrix the encoder sees and the two compartments are not the
+# same set of cells.
 scope_args=(--analysis-scope "$scope")
 if [[ "$scope" == "malignant" ]]; then
-    scope_args+=(--malignant-column "$malignant_column"
-                 --malignant-value "$malignant_value")
+    if [[ -n "$annotation_spec" ]]; then
+        IFS='|' read -r -a annotations <<< "$annotation_spec"
+        for annotation in "${annotations[@]}"; do
+            scope_args+=(--include-annotation "$annotation")
+        done
+    else
+        scope_args+=(--malignant-column "$malignant_column"
+                     --malignant-value "$malignant_value")
+    fi
 fi
 
 echo "manifest    $manifest"

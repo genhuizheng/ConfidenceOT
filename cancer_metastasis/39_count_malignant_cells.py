@@ -50,6 +50,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--malignant-value", default="malignant")
     parser.add_argument("--undetermined-value", default="undetermined")
     parser.add_argument(
+        "--include-annotation", action="append", default=[],
+        help="Count cells whose cell_type is one of these instead of using "
+             "the uniform call. That is how the prostate object is scoped: "
+             "its author annotation is the authoritative labelling for that "
+             "deposit, and the GEO conversion of the same accession carries "
+             "no call at all. Repeat the flag per label.")
+    parser.add_argument("--annotation-column", default="cell_type")
+    parser.add_argument(
         "--minimum-cells-per-side", type=int, default=20,
         help="The runner's --minimum-scope-cells, so evaluable here means "
              "evaluable there")
@@ -65,14 +73,24 @@ def side_paths(row: pd.Series, side: str) -> list[str]:
 
 
 def side_counts(paths: list[str], sample: str, column: str, malignant: str,
-                undetermined: str) -> dict:
-    """Cells of each kind on one side, read from obs without touching X."""
+                undetermined: str, annotations: list[str],
+                annotation_column: str) -> dict:
+    """Cells of each kind on one side, read from obs without touching X.
+
+    Two ways of naming the compartment, because the deposits genuinely have
+    two. Where the uniform inferCNV call exists it is used; where a deposit
+    carries its own annotation instead, ``--include-annotation`` selects on
+    that. ``undetermined`` only means anything on the first route: an author
+    label does not abstain.
+    """
     import anndata as ad
 
     total = 0
     malignant_n = 0
     undetermined_n = 0
     missing_column = False
+    select = column if not annotations else annotation_column
+    wanted = set(annotations)
     for path in paths:
         backed = ad.read_h5ad(path, backed="r")
         try:
@@ -84,16 +102,19 @@ def side_counts(paths: list[str], sample: str, column: str, malignant: str,
         if obs.shape[0] == 0:
             continue
         total += int(obs.shape[0])
-        if column not in obs:
-            # A file from a source that predates the uniform call. Recorded
-            # rather than raised: one such deposit must not stop the count
-            # for the other eleven, and the runner would need
-            # --include-annotation for it anyway.
+        if select not in obs:
+            # A file from a source that predates the uniform call, or one
+            # whose annotation lives under another name. Recorded rather
+            # than raised: one such deposit must not stop the count for the
+            # other eleven.
             missing_column = True
             continue
-        values = obs[column].astype(str).to_numpy()
-        malignant_n += int(np.sum(values == malignant))
-        undetermined_n += int(np.sum(values == undetermined))
+        values = obs[select].astype(str).to_numpy()
+        if annotations:
+            malignant_n += int(np.sum(np.isin(values, list(wanted))))
+        else:
+            malignant_n += int(np.sum(values == malignant))
+            undetermined_n += int(np.sum(values == undetermined))
     return {"total_n": total, "malignant_n": malignant_n,
             "undetermined_n": undetermined_n,
             "other_n": total - malignant_n - undetermined_n,
@@ -117,7 +138,8 @@ def main() -> None:
                 counts = side_counts(
                     side_paths(row, side), str(row[f"{side}_sample"]),
                     args.malignant_column, args.malignant_value,
-                    args.undetermined_value)
+                    args.undetermined_value, args.include_annotation,
+                    args.annotation_column)
             except Exception as error:  # noqa: BLE001 - reported, not raised
                 # One unreadable file must not cost the other 251 pairs.
                 counts = {"total_n": -1, "malignant_n": -1,

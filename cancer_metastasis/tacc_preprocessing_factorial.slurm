@@ -49,6 +49,11 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 manifest=${CONFIDENCEOT_FACTORIAL_MANIFEST:-$result/manifest/pancancer_20260924/pair_manifest_eligible.csv}
 out=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
+# One block is one (manifest, compartment definition). The name goes into the
+# path, so the diagnostics can find every block that ran and carry which is
+# which into the comparison rather than pooling two definitions of malignant
+# into one median without saying so.
+block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
 labels=(${CONFIDENCEOT_FACTORIAL_LABELS:-\
 raw raw_noscale raw_cos raw_noscale_cos \
 logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
@@ -57,6 +62,17 @@ workers=${CONFIDENCEOT_FACTORIAL_WORKERS:-3}
 scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-malignant}
 malignant_column=${CONFIDENCEOT_MALIGNANT_COLUMN:-malignant}
 malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
+# The other way of naming the malignant compartment, pipe separated. Each
+# deposit uses its own best available call: the uniform inferCNV labels where
+# they exist, and Faming Zhao's annotation of the prostate object, which is
+# the authoritative labelling for that deposit -- the GEO conversion of the
+# same accession carries no call at all, since its paper used NUMBAT and that
+# needs BAMs behind EGA access.
+#
+# Both are correct for the data they cover. The block name and the recorded
+# definition exist so the comparison can say which pairs came from which, not
+# because either is provisional.
+annotation_spec=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
 calibration_null=${CONFIDENCEOT_CALIBRATION_NULL:-within_side_split}
 maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 # CPU because gg has no GPU, and because the solve runs on cores anyway. The
@@ -108,8 +124,14 @@ if (( label_index >= ${#labels[@]} )); then
     exit 0
 fi
 label=${labels[$label_index]}
-output_root=$out/$label
+output_root=$out/$block/$label
 mkdir -p "$result/logs" "$output_root"
+# Written beside the results, so the diagnostics do not have to be told again
+# what this block was. A record that travels with the data cannot fall out of
+# step with it the way a second argument can.
+echo "$manifest" > "$out/$block/MANIFEST_PATH"
+if [[ -n "$annotation_spec" ]]; then definition=author_labels; else definition=uniform_infercnv; fi
+echo "$definition" > "$out/$block/COMPARTMENT_DEFINITION"
 
 # The raw arms resolve to the 'precomputed' transform, which the pair runner
 # refuses unless asked, because an unrecognised stem resolves to it too and a
@@ -118,6 +140,7 @@ mkdir -p "$result/logs" "$output_root"
 allow=()
 [[ "$label" == raw* ]] && allow=(--allow-precomputed)
 
+echo "block       $block"
 echo "label       $label  (arm $(( label_index + 1 )) of ${#labels[@]})"
 echo "worker      $worker of $workers, striding $pairs manifest rows"
 echo "manifest    $manifest"
@@ -129,8 +152,17 @@ skip=(--skip-completed)
 
 scope_args=(--analysis-scope "$scope")
 if [[ "$scope" == "malignant" ]]; then
-    scope_args+=(--malignant-column "$malignant_column"
-                 --malignant-value "$malignant_value")
+    if [[ -n "$annotation_spec" ]]; then
+        IFS='|' read -r -a annotations <<< "$annotation_spec"
+        for annotation in "${annotations[@]}"; do
+            scope_args+=(--include-annotation "$annotation")
+        done
+        echo "compartment author labels: ${annotations[*]}"
+    else
+        scope_args+=(--malignant-column "$malignant_column"
+                     --malignant-value "$malignant_value")
+        echo "compartment uniform call: $malignant_column==$malignant_value"
+    fi
 fi
 
 failures=0
