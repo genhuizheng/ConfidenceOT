@@ -70,11 +70,12 @@ for (( unit = start; unit < stop; unit++ )); do
     # representation. Asking here is deliberate; a typo still fails.
     allow=()
     [[ "$preprocessing" == raw* ]] && allow=(--allow-precomputed)
+    # The manifest and the output root are positional, and the row is
+    # --index. There are no --manifest, --output-root or --pair-index flags.
     python "$repo/cancer_metastasis/02_run_pair.py" \
+        "$manifest" "$output" \
         "${allow[@]}" \
-        --manifest "$manifest" \
-        --pair-index "$pair_index" \
-        --output-root "$output" \
+        --index "$pair_index" \
         --analysis-scope all \
         --preprocessing "$preprocessing" \
         --calibration-null within_side_split \
@@ -84,7 +85,7 @@ for (( unit = start; unit < stop; unit++ )); do
         --save-coupling --save-pairing-edges \
         --device "$device" \
         --seed "${CONFIDENCEOT_BENCH_SEED:-20260925}" \
-        || echo "  unit $unit FAILED; leaving it for a resubmission" >&2
+        || echo "  unit $unit FAILED; leaving it for a resubmission"
 done
 
 echo "chunk $chunk finished"
