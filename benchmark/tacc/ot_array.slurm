@@ -64,7 +64,10 @@ for (( unit = start; unit < stop; unit++ )); do
     IFS=',' read -r manifest pair_index pair_id preprocessing <<< \
         "$(sed -n "${line}p" "$worklist" | cut -d',' -f1-4)"
     output=$root/runs/$preprocessing
-    if [[ "$force" != "1" && -f "$output/$pair_id/scope_all/SUCCESS" ]]; then
+    # The solver writes scope_all/budget_<value>, and the budget is
+    # not known here. Checking scope_all/SUCCESS found nothing, so
+    # every resubmission redid work that was already complete.
+    if [[ "$force" != "1" ]] && compgen -G "$output/$pair_id/scope_all/budget_*/SUCCESS" > /dev/null; then
         echo "  unit $unit  $pair_id  $preprocessing  already complete"
         continue
     fi

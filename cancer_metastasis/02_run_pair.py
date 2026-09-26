@@ -775,6 +775,17 @@ def main() -> None:
         "rejection_cost_mode": rejection_cost_mode,
         "calibration_null": calibration_null,
         "cost": args.cost,
+        # The scale the cost was divided by, and what the divided cost then
+        # looks like. Without the scale a metric that moves cannot be told
+        # apart from an embedding that grew, and the two call for opposite
+        # conclusions. The median is ~1 by construction, so a median that is
+        # not says the sampled pairs did not represent the matrix; the
+        # maximum says how long the tail is, which differs by an order of
+        # magnitude between the squared-Euclidean and angular geometries and
+        # therefore changes what a fixed epsilon does.
+        "cost_scale": float(scale),
+        "cost_median": float(np.median(cost)),
+        "cost_max": float(np.max(cost)),
         "preprocessing_label": preprocessing.get("label"),
         "calibration_valid_for_m4r": calibration_valid,
         "calibration_m4e_inference_valid": m4e_inference_valid,

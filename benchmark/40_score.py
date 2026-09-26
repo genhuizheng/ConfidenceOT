@@ -15,11 +15,17 @@ whether OT got the right answer rather than a defensible one; the second is
 the only one that tests the transport rather than the threshold. A method can
 have a clean gate and still be moving mass along the measurement.
 
-The median pair scale and the calibrated rejection cost are carried through as
+The cost scale and the calibrated rejection cost are carried through as
 diagnostics, not metrics. If the scale moves with the level while the metrics
 stay flat, the cost normalisation is doing its job; if the metrics move while
 the scale stays put, the relative geometry was distorted, and that is the
 failure this benchmark exists to catch.
+
+**nCount and nFeature are read from the h5ads, not from the run.** The gate
+table does not carry them, and the benchmark wrote those files, so taking the
+readouts from its own inputs removes a dependency on what the solver happened
+to record. They are aligned on ``observation_id``, which the gate carries and
+which is the h5ad's own index.
 """
 
 from __future__ import annotations
@@ -65,11 +71,24 @@ def correlation(left: np.ndarray, right: np.ndarray) -> float:
     return float(spearmanr(left[ok], right[ok]).statistic)
 
 
+def readouts(path: str) -> pd.DataFrame:
+    """nCount and nFeature per cell, indexed the way the gate names cells."""
+    import anndata as ad
+    from scipy import sparse
+
+    data = ad.read_h5ad(path)
+    matrix = sparse.csr_matrix(data.X)
+    return pd.DataFrame(
+        {"total_counts": np.asarray(matrix.sum(axis=1)).ravel(),
+         "detected_genes": np.asarray((matrix > 0).sum(axis=1)).ravel()},
+        index=pd.Index(data.obs_names.astype(str), name="observation_id"))
+
+
 def coupling_metrics(plan: np.ndarray, source_group: np.ndarray,
                      target_group: np.ndarray, source_value: np.ndarray,
                      target_value: np.ndarray) -> dict:
     mass = plan.sum()
-    if mass <= 0:
+    if mass <= 0 or plan.shape != (source_group.size, target_group.size):
         return {"same_population_mass": float("nan"),
                 "coupling_nuisance_rho": float("nan")}
     same = np.zeros_like(plan, dtype=bool)
@@ -83,12 +102,7 @@ def coupling_metrics(plan: np.ndarray, source_group: np.ndarray,
 
 
 def diagnostics(run: Path) -> dict:
-    """The two numbers that separate a scale change from a geometry change.
-
-    Looked up rather than assumed: run.json carries the calibrated rejection
-    cost and the preprocessing record, and the cost scale lives in whichever
-    of the two files the version in use happens to write it to.
-    """
+    """Looked up rather than assumed: the keys live across two files."""
     found: dict = {}
     for name in ("run.json", "calibration.json"):
         path = run / name
@@ -97,35 +111,48 @@ def diagnostics(run: Path) -> dict:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
             found.update(payload)
-    scale = next((found[key] for key in
-                  ("cost_scale", "scale", "median_pair_scale")
-                  if isinstance(found.get(key), (int, float))), float("nan"))
-    return {"rejection_cost": found.get("rejection_cost", float("nan")),
-            "median_pair_scale": scale,
-            "calibration_null": found.get("calibration_null"),
-            "preprocessing_label": found.get("preprocessing_label")}
+    return {key: found.get(key, float("nan")) for key in
+            ("rejection_cost", "cost_scale", "cost_median", "cost_max")} | {
+        "calibration_null": found.get("calibration_null"),
+        "calibration_valid_for_m4r": found.get("calibration_valid_for_m4r"),
+        "preprocessing_label": found.get("preprocessing_label")}
 
 
-def score_pair(run: Path, truth: pd.DataFrame) -> list[dict]:
+def score_pair(run: Path, truth: pd.DataFrame, row: pd.Series) -> list[dict]:
     gate = pd.read_csv(run / "cell_confidence.csv")
     summary = diagnostics(run)
+    measured = {side: readouts(row[f"{side}_h5ad"])
+                for side in ("source", "target")}
     rows = []
     for method, block in gate.groupby("method"):
         record: dict = {"method": str(method)}
+        group_of: dict[str, np.ndarray] = {}
+        value_of: dict[str, np.ndarray] = {}
         for side in ("source", "target"):
             cells = block[block["side"] == side]
+            answer = truth[truth["side"] == side]
             if cells.empty:
                 continue
-            answer = truth[truth["side"] == side]
             if len(answer) != len(cells):
                 raise ValueError(
                     f"{side}: {len(cells)} gated cells against "
                     f"{len(answer)} in the truth table")
-            retained = cells["retained"].to_numpy(dtype=bool)
+            # The truth table is in the h5ad's order, and so is the gate, but
+            # a join on the name is the only version of that which cannot go
+            # quietly wrong.
+            joined = cells.set_index(
+                cells["observation_id"].astype(str)).join(
+                measured[side], how="left")
+            if joined[["total_counts", "detected_genes"]].isna().any().any():
+                raise ValueError(f"{side}: a gated cell is not in the h5ad")
+
+            retained = joined["retained"].to_numpy(dtype=bool)
             should_reject = answer["should_reject"].to_numpy(dtype=bool)
-            cost = cells["decision_cost"].to_numpy(dtype=float)
-            total = cells["total_counts"].to_numpy(dtype=float)
-            detected = cells["n_genes_by_counts"].to_numpy(dtype=float)
+            cost = joined["decision_cost"].to_numpy(dtype=float)
+            total = joined["total_counts"].to_numpy(dtype=float)
+            detected = joined["detected_genes"].to_numpy(dtype=float)
+            group_of[side] = answer["group"].to_numpy()
+            value_of[side] = total
 
             matched = ~should_reject
             record[f"{side}_false_rejection_rate"] = float(
@@ -146,20 +173,16 @@ def score_pair(run: Path, truth: pd.DataFrame) -> list[dict]:
             record[f"{side}_auc_detected_genes"] = rank_auc(detected, retained)
             record[f"{side}_rho_cost_total_counts"] = correlation(cost, total)
             record[f"{side}_rho_cost_detected_genes"] = correlation(cost, detected)
-            record[f"{side}_rejected_n"] = int((~retained).sum())
+            record[f"{side}_rejected_n"] = int(rejected.sum())
             record[f"{side}_cells_n"] = int(retained.size)
+
         plan_path = run / f"coupling_{str(method).lower().replace('-', '')}.npz"
-        if plan_path.exists():
+        if plan_path.exists() and {"source", "target"} <= set(group_of):
             with np.load(plan_path) as handle:
                 plan = np.asarray(handle["coupling"], dtype=np.float64)
-            source_cells = block[block["side"] == "source"]
-            target_cells = block[block["side"] == "target"]
             record.update(coupling_metrics(
-                plan,
-                truth.loc[truth["side"] == "source", "group"].to_numpy(),
-                truth.loc[truth["side"] == "target", "group"].to_numpy(),
-                source_cells["total_counts"].to_numpy(dtype=float),
-                target_cells["total_counts"].to_numpy(dtype=float)))
+                plan, group_of["source"], group_of["target"],
+                value_of["source"], value_of["target"]))
         else:
             record.update({"same_population_mass": float("nan"),
                            "coupling_nuisance_rho": float("nan")})
@@ -174,21 +197,28 @@ def main() -> None:
     collected = []
     missing = []
     for _, row in manifest.iterrows():
-        run = args.run_root / str(row["pair_id"]) / f"scope_{args.scope}"
-        if not (run / "cell_confidence.csv").exists():
+        # The solver writes scope_<scope>/budget_<value>, and the budget is
+        # not knowable from here: it is whatever the run used.
+        found = sorted((args.run_root / str(row["pair_id"])
+                        / f"scope_{args.scope}").glob("budget_*"))
+        ran = [path for path in found if (path / "cell_confidence.csv").exists()]
+        if not ran:
             missing.append(str(row["pair_id"]))
             continue
         truth = pd.read_csv(row["truth_csv"])
-        for record in score_pair(run, truth):
-            record.update({
-                "pair_id": row["pair_id"], "preprocessing": args.preprocessing,
-                "n_cells": row["n_cells"], "replicate": row["replicate"],
-                "technical_level": row["technical_level"],
-                "biological_case": row["biological_case"],
-                "R_nCount": row["R_nCount"], "R_nFeature": row["R_nFeature"],
-                "rank_cut_valid": row["rank_cut_valid"],
-            })
-            collected.append(record)
+        for run in ran:
+            for record in score_pair(run, truth, row):
+                record.update({
+                    "pair_id": row["pair_id"],
+                    "preprocessing": args.preprocessing,
+                    "budget_dir": run.name,
+                    "n_cells": row["n_cells"], "replicate": row["replicate"],
+                    "technical_level": row["technical_level"],
+                    "biological_case": row["biological_case"],
+                    "R_nCount": row["R_nCount"], "R_nFeature": row["R_nFeature"],
+                    "rank_cut_valid": row["rank_cut_valid"],
+                })
+                collected.append(record)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     table = pd.DataFrame(collected)
