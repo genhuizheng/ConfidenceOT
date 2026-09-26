@@ -137,7 +137,11 @@ def main() -> None:
                 .quantile(q))
             for q in (0.0, 0.1, 0.25, 0.5, 1.0)},
     }
-    report_path = args.out_csv.with_name("trim_report.json")
+    # Named after the manifest it describes. A fixed name would have
+    # the prostate block overwrite the uniform block's report, since
+    # both land in one directory.
+    report_path = args.out_csv.with_name(
+        args.out_csv.stem + "_trim_report.json")
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     dropped.to_csv(dropped_path, index=False)
 
