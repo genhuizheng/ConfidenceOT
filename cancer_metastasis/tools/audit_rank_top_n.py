@@ -183,7 +183,22 @@ def main() -> None:
         quantiles = np.quantile(joint, [0.0, 0.001, 0.01, 0.05, 0.50])
         # The actionable cut, as opposed to the strictest one: the largest cut
         # that leaves at most the tolerated fraction of cells encoded short.
-        tolerated = int(np.quantile(joint, min(args.max_fraction_short, 1.0)))
+        #
+        # An order statistic, not a quantile. np.quantile interpolates while
+        # fraction_below_cut counts strictly below, and the two disagree on
+        # exactly the pairs that fail: at 174 cells the 1% position falls
+        # between the second and third smallest and interpolates to 258, but
+        # two cells still sit below 258, so the cut it recommended did not
+        # pass its own gate -- and being above the requested 256, it read as
+        # "lower the cut to 258".
+        #
+        # How many may be short is a count, so the answer is a count: allow
+        # k = floor(tolerance * n) of them, and the largest qualifying cut is
+        # the (k+1)-th smallest detected-gene count, which leaves exactly
+        # those k strictly below it.
+        allowed_short = int(np.floor(args.max_fraction_short * joint.size))
+        allowed_short = min(max(allowed_short, 0), joint.size - 1)
+        tolerated = int(np.sort(joint)[allowed_short])
         rows.append({
             "index": index,
             "pair_id": pair_id,

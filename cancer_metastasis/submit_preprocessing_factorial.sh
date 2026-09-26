@@ -58,6 +58,13 @@ budget_tag=${CONFIDENCEOT_FACTORIAL_BUDGET_TAG:-budget_0.95}
 block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
 annotations=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
 minimum_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-1}
+# How many cells may be encoded short before the rank arms are
+# refused. A count, not a principle: the tool's own reasoning is that
+# one shallow cell in ten thousand changes nothing while a third of
+# them makes the encoding a detection-breadth readout, and where
+# between those a particular dataset falls is something to look at
+# rather than to fix in advance.
+max_fraction_short=${CONFIDENCEOT_AUDIT_MAX_FRACTION_SHORT:-0.01}
 device=${CONFIDENCEOT_DEVICE:-cpu}
 partition=""
 limit=""
@@ -85,6 +92,7 @@ while (( $# )); do
         --block) block=$2; shift 2 ;;
         --annotations) annotations=$2; shift 2 ;;
         --minimum-cells) minimum_cells=$2; shift 2 ;;
+        --max-fraction-short) max_fraction_short=$2; shift 2 ;;
         --device) device=$2; shift 2 ;;
         --force) force=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -184,7 +192,7 @@ fi
 audit_id=""
 if [[ "$stage" == "all" || "$stage" == "audit" ]] && [[ -n "$rank_cut" ]]; then
     audit_id=$(submit "rank-cut audit at $rank_cut ($block)" "${where[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_AUDIT_MANIFEST="$manifest",CONFIDENCEOT_AUDIT_RANK_TOP_N="$rank_cut",CONFIDENCEOT_AUDIT_SCOPE="$scope",CONFIDENCEOT_AUDIT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_AUDIT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_AUDIT_OUT="$result/logs/rank_cut_audit_${block}_${rank_cut}.csv" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_AUDIT_MANIFEST="$manifest",CONFIDENCEOT_AUDIT_RANK_TOP_N="$rank_cut",CONFIDENCEOT_AUDIT_SCOPE="$scope",CONFIDENCEOT_AUDIT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_AUDIT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_AUDIT_MAX_FRACTION_SHORT="$max_fraction_short",CONFIDENCEOT_AUDIT_OUT="$result/logs/rank_cut_audit_${block}_${rank_cut}.csv" \
         "$repo/cancer_metastasis/tacc_rank_cut_audit.slurm")
 elif [[ -z "$rank_cut" ]]; then
     echo "no rank arm in this set; the cut audit is skipped" >&2
@@ -271,6 +279,7 @@ echo "block       $block"
 echo "minimum     $minimum_cells cells per side (must match the trim)"
 echo "compartment ${annotations:-uniform call $malignant_column==$malignant_value}"
 echo "rank cut    ${rank_cut:-none in this set}"
+echo "short cells at most $max_fraction_short of any pair"
 echo "partition   ${partition:-the default in each script (gg)}"
 echo "device      $device"
 echo "time        ${limit:-24:00:00, the default in the array}"
