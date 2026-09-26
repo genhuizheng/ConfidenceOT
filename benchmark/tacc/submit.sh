@@ -88,13 +88,20 @@ preprocessing_array=($preprocessing)
 # where $root does not exist.
 (( dry_run )) || mkdir -p "$root/logs"
 
+# Counted within the partition being submitted to, because the cap is per
+# queue: work already queued on gg does not spend anything on gh. Counting
+# across all of them refuses a submission SLURM would have taken, which is
+# the worse failure of the two -- it looks like the cap and is not.
+#
 # Under pipefail a missing or hiccuping squeue fails the pipeline, and under
 # set -e that aborts the script from inside the arithmetic that was meant to
 # be a courtesy check -- silently, with a chain half submitted. Nothing is
 # lost by answering zero: the cap is SLURM's own, and sbatch enforces it.
 queued_now() {
     local n
-    n=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l) || n=0
+    local scope=()
+    [[ -n "$partition" ]] && scope=(-p "$partition")
+    n=$(squeue -u "$USER" -h -r "${scope[@]}" 2> /dev/null | wc -l) || n=0
     echo "${n:-0}"
 }
 
@@ -155,7 +162,7 @@ if [[ "$stage" == "all" ]]; then
     required=$(( generation_tasks + chunks + 2 ))
     if (( dry_run == 0 )) && (( $(queued_now) + required > 40 )); then
         room=$(( 40 - $(queued_now) - generation_tasks - 2 ))
-        echo "the whole chain is $required jobs (generation $generation_tasks,"              "OT $chunks, work list and scoring 2) against the 40-job cap"              "with $(queued_now) already queued." >&2
+        echo "the whole chain is $required jobs (generation $generation_tasks,"              "OT $chunks, work list and scoring 2) against the 40-job cap"              "with $(queued_now) already queued on ${partition:-this queue}." >&2
         if (( room > 0 )); then
             echo "either raise --chunk to $(( (units + room - 1) / room )) or"                  "more, or run --stage generate and --stage ot separately." >&2
         else
