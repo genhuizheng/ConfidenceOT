@@ -97,12 +97,15 @@ if (is.null(dropout_mid_target)) {
                          dropout_mid_target = NA,
                          dropout_shape = NA)
 } else {
+  # Two calls, in this order. setParam validates dropout.type against the
+  # length of dropout.mid and dropout.shape, so setting the type first is
+  # refused: "set dropout.mid and dropout.shape first".
   params <- setParams(
     params,
-    dropout.type  = "batch",
     dropout.mid   = c(dropout_mid_source, as.numeric(dropout_mid_target)),
     dropout.shape = c(dropout_shape, dropout_shape)
   )
+  params <- setParams(params, dropout.type = "batch")
   dropout_record <- list(dropout_type = "batch",
                          dropout_mid_source = dropout_mid_source,
                          dropout_mid_target = as.numeric(dropout_mid_target),
