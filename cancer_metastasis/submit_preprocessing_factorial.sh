@@ -190,17 +190,54 @@ elif [[ -z "$rank_cut" ]]; then
     echo "no rank arm in this set; the cut audit is skipped" >&2
 fi
 
-# ---- J2: the twelve arms ----------------------------------------------------
+# ---- J2: the arms -----------------------------------------------------------
+# Submitted as two arrays when the set mixes them, because the cut audit is a
+# gate on the rank arms alone. One array under afterok meant an unsafe cut
+# cancelled the eight arms that never touch rank encoding, which is a
+# statement about a parameter they do not use. Splitting costs no extra array
+# tasks -- the same twelve labels, divided -- only one more job id.
+submit_arm_array() {
+    # $1 = space-separated labels, $2 = extra sbatch args as a name, rest passed
+    local arm_labels=$1; shift
+    local arm_count
+    arm_count=$(wc -w <<< "$arm_labels")
+    (( arm_count == 0 )) && return 0
+    submit "OT ($block: $arm_count labels x $workers workers)" \
+        --array=0-$(( arm_count * workers - 1 )) \
+        "$@" "${where[@]}" "${wall[@]}" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$arm_labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
+        "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm"
+}
+
 ot_id=""
+rank_ot_id=""
 if [[ "$stage" == "all" || "$stage" == "ot" ]]; then
+    # Asked of the class that defines each label, not matched against its
+    # text, for the same reason the cut itself is.
+    IFS=$'\t' read -r plain_labels rank_labels < <(
+        PYTHONPATH="$repo/src" "$env_python" - $labels <<'PYSPLIT'
+import sys
+
+from confidenceot.preprocessing import Preprocessing
+
+plain, ranked = [], []
+for label in sys.argv[1:]:
+    target = ranked if str(
+        Preprocessing.from_label(label).normalisation).startswith("rank") \
+        else plain
+    target.append(label)
+print(" ".join(plain) + "\t" + " ".join(ranked))
+PYSPLIT
+    )
+
+    # The arms that do not rank anything run regardless of the cut.
+    ot_id=$(submit_arm_array "$plain_labels")
+
+    # The rank arms wait on the audit, and are the only thing it can cancel.
     depend=()
     [[ -n "$audit_id" && "$audit_id" != "DRYRUN" ]] && \
         depend=(--dependency=afterok:"$audit_id")
-    ot_id=$(submit "OT ($block: ${#label_array[@]} labels x $workers workers)" \
-        --array=0-$(( tasks - 1 )) \
-        "${depend[@]}" "${where[@]}" "${wall[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
-        "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm")
+    rank_ot_id=$(submit_arm_array "$rank_labels" "${depend[@]}")
 fi
 
 # ---- J3: one diagnostic table over all twelve -------------------------------
@@ -208,8 +245,16 @@ if [[ "$stage" == "all" || "$stage" == "diagnose" ]]; then
     depend=()
     # afterany, not afterok: an arm that fails on some pairs still has a gate
     # worth reading on the rest, and the diagnostic reports what is missing.
-    [[ -n "$ot_id" && "$ot_id" != "DRYRUN" ]] && \
-        depend=(--dependency=afterany:"$ot_id")
+    for finished in "$ot_id" "$rank_ot_id"; do
+        [[ -n "$finished" && "$finished" != "DRYRUN" ]] && \
+            depend+=(--dependency=afterany:"$finished")
+    done
+    # One --dependency wins over another, so several afterany ids go in one.
+    if (( ${#depend[@]} > 1 )); then
+        joined=$(printf '%s:' "${depend[@]}")
+        joined=${joined//--dependency=afterany:/}
+        depend=(--dependency=afterany:"${joined%:}")
+    fi
     submit "gate diagnostics" "${depend[@]}" "${where[@]}" \
         --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_FACTORIAL_BUDGET_TAG="$budget_tag" \
         "$repo/cancer_metastasis/tacc_factorial_diagnostics.slurm" > /dev/null
