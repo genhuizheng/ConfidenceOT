@@ -4,7 +4,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 16
-#SBATCH -t 02:00:00
+#SBATCH -t 08:00:00
 #SBATCH -A MCB26031
 #SBATCH -o /scratch/10119/ghzheng/OT_project/benchmark_technical/logs/score_%A.out
 #SBATCH -e /scratch/10119/ghzheng/OT_project/benchmark_technical/logs/score_%A.err
@@ -35,16 +35,25 @@ for manifest in "$root"/conditions/*/*/*/manifest.csv; do
     level_dir=$(dirname "$manifest")
     replicate_dir=$(dirname "$level_dir")
     tag=$(basename "$(dirname "$replicate_dir")")_$(basename "$replicate_dir")_$(basename "$level_dir")
+    # Every configuration of this condition in one pass. Twelve separate
+    # invocations re-read the same h5ads twelve times for readouts that do
+    # not depend on the preprocessing, and paid twelve interpreter startups
+    # to do it. That is what ran the scoring past its two-hour wall with
+    # every one of the 1,620 runs already finished.
+    roots=()
     for run_root in "$root"/runs/*; do
         [[ -d "$run_root" ]] || continue
-        preprocessing=$(basename "$run_root")
-        python "$repo/benchmark/40_score.py" \
-            --run-root "$run_root" \
-            --manifest "$manifest" \
-            --preprocessing "$preprocessing" \
-            --scope all \
-            --out "$root/metrics/${tag}__${preprocessing}.csv"
+        roots+=(--run-root "$run_root")
     done
+    if (( ${#roots[@]} == 0 )); then
+        echo "no run roots under $root/runs" >&2
+        exit 2
+    fi
+    python "$repo/benchmark/40_score.py" \
+        "${roots[@]}" \
+        --manifest "$manifest" \
+        --scope all \
+        --out "$root/metrics/${tag}.csv"
 done
 
 python - "$root" <<'PY'
@@ -54,7 +63,8 @@ from pathlib import Path
 import pandas as pd
 
 root = Path(sys.argv[1])
-parts = sorted((root / "metrics").glob("*__*.csv"))
+# One file per condition now, holding every configuration.
+parts = sorted((root / "metrics").glob("*.csv"))
 frames = [pd.read_csv(path) for path in parts if path.stat().st_size > 0]
 if not frames:
     raise SystemExit("no scored tables to pool")

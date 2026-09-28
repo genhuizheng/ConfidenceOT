@@ -36,15 +36,26 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from functools import lru_cache
 from scipy.stats import rankdata, spearmanr
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-root", type=Path, required=True,
-                        help="Output root that 02_run_pair.py wrote into")
+    parser.add_argument("--run-root", type=Path, required=True, action="append",
+                        help="Output root that 02_run_pair.py wrote into. "
+                             "Repeat it to score several configurations of "
+                             "one condition in a single pass, which is what "
+                             "makes the readout cache worth having: nCount "
+                             "and nFeature are properties of the input h5ad "
+                             "and do not depend on the preprocessing, so "
+                             "reading them per configuration is the same "
+                             "work twelve times over.")
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--preprocessing", required=True)
+    parser.add_argument("--preprocessing", action="append", default=None,
+                        help="Label for each --run-root, in the same order. "
+                             "Omitted, each root is named after its own "
+                             "directory, which is how the runs were laid out.")
     parser.add_argument("--scope", default="all")
     parser.add_argument("--out", type=Path, required=True)
     return parser.parse_args()
@@ -71,8 +82,14 @@ def correlation(left: np.ndarray, right: np.ndarray) -> float:
     return float(spearmanr(left[ok], right[ok]).statistic)
 
 
+@lru_cache(maxsize=None)
 def readouts(path: str) -> pd.DataFrame:
-    """nCount and nFeature per cell, indexed the way the gate names cells."""
+    """nCount and nFeature per cell, indexed the way the gate names cells.
+
+    Cached on the path. Every configuration scored against one condition
+    reads the same files: the counts are the benchmark's input, not the
+    run's output, so nothing about them changes with the preprocessing.
+    """
     import anndata as ad
     from scipy import sparse
 
@@ -191,26 +208,25 @@ def score_pair(run: Path, truth: pd.DataFrame, row: pd.Series) -> list[dict]:
     return rows
 
 
-def main() -> None:
-    args = parse_args()
-    manifest = pd.read_csv(args.manifest)
+def score_root(run_root, label: str, manifest, truths: dict, scope: str,
+               missing: list) -> list[dict]:
+    """Every pair of one condition under one configuration."""
     collected = []
-    missing = []
     for _, row in manifest.iterrows():
         # The solver writes scope_<scope>/budget_<value>, and the budget is
         # not knowable from here: it is whatever the run used.
-        found = sorted((args.run_root / str(row["pair_id"])
-                        / f"scope_{args.scope}").glob("budget_*"))
+        found = sorted((run_root / str(row["pair_id"])
+                        / f"scope_{scope}").glob("budget_*"))
         ran = [path for path in found if (path / "cell_confidence.csv").exists()]
         if not ran:
-            missing.append(str(row["pair_id"]))
+            missing.append(f"{label}/{row['pair_id']}")
             continue
-        truth = pd.read_csv(row["truth_csv"])
+        truth = truths[str(row["pair_id"])]
         for run in ran:
             for record in score_pair(run, truth, row):
                 record.update({
                     "pair_id": row["pair_id"],
-                    "preprocessing": args.preprocessing,
+                    "preprocessing": label,
                     "budget_dir": run.name,
                     "n_cells": row["n_cells"], "replicate": row["replicate"],
                     "technical_level": row["technical_level"],
@@ -219,6 +235,25 @@ def main() -> None:
                     "rank_cut_valid": row["rank_cut_valid"],
                 })
                 collected.append(record)
+    return collected
+
+
+def main() -> None:
+    args = parse_args()
+    manifest = pd.read_csv(args.manifest)
+    labels = args.preprocessing or [root.name for root in args.run_root]
+    if len(labels) != len(args.run_root):
+        raise SystemExit(
+            f"{len(args.run_root)} run roots against {len(labels)} labels")
+    # The truth table belongs to the condition, not to the configuration, so
+    # it is read once rather than once per root.
+    truths = {str(row["pair_id"]): pd.read_csv(row["truth_csv"])
+              for _, row in manifest.iterrows()}
+    collected = []
+    missing = []
+    for run_root, label in zip(args.run_root, labels):
+        collected.extend(score_root(run_root, label, manifest, truths,
+                                    args.scope, missing))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     table = pd.DataFrame(collected)
