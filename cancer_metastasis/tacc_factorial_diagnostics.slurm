@@ -127,7 +127,17 @@ for side in ("source", "target"):
     if not path.exists():
         continue
     table = pd.read_csv(path)
-    table.insert(0, "side", side)
+    # 25_diagnose_gate_covariates.py already writes a side column, from the
+    # --side it was given. Inserting a second one raised and took the whole
+    # pooling down after both sides had been measured. Checked rather than
+    # assumed, because the two must agree for the concatenation to mean
+    # anything.
+    if "side" not in table:
+        table.insert(0, "side", side)
+    elif not table["side"].astype(str).eq(side).all():
+        raise SystemExit(
+            f"{path} carries sides {sorted(table['side'].unique())} but was "
+            f"written for {side}")
     frames.append(table)
 if not frames:
     raise SystemExit("no per-side statistics to join")
