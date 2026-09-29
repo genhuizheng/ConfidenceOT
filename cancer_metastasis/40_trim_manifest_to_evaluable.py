@@ -5,15 +5,37 @@
 attempts each such pair once per arm -- twelve times -- and every worker exits
 non-zero for reasons that were knowable before submission.
 
-**The cut is emptiness, not a round number.** The default keeps every pair
-with cells on both sides. Twenty was the runner's default, not a measurement,
-and it discards a 19-cell source on no evidence; where the real floor lies is
-a question the run answers, since ``n_cells`` travels into the diagnostics per
-pair and per side, so a gate resting on a handful of cells stays visible and
-can be excluded afterwards with a reason. What cannot be undone afterwards is
-a pair that was never run. The one thing this threshold must do is match the
-runner's ``--minimum-scope-cells``: trimming at one while the runner refuses
-below twenty moves the failure rather than removing it.
+**The cut is derived, not chosen.** Four cells per side, because that is
+where the method stops working:
+
+    half = n // 2
+    if half < 2:
+        raise ValueError("within-side split nulls need at least four rows
+                          to halve.")
+
+``within_side_null_costs`` builds the calibration null by halving a side, and
+refuses a half below two rows, so a side of three cells cannot be calibrated
+at all and the run raises. On the 118-pair manifest that is exactly eight
+pairs, and it was found by running them: six failed on one worker with this
+error and the completed count landed on 110.
+
+Twenty, the runner's old default, was a round number -- it also discarded a
+19-cell source, on no evidence. Four is the opposite kind of threshold: below
+it nothing can run, and above it the question is open.
+
+**Four is where it stops crashing, not where it starts being meaningful.** A
+side of four gives two halves of two, so the null is four distances and an
+acceptance target of 0.90 over them can only mean "all four". Whether such a
+pair's calibrated cost is usable is a question for the table rather than for
+this threshold: ``n_cells`` travels into the diagnostics per pair and per
+side, and the summaries carry its median and minimum per arm, so a gate
+resting on a handful of cells stays visible and can be excluded afterwards
+with a reason. What cannot be recovered afterwards is a pair that was never
+run.
+
+The one thing this threshold must do is match the runner's
+``--minimum-scope-cells``: trimming at four while the runner refuses below
+twenty moves the failure rather than removing it.
 
 So trim first. The pairs are the same in every arm, because the scoping does
 not depend on the preprocessing, so this neither costs a comparison nor makes
@@ -50,12 +72,12 @@ def parse_args() -> argparse.Namespace:
              "counted under the same compartment call this run will use")
     parser.add_argument("out_csv", type=Path)
     parser.add_argument(
-        "--minimum-cells-per-side", type=int, default=1,
+        "--minimum-cells-per-side", type=int, default=4,
         help="Keep a pair when both sides have at least this many cells in "
-             "the scoped compartment. The default keeps everything "
-             "non-empty, which is deliberate: 20 is a round number, not a "
-             "measurement, and it discards pairs such as a 19-cell source "
-             "for no reason the data gives. It must match the runner's "
+             "the scoped compartment. Four is where the method stops "
+             "working, not a round number: within_side_null_costs halves a "
+             "side and refuses a half below two rows, so a side of three "
+             "cannot be calibrated at all. It must match the runner's "
              "--minimum-scope-cells, or trimming only moves the failure "
              "from here to there.")
     return parser.parse_args()

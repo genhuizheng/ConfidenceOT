@@ -88,7 +88,10 @@ maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 # default of 20 against a manifest trimmed at 1, the small pairs are
 # submitted and refused, which is the failure the trim existed to
 # remove.
-minimum_scope_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-1}
+# Four, because within_side_null_costs halves a side and refuses a
+# half below two rows -- a side of three cannot be calibrated and the
+# run raises. Must match what the manifest was trimmed at.
+minimum_scope_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-4}
 # Cell QC on, thresholds wide open. The switch and the thresholds are
 # separate for exactly this case: 02_run_pair.py records total_counts,
 # n_genes_by_counts and pct_counts_mitochondrial into cell_confidence.csv

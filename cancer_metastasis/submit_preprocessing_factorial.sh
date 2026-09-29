@@ -64,7 +64,7 @@ malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
 budget_tag=${CONFIDENCEOT_FACTORIAL_BUDGET_TAG:-budget_0.95}
 block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
 annotations=${CONFIDENCEOT_INCLUDE_ANNOTATIONS:-}
-minimum_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-1}
+minimum_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-4}
 # How many cells may be encoded short before the rank arms are
 # refused. A count, not a principle: the tool's own reasoning is that
 # one shallow cell in ten thousand changes nothing while a third of
