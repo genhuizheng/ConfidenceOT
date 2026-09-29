@@ -80,6 +80,24 @@ maximum_observed_cells=${CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE:-10000}
 # submitted and refused, which is the failure the trim existed to
 # remove.
 minimum_scope_cells=${CONFIDENCEOT_MINIMUM_SCOPE_CELLS:-1}
+# Cell QC on, thresholds wide open. The switch and the thresholds are
+# separate for exactly this case: 02_run_pair.py records total_counts,
+# n_genes_by_counts and pct_counts_mitochondrial into cell_confidence.csv
+# only when --cell-qc is given -- without it the else branch writes qc_pass
+# and nothing else -- and those three columns are what the gate diagnostics
+# read. The first 1,320 runs of this factorial finished with no depth column
+# at all, so every depth AUC came back NaN and the readout the factorial
+# exists to produce was absent from its own summary.
+#
+# Wide open because nothing here should be filtered. The pairs were already
+# chosen by 40_trim_manifest_to_evaluable.py, and a second QC pass would
+# discard cells that had been selected, changing the comparison between arms
+# into a comparison between cell sets. A cell with zero counts passes >= 0
+# and a cell at 100% mitochondrial passes <= 100, so the thresholds record
+# without removing.
+qc_minimum_counts=${CONFIDENCEOT_MINIMUM_TOTAL_COUNTS:-0}
+qc_minimum_genes=${CONFIDENCEOT_MINIMUM_DETECTED_GENES:-0}
+qc_maximum_mito=${CONFIDENCEOT_MAXIMUM_MITOCHONDRIAL_PERCENT:-100.0}
 # CPU because gg has no GPU, and because the solve runs on cores anyway. The
 # null calibration fits several matrices per cost across the grid, which is
 # the expensive part and the part --workers parallelises, so the core count
@@ -152,6 +170,7 @@ echo "manifest    $manifest"
 echo "output      $output_root"
 echo "scope       $scope, null $calibration_null, device $device"
 echo "minimum     $minimum_scope_cells cells per side"
+echo "cell qc     recorded, thresholds $qc_minimum_counts/$qc_minimum_genes/$qc_maximum_mito (filters nothing)"
 
 skip=(--skip-completed)
 [[ "$force" == "1" ]] && skip=()
@@ -184,6 +203,10 @@ for (( index = worker; index < pairs; index += workers )); do
         --calibration-null "$calibration_null" \
         --max-observed-cells-per-side "$maximum_observed_cells" \
         --minimum-scope-cells "$minimum_scope_cells" \
+        --cell-qc \
+        --minimum-total-counts "$qc_minimum_counts" \
+        --minimum-detected-genes "$qc_minimum_genes" \
+        --maximum-mitochondrial-percent "$qc_maximum_mito" \
         --null-calibration-replicates 5 \
         --null-validation-replicates 5 \
         --calibration-grid-size 5 \
