@@ -56,8 +56,17 @@ out=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
 block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
 labels=(${CONFIDENCEOT_FACTORIAL_LABELS:-\
 raw raw_noscale raw_cos raw_noscale_cos \
+raw_ds raw_noscale_ds raw_ds_cos raw_noscale_ds_cos \
 logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
-ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos})
+logcpm_ds logcpm_noscale_ds logcpm_ds_cos logcpm_noscale_ds_cos \
+ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos \
+ranknm256_ds ranknm256_noscale_ds ranknm256_ds_cos ranknm256_noscale_ds_cos})
+# The equalised counts. Read equalisation is the fifth axis of the factorial
+# and it is the only one that happens to the input rather than inside the
+# representation: 27_downsample_counts.py rewrites the h5ads and the label
+# only records that it did. So a _ds arm is the same twelve transforms on a
+# different matrix, and which matrix is decided per label below.
+manifest_ds=${CONFIDENCEOT_FACTORIAL_MANIFEST_DS:-}
 workers=${CONFIDENCEOT_FACTORIAL_WORKERS:-3}
 scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-malignant}
 malignant_column=${CONFIDENCEOT_MALIGNANT_COLUMN:-malignant}
@@ -147,6 +156,59 @@ if (( label_index >= ${#labels[@]} )); then
     exit 0
 fi
 label=${labels[$label_index]}
+
+# Which input this label is about. Asked of the class that owns the label
+# rather than matched against its text: a shell that guessed wrong would run
+# equalised counts under a name that does not say so, or the reverse, and
+# nothing downstream could detect it -- equalisation is recorded by the run,
+# not applied by it, so the label would still verify either way.
+wants_ds=$(python - "$label" <<'PYDS'
+import sys
+
+from confidenceot.preprocessing import Preprocessing
+
+print("1" if Preprocessing.from_label(sys.argv[1]).equalise_depth else "0")
+PYDS
+) || { echo "could not read $label with confidenceot.Preprocessing" >&2; exit 2; }
+
+if [[ "$wants_ds" == "1" ]]; then
+    if [[ -z "$manifest_ds" ]]; then
+        echo "$label needs equalised counts but no manifest was given." >&2
+        echo "  run 27_downsample_counts.py and pass --manifest-ds" >&2
+        exit 2
+    fi
+    if [[ ! -f "$manifest_ds" ]]; then
+        echo "equalised manifest does not exist: $manifest_ds" >&2
+        exit 2
+    fi
+    manifest=$manifest_ds
+    echo "input       equalised counts"
+else
+    echo "input       original counts"
+fi
+
+# The two manifests have to cover the same pairs, or the _ds arms and the
+# rest are not two halves of one factorial: a difference between them would
+# be partly a difference in which patients were measured, and no comparison
+# could separate the two.
+if [[ -n "$manifest_ds" && -f "$manifest_ds" ]]; then
+    python - "$manifest" "$manifest_ds" <<'PYSAME' || exit 2
+import sys
+
+import pandas as pd
+
+left, right = (set(pd.read_csv(path)["pair_id"].astype(str))
+               for path in sys.argv[1:3])
+if left != right:
+    only_left = sorted(left - right)[:6]
+    only_right = sorted(right - left)[:6]
+    raise SystemExit(
+        f"the two manifests cover different pairs: {len(left)} against "
+        f"{len(right)}; only in the first {only_left}, only in the second "
+        f"{only_right}")
+PYSAME
+fi
+
 output_root=$out/$block/$label
 mkdir -p "$result/logs" "$output_root"
 # Written beside the results, so the diagnostics do not have to be told again

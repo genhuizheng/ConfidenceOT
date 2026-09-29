@@ -5,6 +5,15 @@ expressible as a ``Preprocessing`` label. The other four put library-size
 normalisation and rank encoding on together, and those are one field in the
 production code -- ``normalisation`` takes one value -- so they have no name.
 
+Adding read equalisation as the fifth axis doubles both counts: 32 cells, 24
+expressible, 8 unnameable. The identity below is still asserted over the four
+geometry-and-scaling combinations rather than all eight, and deliberately so.
+Equalisation on this project's path is recorded by the label and applied
+upstream by ``27_downsample_counts.py``, so it does not enter the transform
+being compared here; and it is hypergeometric subsampling, which is
+stochastic, so "bit for bit" would be a statement about a seed rather than
+about the encoding.
+
 They are also not a separate condition. Ranking is done within a cell, and
 library-size normalisation to 1e4 followed by ``log1p`` is a strictly
 increasing per-cell map, so it cannot reorder the genes of a cell. The rank
@@ -36,11 +45,16 @@ CELLS = tuple((cost, scale_genes)
               for cost in ("squared_euclidean", "cosine")
               for scale_genes in (True, False))
 
-LABELS = (
-    "raw raw_noscale raw_cos raw_noscale_cos "
-    "logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos "
-    "ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos"
-).split()
+# The 2^5 factorial's twenty-four expressible labels. Read equalisation is
+# the fifth axis; on this project's path it is recorded by the label and
+# applied by 27_downsample_counts.py at the file level, so a _ds arm is these
+# same transforms over a different input matrix.
+LABELS = [
+    "_".join([stem] + [tag for bit, tag in
+                       zip((noscale, ds, cos), ("noscale", "ds", "cos")) if bit])
+    for stem in ("raw", "logcpm", "ranknm256")
+    for noscale in (0, 1) for ds in (0, 1) for cos in (0, 1)
+]
 
 
 def library_normalise(counts: np.ndarray) -> np.ndarray:
@@ -76,9 +90,9 @@ def test_rank_absorbs_library_normalisation():
         check_one_cell(cost, scale_genes)
 
 
-def test_the_twelve_labels_round_trip():
+def test_every_label_round_trips():
     """A label that does not rebuild itself would silently run something else."""
-    assert len(LABELS) == 12
+    assert len(LABELS) == 24, LABELS
     for label in LABELS:
         rebuilt = Preprocessing.from_label(label).label()
         assert rebuilt == label, f"{label} rebuilt itself as {rebuilt}"

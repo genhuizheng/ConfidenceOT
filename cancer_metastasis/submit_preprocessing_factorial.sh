@@ -48,9 +48,16 @@ manifest=${CONFIDENCEOT_FACTORIAL_MANIFEST:-$result/manifest/pancancer_20260924/
 out=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
 labels=${CONFIDENCEOT_FACTORIAL_LABELS:-"\
 raw raw_noscale raw_cos raw_noscale_cos \
+raw_ds raw_noscale_ds raw_ds_cos raw_noscale_ds_cos \
 logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
-ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos"}
-workers=2
+logcpm_ds logcpm_noscale_ds logcpm_ds_cos logcpm_noscale_ds_cos \
+ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos \
+ranknm256_ds ranknm256_noscale_ds ranknm256_ds_cos ranknm256_noscale_ds_cos"}
+manifest_ds=${CONFIDENCEOT_FACTORIAL_MANIFEST_DS:-}
+# One worker per label. Twenty-four labels at two workers is 48 array
+# tasks, which with the audit and the diagnostics is 50 against a cap
+# of 40. Raise it only when the label set is smaller.
+workers=1
 scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-malignant}
 malignant_column=${CONFIDENCEOT_MALIGNANT_COLUMN:-malignant}
 malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
@@ -87,6 +94,7 @@ while (( $# )); do
         --partition) partition=$2; shift 2 ;;
         --time) limit=$2; shift 2 ;;
         --manifest) manifest=$2; shift 2 ;;
+        --manifest-ds) manifest_ds=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --scope) scope=$2; shift 2 ;;
         --block) block=$2; shift 2 ;;
@@ -213,7 +221,7 @@ submit_arm_array() {
     submit "OT ($block: $arm_count labels x $workers workers)" \
         --array=0-$(( arm_count * workers - 1 )) \
         "$@" "${where[@]}" "${wall[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$arm_labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_MANIFEST_DS="$manifest_ds",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$arm_labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
         "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm"
 }
 
@@ -272,6 +280,7 @@ echo
 echo "manifest    $manifest"
 echo "output      $out"
 echo "labels      ${#label_array[@]}"
+echo "equalised   ${manifest_ds:-none: the _ds arms will refuse}"
 echo "workers     $workers per label"
 echo "jobs        $tasks OT + 2 for the whole chain"
 echo "scope       $scope, budget tag $budget_tag"
