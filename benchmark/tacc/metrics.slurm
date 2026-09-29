@@ -28,6 +28,16 @@ conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}
+# Cleared, not merged into. The file name carries the condition and one
+# table now holds every configuration of it, where the previous layout was
+# one table per (condition, configuration) -- and the old names still match
+# the new glob. Pooling over both put 515 of the 540 old cells into the
+# table a second time: 6,330 rows where 3,240 were real, and every median
+# over them double counted most of the grid.
+#
+# The directory is derived output and is rebuilt in full by this job, so
+# emptying it is the correct operation rather than a convenience.
+rm -rf "$root/metrics"
 mkdir -p "$root/metrics"
 
 shopt -s nullglob
