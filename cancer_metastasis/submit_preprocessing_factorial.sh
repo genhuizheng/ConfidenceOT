@@ -52,6 +52,9 @@ logcpm logcpm_cos logcpm_ds logcpm_ds_cos logcpm_noscale logcpm_noscale_cos logc
 rank256 rank256_cos rank256_ds rank256_ds_cos rank256_noscale rank256_noscale_cos rank256_noscale_ds rank256_noscale_ds_cos \
 ranknm256 ranknm256_cos ranknm256_ds ranknm256_ds_cos ranknm256_noscale ranknm256_noscale_cos ranknm256_noscale_ds ranknm256_noscale_ds_cos"}
 manifest_ds=${CONFIDENCEOT_FACTORIAL_MANIFEST_DS:-}
+# predownsample_depth.csv.gz, which 27_downsample_counts.py writes
+# beside its own manifest rather than beside the trimmed one.
+depth_table=${CONFIDENCEOT_PREDOWNSAMPLE_DEPTH:-}
 # One worker per label. Twenty-four labels at two workers is 48 array
 # tasks, which with the audit and the diagnostics is 50 against a cap
 # of 40. Raise it only when the label set is smaller.
@@ -93,6 +96,7 @@ while (( $# )); do
         --time) limit=$2; shift 2 ;;
         --manifest) manifest=$2; shift 2 ;;
         --manifest-ds) manifest_ds=$2; shift 2 ;;
+        --predownsample-depth) depth_table=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --scope) scope=$2; shift 2 ;;
         --block) block=$2; shift 2 ;;
@@ -219,7 +223,7 @@ submit_arm_array() {
     submit "OT ($block: $arm_count labels x $workers workers)" \
         --array=0-$(( arm_count * workers - 1 )) \
         "$@" "${where[@]}" "${wall[@]}" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_MANIFEST_DS="$manifest_ds",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$arm_labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$result",CONFIDENCEOT_FACTORIAL_MANIFEST="$manifest",CONFIDENCEOT_FACTORIAL_MANIFEST_DS="$manifest_ds",CONFIDENCEOT_PREDOWNSAMPLE_DEPTH="$depth_table",CONFIDENCEOT_FACTORIAL_ROOT="$out",CONFIDENCEOT_FACTORIAL_LABELS="$arm_labels",CONFIDENCEOT_FACTORIAL_WORKERS="$workers",CONFIDENCEOT_ANALYSIS_SCOPE="$scope",CONFIDENCEOT_MALIGNANT_COLUMN="$malignant_column",CONFIDENCEOT_DEVICE="$device",CONFIDENCEOT_FACTORIAL_FORCE="$force",CONFIDENCEOT_FACTORIAL_BLOCK="$block",CONFIDENCEOT_INCLUDE_ANNOTATIONS="$annotations",CONFIDENCEOT_MINIMUM_SCOPE_CELLS="$minimum_cells" \
         "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm"
 }
 
@@ -279,6 +283,7 @@ echo "manifest    $manifest"
 echo "output      $out"
 echo "labels      ${#label_array[@]}"
 echo "equalised   ${manifest_ds:-none: the _ds arms will refuse}"
+echo "depth table ${depth_table:-derived from the equalised manifest}"
 echo "workers     $workers per label"
 echo "jobs        $tasks OT + 2 for the whole chain"
 echo "scope       $scope, budget tag $budget_tag"

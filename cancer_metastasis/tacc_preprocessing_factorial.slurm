@@ -190,14 +190,25 @@ if [[ "$wants_ds" == "1" ]]; then
     fi
     manifest=$manifest_ds
     echo "input       equalised counts"
-    # Beside the equalised manifest, written by 27_downsample_counts.py. The
-    # diagnostics need it because equalisation makes the stored depth nearly
-    # constant: an AUC against it is trivially 0.5 and says nothing, while
-    # the question that matters is whether the gate still tracks each cell's
-    # depth *before* the correction.
-    depth_table=$(dirname "$manifest_ds")/predownsample_depth.csv.gz
+    # 27_downsample_counts.py writes the depth table beside the manifest it
+    # emits, but 40_trim_manifest_to_evaluable.py writes the trimmed manifest
+    # somewhere else, so deriving the path from the manifest in hand finds
+    # nothing once the two have been separated -- which is what happened on
+    # the first submission of the full grid. Given explicitly, derived only
+    # as a fallback for the untrimmed case.
+    #
+    # The diagnostics need it because equalisation makes the stored depth
+    # nearly constant: an AUC against it is trivially 0.5 and says nothing,
+    # while the question that matters is whether the gate still tracks the
+    # depth each cell had *before* the correction.
+    depth_table=${CONFIDENCEOT_PREDOWNSAMPLE_DEPTH:-}
+    if [[ -z "$depth_table" ]]; then
+        depth_table=$(dirname "$manifest_ds")/predownsample_depth.csv.gz
+    fi
     if [[ ! -f "$depth_table" ]]; then
-        echo "no predownsample_depth.csv.gz beside $manifest_ds" >&2
+        echo "no depth table at $depth_table" >&2
+        echo "  pass --predownsample-depth; it lives beside the manifest" >&2
+        echo "  27_downsample_counts.py emitted, not beside the trimmed one" >&2
         echo "  the _ds arms would be scored against a constant depth" >&2
         exit 2
     fi
