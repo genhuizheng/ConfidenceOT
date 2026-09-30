@@ -247,6 +247,78 @@ cat(sprintf("  Q3 answer: dropout composes with the native depth = %s\n",
             l2_composes))
 cat("\n")
 
+# ---- Q2e: the same seed, but different cells ----------------------------
+# The pairing comes from cell-level draws and the shared biology comes from
+# gene-level draws, and the gene-level ones happen first. So two calls that
+# each request two batches, at one seed, share their genes -- and taking
+# batch 1 from the deep call against batch 2 of the shallow one takes two cell
+# sets from different stream positions, which cannot be index-paired.
+cat("==== Q2e: batch 1 of a deep call vs batch 2 of a shallow one ====\n")
+two_side <- function(lib_loc, dropout_mid = NULL) {
+  params <- setParams(newSplatParams(), nGenes = G, batchCells = c(N, N),
+                      batch.facLoc = 0, batch.facScale = 0,
+                      group.prob = rep(1 / K, K), lib.loc = lib_loc,
+                      lib.scale = 0.2, seed = SEED)
+  if (is.null(dropout_mid)) {
+    params <- setParams(params, dropout.type = "none")
+  } else {
+    params <- setParams(params, dropout.mid = dropout_mid, dropout.shape = -1)
+    params <- setParams(params, dropout.type = "experiment")
+  }
+  splatSimulate(params, method = "groups", verbose = FALSE)
+}
+deep <- two_side(LIB_LOC)
+shallow <- two_side(LIB_LOC_LOW)
+d_means_identical <- identical(as.numeric(rowData(deep)$GeneMean),
+                               as.numeric(rowData(shallow)$GeneMean))
+d_de_identical <- length(de_cols) > 0
+d_de_worst <- 0
+for (nm in de_cols) {
+  a <- as.numeric(rowData(deep)[[nm]])
+  b <- as.numeric(rowData(shallow)[[nm]])
+  d_de_identical <- d_de_identical && identical(a, b)
+  d_de_worst <- max(d_de_worst, max(abs(a - b)))
+}
+cat(sprintf("  gene means identical across the two calls: %s\n", d_means_identical))
+cat(sprintf("  group DE factors identical:                %s (worst %.3e)\n",
+            d_de_identical, d_de_worst))
+
+first <- sort(unique(as.character(colData(deep)$Batch)))[1]
+second <- sort(unique(as.character(colData(shallow)$Batch)))[2]
+src <- as.character(colData(deep)$Batch) == first
+tgt <- as.character(colData(shallow)$Batch) == second
+Ad <- lcpm(deep)[, src, drop = FALSE]
+Bd <- lcpm(shallow)[, tgt, drop = FALSE]
+nd <- ncol(Ad)
+sqd <- outer(colSums(Ad^2), colSums(Bd^2), "+") - 2 * crossprod(Ad, Bd)
+nearest_d <- apply(sqd, 1, which.min)
+self_nearest_d <- mean(nearest_d == seq_len(nd))
+self_rank_d <- vapply(seq_len(nd), function(i) {
+  sum(sqd[i, ] < sqd[i, i]) / (nd - 1)
+}, numeric(1))
+cat(sprintf("  nearest target is own index: %.1f%% of cells (chance %.1f%%)\n",
+            100 * self_nearest_d, 100 / nd))
+cat(sprintf("  same-index target's mean normalised rank: %.4f (chance 0.5)\n",
+            mean(self_rank_d)))
+d_pairing_free <- self_nearest_d < (5 / nd) && mean(self_rank_d) > 0.40
+cat(sprintf("  no invented pairing: %s\n", d_pairing_free))
+dd <- Matrix::colSums(counts(deep))[src]
+ds <- Matrix::colSums(counts(shallow))[tgt]
+fd <- Matrix::colSums(counts(deep) > 0)[src]
+fs <- Matrix::colSums(counts(shallow) > 0)[tgt]
+cat(sprintf("  realised depth   source %8.0f  target %8.0f  ratio %.4f (asked %.4f)\n",
+            median(dd), median(ds), median(ds) / median(dd), DEPTH_RATIO))
+cat(sprintf("  realised nFeature source %8.0f  target %8.0f\n",
+            median(fd), median(fs)))
+# and the same construction with dropout, which is what L2 needs
+shallow_drop <- two_side(LIB_LOC_LOW, dropout_mid = 1.0)
+tgt_drop <- as.character(colData(shallow_drop)$Batch) == second
+fsd <- Matrix::colSums(counts(shallow_drop) > 0)[tgt_drop]
+dsd <- Matrix::colSums(counts(shallow_drop) > 0)[tgt_drop]
+cat(sprintf("  with dropout: median nFeature %8.0f (detection %.4f vs %.4f without)\n",
+            median(fsd), median(fsd) / G, median(fs) / G))
+cat("\n")
+
 cat("================ verdict ================\n")
 route <- "NONE"
 if (route_a_honoured) {
@@ -254,6 +326,18 @@ if (route_a_honoured) {
   cat("ROUTE A. One simulation, two batches, per-batch lib.loc. Splatter\n")
   cat("draws each batch's cells independently, so the biology is shared by\n")
   cat("construction and no pairing is invented. Use this.\n")
+} else if (d_means_identical && d_de_identical && d_pairing_free) {
+  route <- "D"
+  cat("ROUTE D. Two calls, each asking for two batches, at one seed and two\n")
+  cat("lib.loc values. Source is batch 1 of the deep call, target is batch 2\n")
+  cat("of the shallow one. The gene means and the group DE factors agree,\n")
+  cat("because they are drawn before any cell is; the two cell sets sit at\n")
+  cat("different stream positions, so no index pairing appears. Use this.\n")
+  if (means_identical && de_identical && !pairing_free) {
+    cat("\n(Route B -- two single-batch calls -- shares the biology but pairs\n")
+    cat("the sides cell by cell, so it is not the route even though its\n")
+    cat("biology checks pass.)\n")
+  }
 } else if (means_identical && de_identical && groups_identical && pairing_free) {
   route <- "B"
   cat("ROUTE B. Two single-batch calls sharing seed and biology. The gene\n")
@@ -261,11 +345,11 @@ if (route_a_honoured) {
   cat("so the depth is the only difference between the sides.\n")
 } else if (means_identical && de_identical && !pairing_free) {
   route <- "B_PAIRED"
-  cat("ROUTE B IS UNSAFE. The biology is shared, but the shared seed also\n")
-  cat("paired the sides cell by cell: a source cell's nearest target is its\n")
-  cat("own index far more often than chance. That hands the transport a\n")
-  cat("trivially correct answer unrelated to the biology under test. Do not\n")
-  cat("generate on this route.\n")
+  cat("NO SAFE ROUTE. The biology is shared on both two-call constructions,\n")
+  cat("but each paired the sides cell by cell: a source cell's nearest target\n")
+  cat("is its own index far more often than chance. That hands the transport\n")
+  cat("a trivially correct answer unrelated to the biology under test. Do not\n")
+  cat("generate.\n")
 } else {
   cat("NEITHER ROUTE IS SAFE. Two calls do not share their biology, so the\n")
   cat("sides would differ biologically and the benchmark's ground truth\n")
@@ -289,6 +373,16 @@ if (!is.null(out)) {
     two_call_pairing_free = pairing_free,
     different_seed_self_nearest_fraction = self_nearest_o,
     different_seed_gene_means_identical = other_means_identical,
+    route_d_gene_means_identical = d_means_identical,
+    route_d_group_de_identical = d_de_identical,
+    route_d_self_nearest_fraction = self_nearest_d,
+    route_d_self_rank_mean = mean(self_rank_d),
+    route_d_pairing_free = d_pairing_free,
+    route_d_source_median_nCount = as.numeric(median(dd)),
+    route_d_target_median_nCount = as.numeric(median(ds)),
+    route_d_realised_depth_ratio = as.numeric(median(ds) / median(dd)),
+    route_d_detection_no_dropout = as.numeric(median(fs) / G),
+    route_d_detection_with_dropout = as.numeric(median(fsd) / G),
     asked_depth_ratio = DEPTH_RATIO,
     realised_depth_ratio_two_call = as.numeric(median(d_low) / median(d_high)),
     detection_rate_matched = as.numeric(median(f_high) / G),

@@ -17,21 +17,33 @@
 # **Route A** -- if `lib.loc` accepts one value per batch, one simulation
 # carries both sides at two depths and nothing else is needed.
 #
-# **Route B** -- otherwise, two single-batch calls with the same seed and the
-# same biological parameters, differing only in `lib.loc`. Checked and not
-# trusted: the gene means, the **per-group DE factors** and the group labels
+# **Route D** -- otherwise, and this is what Splatter 1.30.0 requires, because
+# it refuses a per-batch `lib.loc` outright: `Must have length 1`.
+#
+# The obvious fallback is two single-batch calls at one seed. It shares the
+# biology perfectly -- gene means and all five DE factor columns identical to
+# the bit -- and it is still wrong, because one seed does more than share the
+# biology. Cell i in both calls draws the same group, the same DE factors and
+# the same BCV value from the same stream position, so the two cells differ
+# only by a library factor. Measured on 200 cells: a source cell's nearest
+# target is its own index 3.5% of the time against a 0.5% chance, and the
+# same-index target's mean rank is 0.35 against 0.5. That is a near-duplicate
+# pair at two depths, and it hands the transport a trivially correct answer
+# with nothing to do with the biology under test.
+#
+# The pairing is a cell-level artefact; the shared biology is gene-level; and
+# the gene-level draws happen first. So each call asks for **two** batches and
+# the sides are taken from different ones: source is batch 1 of the deep call,
+# target is batch 2 of the shallow one. The genes are identical because the
+# seed is; the cells sit at different positions in the same stream, so no
+# index pairing survives.
+#
+# Checked and not trusted: the gene means and the **per-group DE factors**
 # must come out identical or this script stops. Marginal gene means agreeing
 # says nothing about the group-specific parameters, and those are what make
-# the populations distinct.
-#
-# Route B also needs `--allow-shared-seed-sides`, and the flag exists because
-# of what one seed does beyond sharing the biology: cell i in both calls draws
-# the same group, the same DE factors and the same BCV value from the same
-# stream position, so the two differ only by a library factor. That is a
-# near-duplicate pair at two depths, and it hands the transport a trivially
-# correct answer that has nothing to do with the biology under test.
-# 09_probe_splatter_library.R measures whether that pairing appeared; the flag
-# says an operator read the answer. It is not a default.
+# the populations distinct. The per-cell group labels are *not* required to
+# match -- a match there would mean the two sides are the same cells -- but
+# every group has to be present on both sides.
 #
 # The depth ratio is set through the log-normal's median, which is exactly
 # `exp(lib.loc)`:
@@ -127,8 +139,13 @@ per_batch_lib_loc <- tryCatch({
 
 assertions <- list(gene_means_identical = NA, groups_identical = NA,
                    group_de_identical = NA, group_de_worst_abs_diff = NA,
-                   group_de_columns = NA,
-                   shared_seed_sides_allowed = allow_shared_seed)
+                   group_de_columns = NA, groups_on_both_sides = NA,
+                   n_groups_source = NA, n_groups_target = NA,
+                   # Vestigial: it gated the single-batch route, which the
+                   # pairing measurement retired. Still recorded, because a
+                   # job that passes it should not look as though it did
+                   # something.
+                   shared_seed_sides_flag = allow_shared_seed)
 
 if (per_batch_lib_loc) {
   route <- "A"
@@ -157,22 +174,20 @@ if (per_batch_lib_loc) {
   gene_ids <- rownames(sim)
   gene_means <- as.numeric(rowData(sim)$GeneMean)
 } else {
-  route <- "B"
-  cat("  route B: two single-batch calls, same seed, different lib.loc\n")
-  # The gate, before any generation. One seed pairs the sides cell by cell as
-  # well as sharing their biology, and a paired benchmark measures nothing.
-  if (!allow_shared_seed) {
-    stop(paste0(
-      "this Splatter has no per-batch lib.loc, so the only native route is ",
-      "two calls sharing one seed -- and that seed pairs the sides cell by ",
-      "cell as well as sharing their biology, which would hand the transport ",
-      "a trivially correct answer. Run ",
-      "benchmark/tacc/09_probe_splatter_library.R first; if it reports ",
-      "route B (no invented pairing), pass --allow-shared-seed-sides. If it ",
-      "reports B_PAIRED, do not generate on this route."))
-  }
-  one_side <- function(this_lib_loc, this_dropout) {
-    params <- setParams(base_params(n_cells), lib.loc = this_lib_loc)
+  route <- "D"
+  cat("  route D: two two-batch calls, same seed, different lib.loc;\n")
+  cat("           source = batch 1 of the deep call, target = batch 2 of the\n")
+  cat("           shallow one\n")
+  # Two single-batch calls at one seed share their biology and also pair the
+  # sides cell by cell -- measured at 3.5% nearest-is-own-index against a 0.5%
+  # chance, with a mean rank of 0.35 against 0.5. The pairing is a cell-level
+  # artefact and the shared biology is gene-level, and the gene-level draws
+  # happen first, so asking each call for two batches and then taking
+  # different batches from each keeps the genes and drops the pairing: the two
+  # cell sets sit at different positions in the same stream.
+  both_sides <- function(this_lib_loc, this_dropout) {
+    params <- setParams(base_params(c(n_cells, n_cells)),
+                        lib.loc = this_lib_loc)
     if (is.na(this_dropout)) {
       params <- setParams(params, dropout.type = "none")
     } else {
@@ -182,8 +197,22 @@ if (per_batch_lib_loc) {
     }
     splatSimulate(params, method = "groups", verbose = FALSE)
   }
-  source_sim <- one_side(lib_loc, NA_real_)
-  target_sim <- one_side(lib_loc_target, target_dropout)
+  deep <- both_sides(lib_loc, NA_real_)
+  shallow <- both_sides(lib_loc_target, target_dropout)
+
+  # Batch 1 of one call against batch 2 of the other. Taken by name rather
+  # than by position so a change in Splatter's batch ordering fails here
+  # instead of silently swapping the sides.
+  deep_batches <- sort(unique(as.character(colData(deep)$Batch)))
+  shallow_batches <- sort(unique(as.character(colData(shallow)$Batch)))
+  if (length(deep_batches) != 2 || length(shallow_batches) != 2) {
+    stop("expected two batches from each call; got ",
+         length(deep_batches), " and ", length(shallow_batches))
+  }
+  source_keep <- as.character(colData(deep)$Batch) == deep_batches[1]
+  target_keep <- as.character(colData(shallow)$Batch) == shallow_batches[2]
+  source_sim <- deep[, source_keep]
+  target_sim <- shallow[, target_keep]
 
   # The check the whole route rests on. Not a warning: a difference here means
   # the two sides are biologically different simulations, and every later
@@ -229,13 +258,28 @@ if (per_batch_lib_loc) {
       "truth that every population is on both sides would not hold. Refusing ",
       "to generate."), seed, max(abs(source_means - target_means))))
   }
-  if (!assertions$groups_identical) {
+  # Group labels are NOT expected to match cell for cell here, and a match
+  # would be the bad outcome: it would mean the two sides are the same cells
+  # at two depths. What has to hold is that both sides carry every group, so
+  # "every population is on both sides" is true of the populations rather than
+  # of an index.
+  source_present <- sort(unique(source_groups))
+  target_present <- sort(unique(target_groups))
+  assertions$groups_on_both_sides <- identical(source_present, target_present)
+  assertions$n_groups_source <- length(source_present)
+  assertions$n_groups_target <- length(target_present)
+  if (!assertions$groups_on_both_sides) {
     stop(sprintf(paste0(
-      "two calls with seed %d assigned different groups (%d of %d cells ",
-      "agree). Refusing to generate."), seed,
-      sum(source_groups == target_groups), n_cells))
+      "the sides do not carry the same populations: source has %s, target has ",
+      "%s. Refusing to generate."),
+      paste(source_present, collapse = "/"),
+      paste(target_present, collapse = "/")))
   }
-  cat("  shared biology confirmed: gene means and group labels identical\n")
+  cat(sprintf(paste0("  shared biology confirmed: gene means and group DE ",
+                     "factors identical, %d groups on both sides\n"),
+              length(source_present)))
+  cat(sprintf("  cell-level pairing avoided: %d of %d index positions share a group\n",
+              sum(source_groups == target_groups), n_cells))
 
   counts_all <- cbind(counts(source_sim), counts(target_sim))
   batch_labels <- c(rep("Batch1", ncol(source_sim)),
