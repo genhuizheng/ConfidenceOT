@@ -36,6 +36,24 @@ sizes=(${CONFIDENCEOT_BENCH_SIZES:-1000 5000 10000})
 replicates=${CONFIDENCEOT_BENCH_REPLICATES:-5}
 theta=${CONFIDENCEOT_BENCH_THETA:-0.50}
 dropout_mid=${CONFIDENCEOT_BENCH_DROPOUT_MID:--1.0}
+# Where the depth mismatch comes from. 'thinning' is the original: Splatter
+# draws both sides at one library size and 20_build_conditions.py thins the
+# target's counts. 'splatter' asks the simulator for it, through lib.loc per
+# side, and then nothing downstream touches the counts -- which is the point,
+# because the read-equalisation arm inverts binomial thinning exactly and an
+# equalised L1 result was therefore never independent evidence.
+#
+# The default is the original, so an existing root re-run reproduces itself.
+depth_mechanism=${CONFIDENCEOT_BENCH_DEPTH_MECHANISM:-thinning}
+lib_loc=${CONFIDENCEOT_BENCH_LIB_LOC:-11.0}
+lib_scale=${CONFIDENCEOT_BENCH_LIB_SCALE:-0.2}
+depth_ratio=${CONFIDENCEOT_BENCH_DEPTH_RATIO:-0.50}
+# Splatter's dropout.mid is a logistic midpoint on log expression, so the two
+# mechanisms want different values: the old generator put the source at -10
+# and the target at this, the native one puts dropout on the target call
+# alone. Kept separate rather than reused so neither default drifts with the
+# other.
+native_dropout_mid=${CONFIDENCEOT_BENCH_NATIVE_DROPOUT_MID:-1.0}
 rank_top_n=${CONFIDENCEOT_BENCH_RANK_TOP_N:-256}
 base_seed=${CONFIDENCEOT_BENCH_SEED:-20260925}
 force=${CONFIDENCEOT_BENCH_FORCE:-0}
@@ -91,21 +109,39 @@ if [[ "$force" == "1" || ! -f "$generated/GENERATION_DONE" ]]; then
         exit 4
     fi
 
-    # Only the dropout level asks Splatter for dropout, and it asks for it on
-    # the target batch alone.
-    dropout_flag=()
-    [[ "$level" == "L2_depth_dropout" ]] && \
-        dropout_flag=(--dropout-mid-target "$dropout_mid")
+    if [[ "$depth_mechanism" == "splatter" ]]; then
+        # The native generator decides its own per-level settings from
+        # --level, so the dropout flag is not conditional here: it names the
+        # value L2 would use and the script ignores it at L0 and L1. One less
+        # place for the level and its treatment to disagree.
+        $rscript "$repo/benchmark/tacc/10_generate_splatter_native.R" \
+            --out "$generated" \
+            --n "$n_cells" \
+            --replicate "$replicate" \
+            --level "$level" \
+            --groups "${CONFIDENCEOT_BENCH_GROUPS:-5}" \
+            --seed "$seed" \
+            --lib-loc "$lib_loc" \
+            --lib-scale "$lib_scale" \
+            --depth-ratio "$depth_ratio" \
+            --dropout-mid-target "$native_dropout_mid"
+    else
+        # Only the dropout level asks Splatter for dropout, and it asks for it
+        # on the target batch alone.
+        dropout_flag=()
+        [[ "$level" == "L2_depth_dropout" ]] && \
+            dropout_flag=(--dropout-mid-target "$dropout_mid")
 
-    $rscript "$repo/benchmark/tacc/10_generate_splatter.R" \
-        --out "$generated" \
-        --n "$n_cells" \
-        --replicate "$replicate" \
-        --level "$level" \
-        --groups "${CONFIDENCEOT_BENCH_GROUPS:-5}" \
-        --seed "$seed" \
-        "${dropout_flag[@]}" \
-        ${CONFIDENCEOT_BENCH_ESTIMATE_FROM:+--estimate-from "$CONFIDENCEOT_BENCH_ESTIMATE_FROM"}
+        $rscript "$repo/benchmark/tacc/10_generate_splatter.R" \
+            --out "$generated" \
+            --n "$n_cells" \
+            --replicate "$replicate" \
+            --level "$level" \
+            --groups "${CONFIDENCEOT_BENCH_GROUPS:-5}" \
+            --seed "$seed" \
+            "${dropout_flag[@]}" \
+            ${CONFIDENCEOT_BENCH_ESTIMATE_FROM:+--estimate-from "$CONFIDENCEOT_BENCH_ESTIMATE_FROM"}
+    fi
     conda deactivate || true
 else
     echo "generation already present for N=$n_cells rep=$replicate $level"
@@ -113,13 +149,21 @@ fi
 
 # ---- the three biological cases ---------------------------------------------
 conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+# With the native mechanism the depth difference is already in the counts
+# Splatter drew, so the thinning is switched off by asking for a read survival
+# probability of one: thin() returns its input unchanged at theta >= 1.0. The
+# mechanism is passed through as well, so the manifest states where the depth
+# came from instead of leaving a reader to infer it from a theta of one.
+build_theta=$theta
+[[ "$depth_mechanism" == "splatter" ]] && build_theta=1.0
 python "$repo/benchmark/20_build_conditions.py" \
     --generated "$generated" \
     --out "$conditions" \
     --n-cells "$n_cells" \
     --replicate "$replicate" \
     --level "$level" \
-    --theta "$theta" \
+    --theta "$build_theta" \
+    --depth-mechanism "$depth_mechanism" \
     --rank-top-n "$rank_top_n" \
     --seed "$base_seed"
 

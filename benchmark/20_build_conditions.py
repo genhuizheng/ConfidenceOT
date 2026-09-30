@@ -16,10 +16,25 @@ dropout on the target side, so the extra detection loss is part of the
 simulation rather than a mask applied here. L2 is not L1 with more dropout: it
 is its own draw, with its own observation setting.
 
-Thinning is binomial, the exact likelihood of sequencing the same library less
-deeply: every read survives independently with probability theta. It stays
-here, and is the only post-hoc operation on counts, because Splatter has one
-global library size and no per-batch override.
+**Two depth mechanisms, and which one ran is recorded rather than inferred.**
+
+``--depth-mechanism thinning`` is the original: Splatter draws both sides at
+one library size and the target's counts are thinned here. Thinning is
+binomial, the exact likelihood of sequencing the same library less deeply --
+every read surviving independently with probability theta -- and it is the
+only post-hoc operation on counts.
+
+``--depth-mechanism splatter`` asks the simulator instead, through a lower
+``lib.loc`` on the target side, and then nothing here touches the counts:
+``--theta 1.0`` makes ``thin`` return its input. This is the route to prefer,
+because read equalisation inverts binomial thinning *exactly* -- the
+subsampling is that mechanism's own inverse -- so an equalised L1 arm built on
+thinned counts was never independent evidence about low depth. A lower library
+size is not inverted the same way: the reads were never there to recover.
+
+At ``theta = 1.0`` the two mechanisms are indistinguishable from the manifest
+alone, and they support different claims, so the mechanism is written into
+both the readouts and the manifest.
 
 There is no level that holds one readout while moving the other. At a fixed
 library size nothing can change how many genes are detected except changing
@@ -66,7 +81,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--theta", type=float, default=0.50,
                         help="Read survival probability for the target at the "
                              "thinned levels; the realised depth ratio is "
-                             "measured, not assumed")
+                             "measured, not assumed. A theta of 1.0 leaves "
+                             "the counts alone, which is what the native "
+                             "mechanism wants")
+    parser.add_argument("--depth-mechanism", default="thinning",
+                        choices=("thinning", "splatter"),
+                        help="Where the target's lower depth came from. "
+                             "'thinning' means this script produced it by "
+                             "binomial subsampling; 'splatter' means the "
+                             "simulator drew it from a lower lib.loc and "
+                             "nothing here touches the counts. Recorded "
+                             "rather than inferred, because at theta=1.0 the "
+                             "two are indistinguishable from the manifest "
+                             "alone and they support different claims")
     parser.add_argument("--unmatched-group", default=None,
                         help="Group removed in the lost and emerged cases; "
                              "the last group by name when not given")
@@ -208,6 +235,11 @@ def main() -> None:
         (directory / "readouts.json").write_text(json.dumps(
             {"source": source_read, "target": target_read,
              "measured": measured, "theta_nominal": theta,
+             "depth_mechanism": args.depth_mechanism,
+             "generator_depth_mechanism": record.get("depth_mechanism"),
+             "generator_route": record.get("route"),
+             "lib_loc_source": record.get("lib_loc_source"),
+             "lib_loc_target": record.get("lib_loc_target"),
              "technical_level": args.level,
              "dropout_from_splatter": record.get("dropout_type"),
              "dropout_mid_target": record.get("dropout_mid_target"),
@@ -232,6 +264,8 @@ def main() -> None:
             "biological_case": case,
             "unmatched_group": unmatched,
             "theta_nominal": theta,
+            "depth_mechanism": args.depth_mechanism,
+            "generator_route": record.get("route"),
             "dropout_mid_target": record.get("dropout_mid_target"),
             "generation_seed": record.get("seed"),
             "R_nCount": round(measured["R_nCount"], 4),
