@@ -80,11 +80,22 @@ PY
 allow=()
 [[ "$label" == raw* ]] && allow=(--allow-precomputed)
 
+# /usr/bin/time is not on every node -- Vista's GH nodes do not carry it --
+# and hardcoding it turned a numerical comparison into a missing-file error
+# before either solve had started. Peak resident size is a nice-to-have; the
+# wall clock is computed below from date and does not depend on it.
+timer=()
+if [[ -x /usr/bin/time ]]; then
+    timer=(/usr/bin/time -v)
+else
+    echo "no /usr/bin/time on this node: wall clock only, no peak resident size"
+fi
+
 for device in cpu cuda; do
     echo
     echo "===== $device $(date --iso-8601=seconds) ====="
     start=$(date +%s)
-    /usr/bin/time -v python cancer_metastasis/02_run_pair.py \
+    "${timer[@]}" python cancer_metastasis/02_run_pair.py \
         "$manifest" "$out/$device" \
         --index "$index" \
         --analysis-scope all \
