@@ -112,7 +112,17 @@ def subtype_mask(data, column: str, excluded: list[str]) -> np.ndarray:
 def analysed_subset(sample: str, files: tuple[str, ...], args: argparse.Namespace):
     """Load one sample and keep only the cells the analysis would use."""
     data = load_exact_side(list(files), sample)
-    if args.malignant_column:
+    if args.all_cells:
+        # Every cell is in scope. Not a convenience: the synthetic conditions
+        # have no non-malignant compartment at all -- their obs carries the
+        # simulator's population label and nothing else -- so a selector would
+        # have nothing to select and the step would refuse to run on them.
+        # Only this branch changes; the subsampling, the target depth, the
+        # seed and the outputs are the same operation either way, which is
+        # what lets the equalised synthetic arms be compared with the
+        # equalised real ones.
+        keep = np.ones(data.n_obs, dtype=bool)
+    elif args.malignant_column:
         if args.malignant_column not in data.obs:
             raise KeyError(
                 f"obs has no {args.malignant_column!r} column; use "
@@ -170,6 +180,13 @@ def main() -> None:
     parser.add_argument(
         "--malignant-annotation", action="append", dest="malignant_annotations", help="Author malignant label to keep; may be repeated",
     )
+    parser.add_argument(
+        "--all-cells", action="store_true",
+        help="Keep every cell instead of selecting a malignant compartment. "
+             "For the synthetic conditions, which have no non-malignant "
+             "cells to exclude. Refused together with either selector, "
+             "because a run that both selected and did not select has no "
+             "answer to what it ran on.")
     parser.add_argument("--minimum-total-counts", type=int, default=1000)
     parser.add_argument("--minimum-detected-genes", type=int, default=500)
     parser.add_argument("--maximum-mitochondrial-percent", type=float, default=20.0)
@@ -192,9 +209,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.malignant_column and args.malignant_annotations:
         parser.error("pass --malignant-column or --malignant-annotation, not both")
-    if not args.malignant_column and not args.malignant_annotations:
-        parser.error("malignant selection needs --malignant-column or at least "
-                     "one --malignant-annotation")
+    if args.all_cells and (args.malignant_column or args.malignant_annotations):
+        parser.error("--all-cells keeps every cell, so it cannot be combined "
+                     "with a malignant selector")
+    if not args.all_cells and not args.malignant_column \
+            and not args.malignant_annotations:
+        parser.error("malignant selection needs --malignant-column, at least "
+                     "one --malignant-annotation, or --all-cells")
     if not 0.0 < args.target_quantile < 1.0:
         raise ValueError("--target-quantile must lie in (0, 1)")
     destination = args.output_root
@@ -316,7 +337,8 @@ def main() -> None:
         ),
         "malignant_annotations": args.malignant_annotations,
         "malignant_selector": (
-            f"{args.malignant_column}=={args.malignant_value}"
+            "every cell, no compartment selection" if args.all_cells
+            else f"{args.malignant_column}=={args.malignant_value}"
             if args.malignant_column else "cell_type in malignant_annotations"),
         "qc_thresholds": {
             "minimum_total_counts": args.minimum_total_counts,
