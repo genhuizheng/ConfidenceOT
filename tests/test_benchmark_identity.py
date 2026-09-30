@@ -5,8 +5,12 @@ expressible as a ``Preprocessing`` label. The other four put library-size
 normalisation and rank encoding on together, and those are one field in the
 production code -- ``normalisation`` takes one value -- so they have no name.
 
-Adding read equalisation as the fifth axis doubles both counts: 32 cells, 24
-expressible, 8 unnameable. The identity below is still asserted over the four
+The normalisation axis has four levels, not two: nothing, library size,
+rank with the gene-median division (``rank_value``, the one the project
+ships) and rank without it (``rank_no_median``). With gene scaling, read
+equalisation and the angular geometry that is 4 x 2 x 2 x 2 = 32 expressible
+labels, and the unnameable cells are the ones that would put library-size
+normalisation and either rank encoding on at once. The identity below is still asserted over the four
 geometry-and-scaling combinations rather than all eight, and deliberately so.
 Equalisation on this project's path is recorded by the label and applied
 upstream by ``27_downsample_counts.py``, so it does not enter the transform
@@ -52,7 +56,7 @@ CELLS = tuple((cost, scale_genes)
 LABELS = [
     "_".join([stem] + [tag for bit, tag in
                        zip((noscale, ds, cos), ("noscale", "ds", "cos")) if bit])
-    for stem in ("raw", "logcpm", "ranknm256")
+    for stem in ("raw", "logcpm", "rank256", "ranknm256")
     for noscale in (0, 1) for ds in (0, 1) for cos in (0, 1)
 ]
 
@@ -92,7 +96,7 @@ def test_rank_absorbs_library_normalisation():
 
 def test_every_label_round_trips():
     """A label that does not rebuild itself would silently run something else."""
-    assert len(LABELS) == 24, LABELS
+    assert len(LABELS) == 32, LABELS
     for label in LABELS:
         rebuilt = Preprocessing.from_label(label).label()
         assert rebuilt == label, f"{label} rebuilt itself as {rebuilt}"

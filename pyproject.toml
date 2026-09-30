@@ -11,7 +11,13 @@ requires-python = ">=3.10"
 dependencies = ["numpy>=1.20", "scipy>=1.9"]
 
 [project.optional-dependencies]
-benchmark = ["matplotlib>=3.8", "umap-learn>=0.5"]
+benchmark = ["matplotlib>=3.8", "umap-learn>=0.5", "pot>=0.9"]
+# POT supplies the comparator solvers -- balanced, unbalanced and
+# partial OT -- rather than this repository's own implementations of
+# them. A method comparison in which the competing methods are our
+# code invites the reading that they were crippled, and no amount of
+# care in writing them answers it; a reference implementation does.
+# ConfidenceOT stays ours, because it is the thing under test.
 # confidenceot.preprocessing needs PCA. The solver does not, so this is
 # separate: fit(cost_matrix) still installs on numpy and scipy alone.
 preprocessing = ["scikit-learn>=1.3"]

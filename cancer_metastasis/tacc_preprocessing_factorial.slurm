@@ -55,12 +55,10 @@ out=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
 # into one median without saying so.
 block=${CONFIDENCEOT_FACTORIAL_BLOCK:-uniform}
 labels=(${CONFIDENCEOT_FACTORIAL_LABELS:-\
-raw raw_noscale raw_cos raw_noscale_cos \
-raw_ds raw_noscale_ds raw_ds_cos raw_noscale_ds_cos \
-logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
-logcpm_ds logcpm_noscale_ds logcpm_ds_cos logcpm_noscale_ds_cos \
-ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos \
-ranknm256_ds ranknm256_noscale_ds ranknm256_ds_cos ranknm256_noscale_ds_cos})
+raw raw_cos raw_ds raw_ds_cos raw_noscale raw_noscale_cos raw_noscale_ds raw_noscale_ds_cos \
+logcpm logcpm_cos logcpm_ds logcpm_ds_cos logcpm_noscale logcpm_noscale_cos logcpm_noscale_ds logcpm_noscale_ds_cos \
+rank256 rank256_cos rank256_ds rank256_ds_cos rank256_noscale rank256_noscale_cos rank256_noscale_ds rank256_noscale_ds_cos \
+ranknm256 ranknm256_cos ranknm256_ds ranknm256_ds_cos ranknm256_noscale ranknm256_noscale_cos ranknm256_noscale_ds ranknm256_noscale_ds_cos})
 # The equalised counts. Read equalisation is the fifth axis of the factorial
 # and it is the only one that happens to the input rather than inside the
 # representation: 27_downsample_counts.py rewrites the h5ads and the label
@@ -71,6 +69,12 @@ workers=${CONFIDENCEOT_FACTORIAL_WORKERS:-3}
 scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-malignant}
 malignant_column=${CONFIDENCEOT_MALIGNANT_COLUMN:-malignant}
 malignant_value=${CONFIDENCEOT_MALIGNANT_VALUE:-malignant}
+# Four normalisation levels, not three. rank_value and rank_no_median are
+# different transforms -- the first divides each gene by its nonzero median
+# over both sides before ranking, the second does not -- and only the second
+# was in the earlier grid. The shipped configuration rank256_ds_cos uses the
+# first, so the grid had never tested the configuration the project ships.
+#
 # The other way of naming the malignant compartment, pipe separated. Each
 # deposit uses its own best available call: the uniform inferCNV labels where
 # they exist, and Faming Zhao's annotation of the prostate object, which is

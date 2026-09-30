@@ -47,12 +47,10 @@ result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confi
 manifest=${CONFIDENCEOT_FACTORIAL_MANIFEST:-$result/manifest/pancancer_20260924/pair_manifest_eligible.csv}
 out=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
 labels=${CONFIDENCEOT_FACTORIAL_LABELS:-"\
-raw raw_noscale raw_cos raw_noscale_cos \
-raw_ds raw_noscale_ds raw_ds_cos raw_noscale_ds_cos \
-logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
-logcpm_ds logcpm_noscale_ds logcpm_ds_cos logcpm_noscale_ds_cos \
-ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos \
-ranknm256_ds ranknm256_noscale_ds ranknm256_ds_cos ranknm256_noscale_ds_cos"}
+raw raw_cos raw_ds raw_ds_cos raw_noscale raw_noscale_cos raw_noscale_ds raw_noscale_ds_cos \
+logcpm logcpm_cos logcpm_ds logcpm_ds_cos logcpm_noscale logcpm_noscale_cos logcpm_noscale_ds logcpm_noscale_ds_cos \
+rank256 rank256_cos rank256_ds rank256_ds_cos rank256_noscale rank256_noscale_cos rank256_noscale_ds rank256_noscale_ds_cos \
+ranknm256 ranknm256_cos ranknm256_ds ranknm256_ds_cos ranknm256_noscale ranknm256_noscale_cos ranknm256_noscale_ds ranknm256_noscale_ds_cos"}
 manifest_ds=${CONFIDENCEOT_FACTORIAL_MANIFEST_DS:-}
 # One worker per label. Twenty-four labels at two workers is 48 array
 # tasks, which with the audit and the diagnostics is 50 against a cap
