@@ -54,6 +54,12 @@ depth_ratio=${CONFIDENCEOT_BENCH_DEPTH_RATIO:-0.50}
 # alone. Kept separate rather than reused so neither default drifts with the
 # other.
 native_dropout_mid=${CONFIDENCEOT_BENCH_NATIVE_DROPOUT_MID:-1.0}
+# Only reached when this Splatter has no per-batch lib.loc, so the only native
+# route is two calls sharing one seed -- which pairs the sides cell by cell as
+# well as sharing their biology. Set this to 1 only after
+# 09_probe_splatter_library.R has reported route B rather than B_PAIRED; the
+# generator refuses otherwise, and that refusal is the point.
+allow_shared_seed=${CONFIDENCEOT_BENCH_ALLOW_SHARED_SEED:-0}
 rank_top_n=${CONFIDENCEOT_BENCH_RANK_TOP_N:-256}
 base_seed=${CONFIDENCEOT_BENCH_SEED:-20260925}
 force=${CONFIDENCEOT_BENCH_FORCE:-0}
@@ -114,6 +120,10 @@ if [[ "$force" == "1" || ! -f "$generated/GENERATION_DONE" ]]; then
         # --level, so the dropout flag is not conditional here: it names the
         # value L2 would use and the script ignores it at L0 and L1. One less
         # place for the level and its treatment to disagree.
+        shared_seed_flag=()
+        [[ "$allow_shared_seed" == "1" ]] && \
+            shared_seed_flag=(--allow-shared-seed-sides)
+
         $rscript "$repo/benchmark/tacc/10_generate_splatter_native.R" \
             --out "$generated" \
             --n "$n_cells" \
@@ -124,7 +134,8 @@ if [[ "$force" == "1" || ! -f "$generated/GENERATION_DONE" ]]; then
             --lib-loc "$lib_loc" \
             --lib-scale "$lib_scale" \
             --depth-ratio "$depth_ratio" \
-            --dropout-mid-target "$native_dropout_mid"
+            --dropout-mid-target "$native_dropout_mid" \
+            "${shared_seed_flag[@]}"
     else
         # Only the dropout level asks Splatter for dropout, and it asks for it
         # on the target batch alone.
