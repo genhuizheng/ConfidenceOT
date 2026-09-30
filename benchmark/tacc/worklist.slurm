@@ -45,11 +45,24 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from pathlib import Path
 
 root, out, sizes, *labels = sys.argv[1:]
 wanted = {int(size) for size in sizes.split()}
+
+# Which labels carry read equalisation, asked of the class that owns them.
+# An equalised arm has to read the equalised counts or it misreports itself:
+# the label records the correction and 27_downsample_counts.py applies it, so
+# a _ds arm pointed at the original matrix would carry a name for something
+# that never happened.
+sys.path.insert(0, str(Path(root).parent))
+from confidenceot.preprocessing import Preprocessing  # noqa: E402
+
+equalised_labels = {label for label in labels
+                    if Preprocessing.from_label(label).equalise_depth}
 rows = []
 skipped = set()
+missing_equalised = set()
 for manifest in sorted(Path(root).glob("conditions/*/*/*/manifest.csv")):
     table = pd.read_csv(manifest)
     # Filtered on the column rather than on the directory name: the manifest
@@ -58,10 +71,35 @@ for manifest in sorted(Path(root).glob("conditions/*/*/*/manifest.csv")):
     if present not in wanted:
         skipped.add(present)
         continue
+    # conditions/N1000/rep1/L0_matched -> conditions_ds/N1000/rep1/L0_matched
+    relative = manifest.parent.relative_to(Path(root) / "conditions")
+    equalised_path = (Path(root) / "conditions_ds" / relative
+                      / "pair_manifest_downsampled.csv")
+    equalised = None
+    if equalised_path.exists():
+        # Looked up by pair_id rather than trusted to be in the same order:
+        # the rewritten manifest drops a pair whose sample had no analysed
+        # cells, and a positional index would then silently name a different
+        # pair.
+        table_ds = pd.read_csv(equalised_path)
+        equalised = {str(name): position for position, name
+                     in enumerate(table_ds["pair_id"].astype(str))}
     for index, row in table.iterrows():
         for label in labels:
-            rows.append({"manifest": str(manifest), "pair_index": int(index),
-                         "pair_id": row["pair_id"], "preprocessing": label})
+            if label in equalised_labels:
+                if equalised is None:
+                    missing_equalised.add(str(relative))
+                    continue
+                position = equalised.get(str(row["pair_id"]))
+                if position is None:
+                    continue
+                rows.append({"manifest": str(equalised_path),
+                             "pair_index": int(position),
+                             "pair_id": row["pair_id"], "preprocessing": label})
+            else:
+                rows.append({"manifest": str(manifest),
+                             "pair_index": int(index),
+                             "pair_id": row["pair_id"], "preprocessing": label})
 if not rows:
     raise SystemExit("no manifests found; the generation stage has not run")
 frame = pd.DataFrame(rows)
@@ -74,4 +112,9 @@ print(f"work list: {len(frame)} units, {frame['pair_id'].nunique()} pairs, "
       f"{len(labels)} configurations -> {out}")
 if skipped:
     print(f"left out {sorted(skipped)}, which this invocation is not about")
+if missing_equalised:
+    raise SystemExit(
+        f"{len(missing_equalised)} conditions have no equalised counts, so "
+        f"the _ds arms have nothing to read: run --stage equalise first. "
+        f"First few: {sorted(missing_equalised)[:4]}")
 PY

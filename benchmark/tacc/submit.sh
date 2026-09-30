@@ -62,10 +62,11 @@ limit=""
 # rank encoding on together, which is one slot in the production code and
 # cannot be named; they are a bit-for-bit identity with rank alone and are
 # asserted in tests/test_benchmark_identity.py rather than run here.
-# Sixteen of the factorial's thirty-two cells: four normalisations by
-# gene scaling by geometry. The other sixteen carry read
-# equalisation, which is a file-level operation on the counts, so
-# they need equalised conditions generated before they can run.
+# All thirty-two expressible cells of the factorial: four normalisations by
+# gene scaling by read equalisation by geometry. The equalised half reads a
+# mirrored conditions_ds/ tree, which --stage equalise builds and the work
+# list routes to; it refuses to build a list at all if that tree is missing,
+# rather than quietly pointing a _ds arm at the original counts.
 #
 # rank256 and ranknm256 are both here because they are different
 # transforms, not two spellings of one: the first divides each gene
@@ -74,10 +75,10 @@ limit=""
 # ships, uses the first, and a grid without it cannot judge what is
 # shipped.
 preprocessing=${CONFIDENCEOT_BENCH_PREPROCESSING:-"\
-raw raw_noscale raw_cos raw_noscale_cos \
-logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
-rank256 rank256_noscale rank256_cos rank256_noscale_cos \
-ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos"}
+raw raw_cos raw_ds raw_ds_cos raw_noscale raw_noscale_cos raw_noscale_ds raw_noscale_ds_cos \
+logcpm logcpm_cos logcpm_ds logcpm_ds_cos logcpm_noscale logcpm_noscale_cos logcpm_noscale_ds logcpm_noscale_ds_cos \
+rank256 rank256_cos rank256_ds rank256_ds_cos rank256_noscale rank256_noscale_cos rank256_noscale_ds rank256_noscale_ds_cos \
+ranknm256 ranknm256_cos ranknm256_ds ranknm256_ds_cos ranknm256_noscale ranknm256_noscale_cos ranknm256_noscale_ds ranknm256_noscale_ds_cos"}
 
 while (( $# )); do
     case "$1" in
@@ -141,6 +142,28 @@ submit() {
 }
 
 # ---- stage 0: the container, when that is the R route -----------------------
+# ---- stage 0b: equalised counts for the _ds arms ---------------------------
+if [[ "$stage" == "equalise" ]]; then
+    # Under pipefail a find over a directory that is not there fails the
+    # pipeline, and under set -e that kills the script from inside an
+    # assignment -- silently, which is how the first version of this stage
+    # printed nothing at all and exited cleanly. The same shape as
+    # queued_now, and the same fix.
+    conditions=$(find "$root/conditions" -name manifest.csv 2>/dev/null         | wc -l) || conditions=0
+    (( conditions == 0 )) && conditions=45
+    ds_chunk=${CONFIDENCEOT_BENCH_DS_CHUNK:-8}
+    ds_tasks=$(( (conditions + ds_chunk - 1) / ds_chunk ))
+    submit "equalisation ($conditions conditions, $ds_tasks tasks)" \
+        --array=0-$(( ds_tasks - 1 )) "${where[@]}" \
+        --export=ALL,CONFIDENCEOT_BENCH_ROOT="$root",CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_BENCH_DS_CHUNK="$ds_chunk" \
+        "$repo/benchmark/tacc/equalise.slurm" > /dev/null
+    echo
+    echo "root        $root"
+    echo "equalised   $root/conditions_ds"
+    (( dry_run )) && echo "nothing was submitted (--dry-run)"
+    exit 0
+fi
+
 if [[ "$stage" == "container" ]]; then
     submit "container build" "${where[@]}" \
         --export=ALL,CONFIDENCEOT_BENCH_ROOT="$root",CONFIDENCEOT_REPO="$repo" \
