@@ -53,6 +53,14 @@ replicates=${CONFIDENCEOT_BENCH_REPLICATES:-5}
 chunk=${CONFIDENCEOT_BENCH_CHUNK:-24}
 stage=all
 dry_run=0
+# Chain scoring behind the OT array in one submission. There was no way to do
+# that: --stage ot does not submit scoring, --stage metrics submits it with no
+# job to wait for, and --stage all would add the 45 generation tasks, whose
+# whole-chain count of 82 the 40-job cap refuses outright. The dependency is
+# afterany rather than afterok on purpose -- scoring reports what is missing
+# instead of refusing to run, so a chunk that failed should not also cost the
+# table for the thirty-four that did not.
+with_metrics=0
 partition=""
 device=""
 limit=""
@@ -83,6 +91,7 @@ ranknm256 ranknm256_cos ranknm256_ds ranknm256_ds_cos ranknm256_noscale ranknm25
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
+        --with-metrics) with_metrics=1; shift ;;
         --stage) stage=$2; shift 2 ;;
         --sizes) sizes=$2; shift 2 ;;
         --replicates) replicates=$2; shift 2 ;;
@@ -255,7 +264,8 @@ if [[ "$stage" == "all" || "$stage" == "ot" ]]; then
 fi
 
 # ---- stage 3: scoring -------------------------------------------------------
-if [[ "$stage" == "all" || "$stage" == "metrics" ]]; then
+if [[ "$stage" == "all" || "$stage" == "metrics" ]] || \
+   { [[ "$stage" == "ot" ]] && (( with_metrics )); }; then
     depend=()
     [[ -n "$ot_id" && "$ot_id" != "DRYRUN" ]] && \
         depend=(--dependency=afterany:"$ot_id")
