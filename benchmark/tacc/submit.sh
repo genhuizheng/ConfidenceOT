@@ -62,9 +62,21 @@ limit=""
 # rank encoding on together, which is one slot in the production code and
 # cannot be named; they are a bit-for-bit identity with rank alone and are
 # asserted in tests/test_benchmark_identity.py rather than run here.
+# Sixteen of the factorial's thirty-two cells: four normalisations by
+# gene scaling by geometry. The other sixteen carry read
+# equalisation, which is a file-level operation on the counts, so
+# they need equalised conditions generated before they can run.
+#
+# rank256 and ranknm256 are both here because they are different
+# transforms, not two spellings of one: the first divides each gene
+# by its nonzero median over both sides before ranking and the
+# second does not. rank256_ds_cos, the configuration this project
+# ships, uses the first, and a grid without it cannot judge what is
+# shipped.
 preprocessing=${CONFIDENCEOT_BENCH_PREPROCESSING:-"\
 raw raw_noscale raw_cos raw_noscale_cos \
 logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
+rank256 rank256_noscale rank256_cos rank256_noscale_cos \
 ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos"}
 
 while (( $# )); do
