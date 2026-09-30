@@ -27,10 +27,18 @@ only post-hoc operation on counts.
 ``--depth-mechanism splatter`` asks the simulator instead, through a lower
 ``lib.loc`` on the target side, and then nothing here touches the counts:
 ``--theta 1.0`` makes ``thin`` return its input. This is the route to prefer,
-because read equalisation inverts binomial thinning *exactly* -- the
-subsampling is that mechanism's own inverse -- so an equalised L1 arm built on
-thinned counts was never independent evidence about low depth. A lower library
-size is not inverted the same way: the reads were never there to recover.
+because the level is then a simulated condition rather than a simulated
+condition plus an edit, and the benchmark has no post-hoc operation on counts
+left to caveat.
+
+It does not change what the equalised L1 arm is worth. The circularity there
+is a property of the composition, not of thinning: Splatter's ``p`` does not
+depend on the library size, so a cell of depth ``d`` is ``Multinomial(d, p)``
+however ``d`` arose and subsampling it to a shared ``D`` gives
+``Multinomial(D, p)``. Drawing a smaller library and thinning a larger one
+land in the same distribution, so equalisation removes the L1 difference by
+construction either way. L2 is the level the downsampling arm can be read on,
+because dropout makes detection depend on more than how much was read.
 
 At ``theta = 1.0`` the two mechanisms are indistinguishable from the manifest
 alone, and they support different claims, so the mechanism is written into

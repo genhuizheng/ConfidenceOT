@@ -18,16 +18,20 @@
 # carries both sides at two depths and nothing else is needed.
 #
 # **Route B** -- otherwise, two single-batch calls with the same seed and the
-# same biological parameters, differing only in `lib.loc`. `lib.loc` is a
-# parameter value rather than a count, so it cannot change how many random
-# numbers are drawn before the gene means, and an equal number of draws leaves
-# the stream in the same place; the two calls should therefore agree on gene
-# means and on group assignment exactly. That is a prediction about Splatter's
-# internals, so it is **checked and not trusted**: the gene means and the group
-# labels must come out identical or this script stops. If they differed, the
-# two sides would differ biologically and the benchmark's ground truth -- every
-# population is on both sides -- would be an assumption rather than a
-# construction.
+# same biological parameters, differing only in `lib.loc`. Checked and not
+# trusted: the gene means, the **per-group DE factors** and the group labels
+# must come out identical or this script stops. Marginal gene means agreeing
+# says nothing about the group-specific parameters, and those are what make
+# the populations distinct.
+#
+# Route B also needs `--allow-shared-seed-sides`, and the flag exists because
+# of what one seed does beyond sharing the biology: cell i in both calls draws
+# the same group, the same DE factors and the same BCV value from the same
+# stream position, so the two differ only by a library factor. That is a
+# near-duplicate pair at two depths, and it hands the transport a trivially
+# correct answer that has nothing to do with the biology under test.
+# 09_probe_splatter_library.R measures whether that pairing appeared; the flag
+# says an operator read the answer. It is not a default.
 #
 # The depth ratio is set through the log-normal's median, which is exactly
 # `exp(lib.loc)`:
@@ -75,6 +79,7 @@ lib_scale <- as.numeric(value_of("--lib-scale", "0.2"))
 depth_ratio <- as.numeric(value_of("--depth-ratio", "0.50"))
 dropout_mid_target <- as.numeric(value_of("--dropout-mid-target", "1.0"))
 dropout_shape <- as.numeric(value_of("--dropout-shape", "-1"))
+allow_shared_seed <- "--allow-shared-seed-sides" %in% args
 
 LEVELS <- c("L0_matched", "L1_depth", "L2_depth_dropout")
 if (!(level %in% LEVELS)) {
@@ -120,7 +125,10 @@ per_batch_lib_loc <- tryCatch({
   FALSE
 })
 
-assertions <- list(gene_means_identical = NA, groups_identical = NA)
+assertions <- list(gene_means_identical = NA, groups_identical = NA,
+                   group_de_identical = NA, group_de_worst_abs_diff = NA,
+                   group_de_columns = NA,
+                   shared_seed_sides_allowed = allow_shared_seed)
 
 if (per_batch_lib_loc) {
   route <- "A"
@@ -151,6 +159,18 @@ if (per_batch_lib_loc) {
 } else {
   route <- "B"
   cat("  route B: two single-batch calls, same seed, different lib.loc\n")
+  # The gate, before any generation. One seed pairs the sides cell by cell as
+  # well as sharing their biology, and a paired benchmark measures nothing.
+  if (!allow_shared_seed) {
+    stop(paste0(
+      "this Splatter has no per-batch lib.loc, so the only native route is ",
+      "two calls sharing one seed -- and that seed pairs the sides cell by ",
+      "cell as well as sharing their biology, which would hand the transport ",
+      "a trivially correct answer. Run ",
+      "benchmark/tacc/09_probe_splatter_library.R first; if it reports ",
+      "route B (no invented pairing), pass --allow-shared-seed-sides. If it ",
+      "reports B_PAIRED, do not generate on this route."))
+  }
   one_side <- function(this_lib_loc, this_dropout) {
     params <- setParams(base_params(n_cells), lib.loc = this_lib_loc)
     if (is.na(this_dropout)) {
@@ -174,6 +194,30 @@ if (per_batch_lib_loc) {
   target_groups <- as.character(colData(target_sim)$Group)
   assertions$gene_means_identical <- identical(source_means, target_means)
   assertions$groups_identical <- identical(source_groups, target_groups)
+
+  # The group-specific parameters, separately. Agreeing marginal gene means
+  # say nothing about the per-group DE factors, and those are what make the
+  # populations distinct -- so "every population is on both sides" rests on
+  # these agreeing, not on the means.
+  de_cols <- grep("^DEFacGroup", colnames(rowData(source_sim)), value = TRUE)
+  de_identical <- length(de_cols) > 0
+  de_worst <- 0
+  for (nm in de_cols) {
+    a <- as.numeric(rowData(source_sim)[[nm]])
+    b <- as.numeric(rowData(target_sim)[[nm]])
+    de_identical <- de_identical && identical(a, b)
+    de_worst <- max(de_worst, max(abs(a - b)))
+  }
+  assertions$group_de_identical <- de_identical
+  assertions$group_de_worst_abs_diff <- de_worst
+  assertions$group_de_columns <- length(de_cols)
+  if (!de_identical) {
+    stop(sprintf(paste0(
+      "two calls with seed %d produced different group DE factors across %d ",
+      "column(s) (worst abs diff %.3e). The populations would not be the same ",
+      "populations on the two sides. Refusing to generate."),
+      seed, length(de_cols), de_worst))
+  }
   if (!identical(rownames(source_sim), rownames(target_sim))) {
     stop("the two calls disagree on gene names, so their columns cannot be ",
          "placed in one matrix")

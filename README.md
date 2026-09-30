@@ -152,9 +152,11 @@ choice that separated a gate's false-rejection rate was the cost: every squared
 Euclidean configuration false-rejected 0.071–0.098 of cells that should not have
 been rejected, every cosine one 0.000–0.057, with no overlap. `cpm` and `log1p`
 exist because the chain needs them and were not measured. `equalise_depth` is
-not attributed: on a simulation whose depth mechanism is multinomial, read
-equalisation is that mechanism's exact inverse, so measuring it there is
-circular. `cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md` has the full table
+not attributed: on a simulation whose composition does not depend on the
+library size, subsampling every cell to a shared total makes both sides draws
+from the same distribution whatever their depths were, so it removes the
+difference by construction and measuring robustness there tests the identity
+rather than the method. `cancer_metastasis/SEQUENCING_DEPTH_RESOLUTION.md` has the full table
 and the caveats.
 
 `Preprocessing` needs scikit-learn for the PCA step:

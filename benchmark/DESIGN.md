@@ -68,14 +68,41 @@ depth and reduces between-cell depth heterogeneity, so its effect reflects
 both factors.
 
 This is not a defect discovered late. `confidenceot.equalise_depth` carries
-the warning in its own docstring -- on data whose depth mechanism is
-`Multinomial(depth, p)` with `p` independent of depth, the subsampling is that
-mechanism's exact inverse, and a measurement of it there is circular -- and
-records that this project's first depth simulation was lost to exactly that.
-L1's thinning is such a mechanism. L2 is not reversed in the same way, because
-dropout removes genes rather than thinning reads proportionally, so the
-equalised L2 arm removes the depth component and leaves the detection-breadth
-component standing.
+the warning in its own docstring, and the warning is about distributions
+rather than about reads. Subsampling does not invert a depth mechanism -- the
+discarded reads are gone and nothing recovers them. It *matches* one. If a
+cell's counts are `Multinomial(depth, p)` with `p` not depending on `depth`,
+subsampling to a shared total `D` gives `Multinomial(D, p)` whatever `depth`
+was, so two cells differing only in depth become draws from the same
+distribution. The correction is the perturbation's own generative model read
+backwards, so it removes the difference by construction and a measurement of
+robustness there tests the identity rather than the method. This project's
+first depth simulation was lost to exactly that.
+
+L1's binomial thinning is such a mechanism. L2 is not matched the same way,
+because dropout removes genes rather than thinning reads proportionally, so
+the equalised L2 arm removes the depth component and leaves the
+detection-breadth component standing.
+
+**What the native generator does and does not fix.** It moves the depth
+difference inside Splatter's own model -- a smaller `lib.loc` on the target
+side -- so nothing downstream touches the counts and the level is a simulated
+condition rather than a simulated condition plus an edit. That is worth
+having, and it is what the design now specifies.
+
+It does **not** rescue the equalised L1 arm, and claiming otherwise would be
+the same error in a new place. The circularity does not come from thinning. It
+comes from the composition: Splatter's `p` does not depend on the library
+size, so a cell of depth `d` is `Multinomial(d, p)` however `d` arose, and
+subsampling any such cell to a shared total `D` gives `Multinomial(D, p)`.
+Drawing a smaller library and thinning a larger one land in the same place.
+Equalisation therefore still removes the L1 difference by construction, and an
+equalised L1 result is still not independent evidence about low depth.
+
+What would change that is a depth-dependent composition -- a mechanism where
+what is detected shifts with how deeply it was read, rather than only how much
+of it was seen. L2's dropout is such a mechanism, which is why L2 is the level
+the downsampling arm can be read on.
 
 ## The three biological cases
 

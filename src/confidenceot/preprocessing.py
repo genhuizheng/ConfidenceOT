@@ -120,10 +120,17 @@ def equalise_depth(
     give the identical result here, which is the property that lets the
     simulation and the production stage be compared at all.
 
-    A warning that is easy to lose: on data whose depth mechanism is
-    ``Multinomial(depth, p)`` with ``p`` independent of depth, this operation is
-    that mechanism's exact inverse, and any measurement of it on such data is
-    circular.  That is what happened to this project's first depth simulation.
+    A warning that is easy to lose, and it is about distributions rather than
+    about reads.  This operation does not invert a depth mechanism: the reads
+    it discards are gone and nothing recovers them.  What it does is match one
+    exactly.  If a cell's counts are ``Multinomial(depth, p)`` with ``p`` not
+    depending on ``depth``, then subsampling to a shared total ``D`` gives
+    ``Multinomial(D, p)`` whatever ``depth`` was -- so two cells that differed
+    only in depth become draws from the *same* distribution.  The correction is
+    the perturbation's own generative model read backwards, so on such data it
+    is guaranteed to remove the difference by construction, and a measurement
+    of robustness there is circular: it tests the identity, not the method.
+    That is what happened to this project's first depth simulation.
     """
     was_sparse = sparse.issparse(counts)
     matrix = sparse.csr_matrix(counts, dtype=np.int64)
