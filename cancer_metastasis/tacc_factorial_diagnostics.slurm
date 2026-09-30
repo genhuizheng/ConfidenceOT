@@ -57,9 +57,10 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 out=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
 labels=(${CONFIDENCEOT_FACTORIAL_LABELS:-\
-raw raw_noscale raw_cos raw_noscale_cos \
-logcpm logcpm_noscale logcpm_cos logcpm_noscale_cos \
-ranknm256 ranknm256_noscale ranknm256_cos ranknm256_noscale_cos})
+raw raw_cos raw_ds raw_ds_cos raw_noscale raw_noscale_cos raw_noscale_ds raw_noscale_ds_cos \
+logcpm logcpm_cos logcpm_ds logcpm_ds_cos logcpm_noscale logcpm_noscale_cos logcpm_noscale_ds logcpm_noscale_ds_cos \
+rank256 rank256_cos rank256_ds rank256_ds_cos rank256_noscale rank256_noscale_cos rank256_noscale_ds rank256_noscale_ds_cos \
+ranknm256 ranknm256_cos ranknm256_ds ranknm256_ds_cos ranknm256_noscale ranknm256_noscale_cos ranknm256_noscale_ds ranknm256_noscale_ds_cos})
 scope=${CONFIDENCEOT_ANALYSIS_SCOPE:-malignant}
 budget_tag=${CONFIDENCEOT_FACTORIAL_BUDGET_TAG:-budget_0.95}
 method=${CONFIDENCEOT_FACTORIAL_METHOD:-M4-E}
@@ -71,7 +72,22 @@ export PYTHONUNBUFFERED=1
 # Every block that ran, found rather than declared: whatever is on disk is
 # what there is to compare, and a block the submitter forgot to mention would
 # otherwise vanish from the table without a word.
+# Which labels carry read equalisation. Asked of the class that owns the
+# label rather than matched against its text, for the same reason everything
+# else about a label is.
+ds_labels=($(PYTHONPATH="$repo/src" python - "${labels[@]}" <<'PYDS'
+import sys
+
+from confidenceot.preprocessing import Preprocessing
+
+print(" ".join(label for label in sys.argv[1:]
+                if Preprocessing.from_label(label).equalise_depth))
+PYDS
+)) || { echo "could not split the labels by equalisation" >&2; exit 2; }
+
 datasets=()
+ds_datasets=()
+depth_source=""
 missing=()
 blocks=()
 shopt -s nullglob
@@ -86,7 +102,20 @@ for block_dir in "$out"/*/; do
     for label in "${labels[@]}"; do
         if compgen -G "$block_dir$label/*/scope_$scope/$budget_tag/cell_confidence.csv" \
             > /dev/null; then
-            datasets+=(--dataset "${block}__${label}=$block_dir$label")
+            # Split by which depth the arm has to be scored against. An
+            # equalised arm's stored depth is nearly constant by
+            # construction, so its AUC against it is trivially 0.5; the
+            # question is whether the gate still tracks the depth the cell
+            # had before the correction, and 25_diagnose_gate_covariates.py
+            # takes one --predownsample-depth for a whole invocation. Hence
+            # two invocations rather than one.
+            if [[ " ${ds_labels[*]} " == *" $label "* ]]; then
+                ds_datasets+=(--dataset "${block}__${label}=$block_dir$label")
+                [[ -f "$block_dir/PREDOWNSAMPLE_DEPTH" ]] && \
+                    depth_source=$(cat "$block_dir/PREDOWNSAMPLE_DEPTH")
+            else
+                datasets+=(--dataset "${block}__${label}=$block_dir$label")
+            fi
             seen=$(( seen + 1 ))
         else
             missing+=("$block/$label")
@@ -98,46 +127,66 @@ done
 if (( ${#missing[@]} > 0 )); then
     echo "no completed gate for: ${missing[*]}" >&2
 fi
-if (( ${#datasets[@]} == 0 )); then
+if (( ${#datasets[@]} == 0 && ${#ds_datasets[@]} == 0 )); then
     echo "not one arm produced a gate under scope_$scope/$budget_tag" >&2
+    exit 2
+fi
+if (( ${#ds_datasets[@]} > 0 )) && [[ -z "$depth_source" ]]; then
+    echo "equalised arms are present but no block recorded a depth table;" >&2
+    echo "  they would be scored against a depth the correction flattened" >&2
     exit 2
 fi
 
 for side in source target; do
-    echo "===== $side ====="
-    python cancer_metastasis/25_diagnose_gate_covariates.py \
-        "$out/diagnostics/$side" \
-        "${datasets[@]}" \
-        --scope "scope_$scope" \
-        --budget-tag "$budget_tag" \
-        --method "$method" \
-        --side "$side"
+    if (( ${#datasets[@]} > 0 )); then
+        echo "===== $side, original counts ====="
+        python cancer_metastasis/25_diagnose_gate_covariates.py \
+            "$out/diagnostics/$side" \
+            "${datasets[@]}" \
+            --scope "scope_$scope" \
+            --budget-tag "$budget_tag" \
+            --method "$method" \
+            --side "$side"
+    fi
+    if (( ${#ds_datasets[@]} > 0 )); then
+        echo "===== $side, equalised counts, scored on pre-equalisation depth ====="
+        python cancer_metastasis/25_diagnose_gate_covariates.py \
+            "$out/diagnostics/${side}_ds" \
+            "${ds_datasets[@]}" \
+            --scope "scope_$scope" \
+            --budget-tag "$budget_tag" \
+            --method "$method" \
+            --side "$side" \
+            --predownsample-depth "$depth_source"
+    fi
 done
 
 python - "$out" <<'PY'
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 root = Path(sys.argv[1])
 frames = []
-for side in ("source", "target"):
+for side in ("source", "source_ds", "target", "target_ds"):
     path = root / "diagnostics" / side / "gate_covariate_pair_statistics.csv"
     if not path.exists():
         continue
     table = pd.read_csv(path)
     # 25_diagnose_gate_covariates.py already writes a side column, from the
-    # --side it was given. Inserting a second one raised and took the whole
-    # pooling down after both sides had been measured. Checked rather than
-    # assumed, because the two must agree for the concatenation to mean
-    # anything.
+    # --side it was given; the directory adds whether the arm ran on
+    # equalised counts. Checked rather than assumed, because the two must
+    # agree for the concatenation to mean anything.
+    bare = side.removesuffix("_ds")
     if "side" not in table:
-        table.insert(0, "side", side)
-    elif not table["side"].astype(str).eq(side).all():
+        table.insert(0, "side", bare)
+    elif not table["side"].astype(str).eq(bare).all():
         raise SystemExit(
             f"{path} carries sides {sorted(table['side'].unique())} but was "
-            f"written for {side}")
+            f"written for {bare}")
+    table["equalised"] = side.endswith("_ds")
     frames.append(table)
 if not frames:
     raise SystemExit("no per-side statistics to join")
@@ -175,6 +224,44 @@ for block_dir in sorted(root.glob("*/")):
 
 pooled["compartment_definition"] = pooled["block"].map(definition).fillna("unrecorded")
 pooled["deposit"] = pooled["pair_id"].astype(str).map(deposit).fillna("unknown")
+
+# Deposit to cancer, from the collection's datasets_manifest.csv rather than
+# from the accession numbers, which say nothing. The three the advisor asked
+# for are ovarian, colorectal and prostate; the rest are named rather than
+# folded into "other", because a block of nineteen pairs that quietly
+# disappears is the same failure as a pooled median that hides a deposit.
+CANCER = {
+    "GSE180661": "ovarian",
+    "GSE164522": "colorectal", "GSE178318": "colorectal",
+    "GSE225857": "colorectal", "GSE315534": "colorectal",
+    "GSE271675": "prostate",
+    "GSE167036": "breast", "GSE180286": "breast",
+    "GSE163558": "gastric",
+    "GSE181919": "head_and_neck", "GSE188737": "head_and_neck",
+    "HRA000036": "nasopharyngeal",
+    "GSE197177": "pancreatic",
+    "GSE184362": "thyroid", "GSE198099": "lung",
+}
+pooled["cancer"] = pooled["deposit"].map(CANCER).fillna("unmapped")
+
+# One depth column to read, with its provenance beside it. An equalised arm
+# has a nearly constant stored depth, so auc_total_counts over it is
+# trivially 0.5; what 25 computed for those arms against the recorded
+# pre-equalisation depth is auc_predownsample_total_counts. Choosing between
+# them per row, and saying which was chosen, is the only way the two halves
+# of the grid can be read in one column without the choice being invisible.
+predownsample = "auc_predownsample_total_counts"
+if predownsample in pooled:
+    use = pooled["equalised"] & pooled[predownsample].notna()
+    pooled["auc_depth"] = pooled[predownsample].where(use, pooled.get("auc_total_counts"))
+    pooled["depth_readout"] = np.where(use, "pre-equalisation depth", "stored depth")
+else:
+    pooled["auc_depth"] = pooled.get("auc_total_counts")
+    pooled["depth_readout"] = "stored depth"
+    if pooled["equalised"].any():
+        print("equalised arms are present but no pre-equalisation depth column "
+              "came back from the diagnostic; their auc_depth is the flattened "
+              "one and means nothing")
 pooled.to_csv(root / "diagnostics" / "factorial_gate_statistics.csv", index=False)
 print(f"wrote {len(pooled)} rows to "
       f"{root / 'diagnostics' / 'factorial_gate_statistics.csv'}")
@@ -218,6 +305,26 @@ by_deposit["n_cells_median"] = deposit_group["n_cells"].median().to_numpy()
 by_deposit["n_cells_min"] = deposit_group["n_cells"].min().to_numpy()
 by_deposit.to_csv(
     root / "diagnostics" / "factorial_gate_summary_by_deposit.csv", index=False)
+
+# The same, per cancer. This is the level the advisor asked for -- ovarian,
+# colorectal, prostate -- and the level at which the composition problem is
+# visible: 92 of the 118 evaluable pairs are ovarian, so a pooled median is
+# very nearly an ovarian median.
+cancer_readouts = [column for column in
+                   (*readouts, "auc_depth") if column in pooled]
+cancer_group = pooled.groupby(["side", "cancer", "preprocessing"])
+by_cancer = cancer_group[cancer_readouts].median().reset_index()
+by_cancer.insert(0, "pairs_n", cancer_group.size().to_numpy())
+by_cancer["n_cells_median"] = cancer_group["n_cells"].median().to_numpy()
+by_cancer.to_csv(
+    root / "diagnostics" / "factorial_gate_summary_by_cancer.csv", index=False)
+print(f"wrote {len(by_cancer)} rows to "
+      f"{root / 'diagnostics' / 'factorial_gate_summary_by_cancer.csv'}")
+print()
+print("pairs per cancer, so the composition is on the record:")
+print(pooled[pooled["side"].eq("source")]
+      .groupby("cancer")["pair_id"].nunique().sort_values(ascending=False)
+      .to_string())
 
 print(f"wrote {len(summary)} rows to "
       f"{root / 'diagnostics' / 'factorial_gate_summary.csv'}")

@@ -190,6 +190,18 @@ if [[ "$wants_ds" == "1" ]]; then
     fi
     manifest=$manifest_ds
     echo "input       equalised counts"
+    # Beside the equalised manifest, written by 27_downsample_counts.py. The
+    # diagnostics need it because equalisation makes the stored depth nearly
+    # constant: an AUC against it is trivially 0.5 and says nothing, while
+    # the question that matters is whether the gate still tracks each cell's
+    # depth *before* the correction.
+    depth_table=$(dirname "$manifest_ds")/predownsample_depth.csv.gz
+    if [[ ! -f "$depth_table" ]]; then
+        echo "no predownsample_depth.csv.gz beside $manifest_ds" >&2
+        echo "  the _ds arms would be scored against a constant depth" >&2
+        exit 2
+    fi
+    echo "$depth_table" > "$out/$block/PREDOWNSAMPLE_DEPTH"
 else
     echo "input       original counts"
 fi
