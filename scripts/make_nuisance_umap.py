@@ -444,7 +444,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 ("Case 3: no population shared", disjoint_gate,
                  np.zeros(n, dtype=bool), "reject everything"))):
             x0 = case_x[column]
-            figure.text(x0, 0.527, title, fontsize=7.2,
+            figure.text(x0, 0.527, title, fontsize=6.9,
                         fontweight="semibold", ha="left", va="top")
             for line, values in enumerate((gate, truth)):
                 y = 0.475 - 0.040 * line
