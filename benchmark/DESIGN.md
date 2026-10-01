@@ -104,7 +104,7 @@ what is detected shifts with how deeply it was read, rather than only how much
 of it was seen. L2's dropout is such a mechanism, which is why L2 is the level
 the downsampling arm can be read on.
 
-## The three biological cases
+## The four biological cases
 
 Built from each generated condition, so every case exists at every level.
 
@@ -113,11 +113,29 @@ Built from each generated condition, so every case exists at every level.
 | `all_shared` | both sides keep all K groups | reject nothing |
 | `population_lost` | the last group is removed from the **target** | reject the **source** cells of that group |
 | `population_emerged` | the last group is removed from the **source** | reject the **target** cells of that group |
+| `populations_disjoint` | the first ⌊K/2⌋ groups to the **source**, the rest to the **target** | reject **everything, on both sides** |
 
 The rejecting side is the side that still *has* the group, which is the
 opposite of the side the removal was applied to. Both directions are built
 because the gate is called on both sides, and a benchmark that only ever asks
 one side to reject cannot see half of what it claims to measure.
+
+`populations_disjoint` is there for a failure the other three cannot catch.
+Each of them leaves a true match available, so a method that always finds
+something still scores on the part of them where finding something is the
+right answer. Here nothing on either side has a match, so anything reported is
+invented, and the correct rejection rate is 1.000 rather than a subset.
+
+It is not a trivial test. Splatter's groups share one gene-mean backbone and
+differ only by DE factors, so the nearest wrong group is still close — which
+is the pressure that makes a solver settle for second best instead of
+declining. A balanced OT has no choice and will transport all of it; what the
+unbalanced and partial formulations do with it is the question. The split is
+the first half of the groups by name against the rest: one rule, no cells
+discarded, and at K=5 it gives 2 groups against 3. That is uneven, but
+`population_lost` already leaves the target at four fifths, and discarding a
+middle group to even the sides would throw away cells to buy a symmetry
+nothing reads.
 
 Labels come from `colData(sim)$Group`, so the truth is what the simulator was
 told to make, not something inferred afterwards.

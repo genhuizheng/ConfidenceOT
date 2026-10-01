@@ -188,12 +188,18 @@ fi
 # independent realizations, so each is generated on its own. Then three
 # biological cases per generated condition, times the configurations.
 levels=3
+# Biological cases per generated condition, which 20_build_conditions.py owns:
+# all_shared, population_lost, population_emerged, populations_disjoint. Named
+# rather than written into the arithmetic below, because the last one was added
+# after this count was first written and a literal 3 there sized the array for
+# three quarters of the work without saying so.
+cases=4
 generation_tasks=$(( ${#size_array[@]} * replicates * levels ))
 # One list per size set. Two invocations on two partitions would otherwise
 # write the same file, and the second would renumber the units the first is
 # still working through.
 worklist=$root/worklist_${sizes// /_}.csv
-pairs=$(( ${#size_array[@]} * replicates * levels * 3 ))
+pairs=$(( ${#size_array[@]} * replicates * levels * cases ))
 units=$(( pairs * ${#preprocessing_array[@]} ))
 chunks=$(( (units + chunk - 1) / chunk ))
 (( chunks < 1 )) && chunks=1

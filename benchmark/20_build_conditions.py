@@ -56,6 +56,18 @@ instead. Both directions are built, because the gate is called on both sides
 and a benchmark that only ever asks one side to reject cannot see half of what
 it claims to measure.
 
+``populations_disjoint`` gives the sides no group in common: the first half of
+the groups by name to the source, the rest to the target. **Nothing on either
+side has a match, so the correct answer is to reject every cell.**
+
+That case exists because the other three cannot catch one particular failure.
+Each of them leaves a true match available, so a method that always finds
+something still scores on the part of them where finding something is right.
+Here there is nothing to find, and anything reported is invented. It is not a
+trivial test: Splatter's groups share one gene-mean backbone and differ by DE
+factors, so the nearest wrong group is still near, which is exactly the
+pressure that makes a solver settle for second best rather than decline.
+
 Ratios are measured after the fact and written into the manifest. The nominal
 theta is recorded too, but the axis a result is plotted against is the realised
 one.
@@ -74,7 +86,8 @@ from scipy import sparse
 
 LEVELS = ("L0_matched", "L1_depth", "L2_depth_dropout")
 THINNED_LEVELS = ("L1_depth", "L2_depth_dropout")
-CASES = ("all_shared", "population_lost", "population_emerged")
+CASES = ("all_shared", "population_lost", "population_emerged",
+         "populations_disjoint")
 
 
 def parse_args() -> argparse.Namespace:
@@ -192,6 +205,20 @@ def main() -> None:
     source_groups = cells.loc[source_mask, "group"].to_numpy()
     target_groups = cells.loc[target_mask, "group"].to_numpy()
 
+    # Which groups each side keeps when the sides must not overlap at all.
+    # The first half by name to the source, the rest to the target: one rule,
+    # no cells discarded, and it generalises to any K. With K=5 the sides are
+    # 2 groups against 3, which is uneven -- but the existing cases are
+    # already uneven (population_lost leaves the target at four fifths), and
+    # discarding a middle group to even them would throw away cells to buy a
+    # symmetry nothing reads.
+    half = len(group_names) // 2
+    if half < 1 or len(group_names) - half < 1:
+        raise ValueError(
+            f"populations_disjoint needs at least two groups to split; "
+            f"found {group_names}")
+    source_only, target_only = group_names[:half], group_names[half:]
+
     rows = []
     for case in CASES:
         keep_source = np.ones(source.shape[0], dtype=bool)
@@ -200,6 +227,9 @@ def main() -> None:
             keep_target = target_groups != unmatched
         elif case == "population_emerged":
             keep_source = source_groups != unmatched
+        elif case == "populations_disjoint":
+            keep_source = np.isin(source_groups, source_only)
+            keep_target = np.isin(target_groups, target_only)
 
         pair_id = f"N{args.n_cells}_rep{args.replicate}_{args.level}_{case}"
         directory = args.out / pair_id
@@ -218,12 +248,22 @@ def main() -> None:
         # opposite of the side the removal was applied to.
         source_kept = source_groups[keep_source]
         target_kept = target_groups[keep_target]
-        source_reject = (source_kept == unmatched
-                         if case == "population_lost"
-                         else np.zeros(source_kept.size, dtype=bool))
-        target_reject = (target_kept == unmatched
-                         if case == "population_emerged"
-                         else np.zeros(target_kept.size, dtype=bool))
+        if case == "populations_disjoint":
+            # No cell on either side has a match, so every cell should be
+            # rejected on both. This is the only case where the correct
+            # answer is a rate of 1.0 rather than a subset, and it is the
+            # only one that can catch a method which always finds something:
+            # the other three leave a true match available, so a gate that
+            # never rejects still scores on part of them.
+            source_reject = np.ones(source_kept.size, dtype=bool)
+            target_reject = np.ones(target_kept.size, dtype=bool)
+        else:
+            source_reject = (source_kept == unmatched
+                             if case == "population_lost"
+                             else np.zeros(source_kept.size, dtype=bool))
+            target_reject = (target_kept == unmatched
+                             if case == "population_emerged"
+                             else np.zeros(target_kept.size, dtype=bool))
         truth = pd.concat([
             pd.DataFrame({"side": "source", "group": source_kept,
                           "should_reject": source_reject}),

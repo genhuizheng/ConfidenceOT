@@ -63,6 +63,11 @@ allow_shared_seed=${CONFIDENCEOT_BENCH_ALLOW_SHARED_SEED:-0}
 rank_top_n=${CONFIDENCEOT_BENCH_RANK_TOP_N:-256}
 base_seed=${CONFIDENCEOT_BENCH_SEED:-20260925}
 force=${CONFIDENCEOT_BENCH_FORCE:-0}
+# Rebuild the biological cases from counts already on disk, without re-running
+# Splatter. Adding a case changes what 20_build_conditions.py writes and not
+# what the generator drew; the seeds are fixed, so a full --force would
+# reproduce the identical counts at the cost of 45 Splatter runs.
+rebuild_cases=${CONFIDENCEOT_BENCH_REBUILD_CASES:-0}
 task=${SLURM_ARRAY_TASK_ID:?Submit as an array over sizes x replicates x levels}
 
 levels=(L0_matched L1_depth L2_depth_dropout)
@@ -86,7 +91,8 @@ generated=$root/generated/N${n_cells}/rep${replicate}/${level}
 conditions=$root/conditions/N${n_cells}/rep${replicate}/${level}
 mkdir -p "$root/logs" "$generated" "$conditions"
 
-if [[ "$force" != "1" && -f "$conditions/CONSTRUCTION_DONE" ]]; then
+if [[ "$force" != "1" && "$rebuild_cases" != "1" \
+      && -f "$conditions/CONSTRUCTION_DONE" ]]; then
     echo "N=$n_cells rep=$replicate $level already built; skipping"
     exit 0
 fi
