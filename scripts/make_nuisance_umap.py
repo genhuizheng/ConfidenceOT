@@ -17,9 +17,9 @@ cannot touch it, because the totals it would divide by already agree.
 Two figures are written. ``problem.png`` puts the embedding one wants beside
 the embedding one gets, for each nuisance. ``benchmark.png`` states the
 setting the method is scored in: counts, an OT coupling, a rejection gate and
-the mask that is correct, in the case where the same populations are in both
-samples and in the case where one is missing from the target. The coupling and
-the gate there are drawn, not run.
+the mask that is correct, in three cases: the same populations in both
+samples, one population missing from the target, and no population in common
+at all. The coupling and the gate there are drawn, not run.
 
 Usage:
 
@@ -312,11 +312,20 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
     and nFeature are not separable -- moving the library size moves detection
     with it, and dropout moves both again.
 
-    (b) is not a second pipeline drawn over again. It is the pair of
-    ground-truth regimes the same framework is evaluated under: one where the
-    biology is shared and nothing should be rejected, and one where a
-    population exists on one side only and just those cells should be. The
-    example gates are drawn, not run; they are there so the comparison has
+    (b) is not a second pipeline drawn over again. It is the ground-truth
+    regimes the same framework is evaluated under: one where the biology is
+    shared and nothing should be rejected, one where a population exists on
+    one side only and just those cells should be, and one where the two sides
+    share no population at all and every cell should be.
+
+    The third is there for a failure the first two cannot see. Both of them
+    leave a true match available, so a method that always finds something
+    still scores on the part of them where finding something is right. With
+    nothing to find, anything reported is invented -- and the populations are
+    not far apart, so the nearest wrong one is still near. Its example gate is
+    drawn as that failure rather than as a near miss.
+
+    The example gates are drawn, not run; they are there so the comparison has
     something to compare against.
     """
     rng = np.random.default_rng(seed)
@@ -410,7 +419,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                     fontweight="semibold", ha="left", va="top")
 
         n = 48
-        case_w, case_x = 0.380, (0.165, 0.585)
+        case_w, case_x = 0.251, (0.165, 0.444, 0.723)
         gate_map = mpl.colors.ListedColormap([C_DROP, C_KEEP])
         unmatched = np.zeros(n, dtype=bool)
         unmatched[8:16] = True          # one population, cells sit together
@@ -420,14 +429,22 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
         unmatched_gate = ~unmatched
         unmatched_gate[[6, 7]] = False
         unmatched_gate[15] = True
+        # The third case's example gate is drawn as the failure it exists to
+        # catch: a block kept because the nearest wrong population is still
+        # near, on data where the right answer is to keep nothing at all.
+        disjoint_gate = np.zeros(n, dtype=bool)
+        disjoint_gate[20:28] = True
+        disjoint_gate[[5, 38]] = True
 
         for column, (title, gate, truth, reading) in enumerate((
                 ("Case 1: all populations shared", shared_gate,
                  np.ones(n, dtype=bool), "reject nothing"),
                 ("Case 2: one population unmatched", unmatched_gate,
-                 ~unmatched, "reject only that population"))):
+                 ~unmatched, "reject only that population"),
+                ("Case 3: no population shared", disjoint_gate,
+                 np.zeros(n, dtype=bool), "reject everything"))):
             x0 = case_x[column]
-            figure.text(x0, 0.527, title, fontsize=7.8,
+            figure.text(x0, 0.527, title, fontsize=7.2,
                         fontweight="semibold", ha="left", va="top")
             for line, values in enumerate((gate, truth)):
                 y = 0.475 - 0.040 * line
@@ -438,7 +455,7 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                 ("example gate", "ground truth")[line],
                                 fontsize=7.0, color="#55555a", ha="right",
                                 va="center")
-            figure.text(x0, 0.427, reading, fontsize=7.4,
+            figure.text(x0, 0.427, reading, fontsize=7.2,
                         color=C_KEEP if column == 0 else C_DROP,
                         ha="left", va="top")
 
