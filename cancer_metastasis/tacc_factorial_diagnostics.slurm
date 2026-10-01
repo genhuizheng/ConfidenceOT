@@ -86,8 +86,23 @@ PYDS
 )) || { echo "could not split the labels by equalisation" >&2; exit 2; }
 
 datasets=()
-ds_datasets=()
-depth_source=""
+# Equalised arms are kept per block, and so are their depth tables. Each
+# block's equalised counts were subsampled from that block's own cells by its
+# own run of 27_downsample_counts.py, so each block has its own
+# pre-equalisation depth table, and 25_diagnose_gate_covariates.py takes one
+# --predownsample-depth for a whole invocation.
+#
+# This used to be a single scalar overwritten inside the block loop. With one
+# block that is harmless. With two it is wrong: the glob visits blocks in
+# name order, the last one's table wins, and every other block's equalised
+# arms are joined against a table that does not contain their cells -- which
+# 25 refuses with "some cells are absent from the pre-downsampling depth
+# table". That is how the first run with a prostate block beside the uniform
+# one died two minutes in. Had 25 filled the gaps instead of refusing, the
+# result would have been worse than a crash: half the equalised arms scored
+# against another dataset's depths.
+declare -A ds_by_block=()
+declare -A depth_by_block=()
 missing=()
 blocks=()
 shopt -s nullglob
@@ -106,13 +121,9 @@ for block_dir in "$out"/*/; do
             # equalised arm's stored depth is nearly constant by
             # construction, so its AUC against it is trivially 0.5; the
             # question is whether the gate still tracks the depth the cell
-            # had before the correction, and 25_diagnose_gate_covariates.py
-            # takes one --predownsample-depth for a whole invocation. Hence
-            # two invocations rather than one.
+            # had before the correction.
             if [[ " ${ds_labels[*]} " == *" $label "* ]]; then
-                ds_datasets+=(--dataset "${block}__${label}=$block_dir$label")
-                [[ -f "$block_dir/PREDOWNSAMPLE_DEPTH" ]] && \
-                    depth_source=$(cat "$block_dir/PREDOWNSAMPLE_DEPTH")
+                ds_by_block[$block]+="$label "
             else
                 datasets+=(--dataset "${block}__${label}=$block_dir$label")
             fi
@@ -121,21 +132,35 @@ for block_dir in "$out"/*/; do
             missing+=("$block/$label")
         fi
     done
+    if [[ -n "${ds_by_block[$block]:-}" && -f "$block_dir/PREDOWNSAMPLE_DEPTH" ]]; then
+        depth_by_block[$block]=$(cat "$block_dir/PREDOWNSAMPLE_DEPTH")
+    fi
     (( seen > 0 )) && blocks+=("$block")
     echo "block $block: $seen of ${#labels[@]} arms have a gate"
 done
 if (( ${#missing[@]} > 0 )); then
     echo "no completed gate for: ${missing[*]}" >&2
 fi
-if (( ${#datasets[@]} == 0 && ${#ds_datasets[@]} == 0 )); then
+if (( ${#datasets[@]} == 0 && ${#ds_by_block[@]} == 0 )); then
     echo "not one arm produced a gate under scope_$scope/$budget_tag" >&2
     exit 2
 fi
-if (( ${#ds_datasets[@]} > 0 )) && [[ -z "$depth_source" ]]; then
-    echo "equalised arms are present but no block recorded a depth table;" >&2
-    echo "  they would be scored against a depth the correction flattened" >&2
-    exit 2
-fi
+# Per block, because a block with no table must not borrow another's.
+for block in "${!ds_by_block[@]}"; do
+    if [[ -z "${depth_by_block[$block]:-}" ]]; then
+        echo "block $block has equalised arms but recorded no depth table;" >&2
+        echo "  they would be scored against a depth the correction flattened" >&2
+        exit 2
+    fi
+    echo "block $block: equalised arms scored against ${depth_by_block[$block]}"
+done
+ds_blocks=$(printf '%s\n' "${!ds_by_block[@]}" | sort)
+
+# The per-side directories are rebuilt from what is on disk, every run. A
+# directory left by a previous layout would otherwise sit beside the new one
+# and be read by nothing -- or, under a looser glob, by the pooling below.
+rm -rf "$out/diagnostics/source" "$out/diagnostics/target" \
+       "$out/diagnostics/source_ds" "$out/diagnostics/target_ds"
 
 for side in source target; do
     if (( ${#datasets[@]} > 0 )); then
@@ -148,17 +173,21 @@ for side in source target; do
             --method "$method" \
             --side "$side"
     fi
-    if (( ${#ds_datasets[@]} > 0 )); then
-        echo "===== $side, equalised counts, scored on pre-equalisation depth ====="
+    for block in $ds_blocks; do
+        block_args=()
+        for label in ${ds_by_block[$block]}; do
+            block_args+=(--dataset "${block}__${label}=$out/$block/$label")
+        done
+        echo "===== $side, $block, equalised counts, scored on its own pre-equalisation depth ====="
         python cancer_metastasis/25_diagnose_gate_covariates.py \
-            "$out/diagnostics/${side}_ds" \
-            "${ds_datasets[@]}" \
+            "$out/diagnostics/${side}_ds/$block" \
+            "${block_args[@]}" \
             --scope "scope_$scope" \
             --budget-tag "$budget_tag" \
             --method "$method" \
             --side "$side" \
-            --predownsample-depth "$depth_source"
-    fi
+            --predownsample-depth "${depth_by_block[$block]}"
+    done
 done
 
 python - "$out" <<'PY'
@@ -169,9 +198,20 @@ import numpy as np
 import pandas as pd
 
 root = Path(sys.argv[1])
+# One original-counts table per side, and one equalised table per side per
+# block, because each block's equalised arms were scored against that
+# block's own depth table.
+candidates = []
+for bare in ("source", "target"):
+    candidates.append(
+        (bare, False,
+         root / "diagnostics" / bare / "gate_covariate_pair_statistics.csv"))
+    candidates.extend(
+        (bare, True, path) for path in sorted(
+            (root / "diagnostics" / f"{bare}_ds").glob(
+                "*/gate_covariate_pair_statistics.csv")))
 frames = []
-for side in ("source", "source_ds", "target", "target_ds"):
-    path = root / "diagnostics" / side / "gate_covariate_pair_statistics.csv"
+for bare, equalised, path in candidates:
     if not path.exists():
         continue
     table = pd.read_csv(path)
@@ -179,14 +219,13 @@ for side in ("source", "source_ds", "target", "target_ds"):
     # --side it was given; the directory adds whether the arm ran on
     # equalised counts. Checked rather than assumed, because the two must
     # agree for the concatenation to mean anything.
-    bare = side.removesuffix("_ds")
     if "side" not in table:
         table.insert(0, "side", bare)
     elif not table["side"].astype(str).eq(bare).all():
         raise SystemExit(
             f"{path} carries sides {sorted(table['side'].unique())} but was "
             f"written for {bare}")
-    table["equalised"] = side.endswith("_ds")
+    table["equalised"] = equalised
     frames.append(table)
 if not frames:
     raise SystemExit("no per-side statistics to join")
