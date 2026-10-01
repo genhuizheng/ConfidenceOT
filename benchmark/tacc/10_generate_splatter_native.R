@@ -137,6 +137,11 @@ per_batch_lib_loc <- tryCatch({
   FALSE
 })
 
+# One parameter object to read the record off at the end. Both routes build
+# their own, and a record taken from whichever was last in scope would differ
+# between them for no reason a reader could see.
+reference_params <- base_params(c(n_cells, n_cells))
+
 assertions <- list(gene_means_identical = NA, groups_identical = NA,
                    group_de_identical = NA, group_de_worst_abs_diff = NA,
                    group_de_columns = NA, groups_on_both_sides = NA,
@@ -349,7 +354,23 @@ record <- c(
     batch_fac_scale = 0,
     independent_realization = TRUE,
     splatter_version = as.character(packageVersion("splatter")),
-    r_version = R.version.string
+    r_version = R.version.string,
+    # Read back off the object rather than restated, so the record is what
+    # Splatter was holding and not what this script believes it set. Every
+    # one of these is newSplatParams()'s default here; that is a weaker claim
+    # than an estimate from real data and is recorded so it reads as one.
+    n_genes = getParam(reference_params, "nGenes"),
+    de_prob = getParam(reference_params, "de.prob"),
+    de_fac_loc = getParam(reference_params, "de.facLoc"),
+    de_fac_scale = getParam(reference_params, "de.facScale"),
+    bcv_common = getParam(reference_params, "bcv.common"),
+    bcv_df = getParam(reference_params, "bcv.df"),
+    mean_rate = getParam(reference_params, "mean.rate"),
+    mean_shape = getParam(reference_params, "mean.shape"),
+    out_prob = getParam(reference_params, "out.prob"),
+    out_fac_loc = getParam(reference_params, "out.facLoc"),
+    out_fac_scale = getParam(reference_params, "out.facScale"),
+    group_prob = getParam(reference_params, "group.prob")
   )
 )
 writeLines(jsonlite::toJSON(record, auto_unbox = TRUE, pretty = TRUE,
