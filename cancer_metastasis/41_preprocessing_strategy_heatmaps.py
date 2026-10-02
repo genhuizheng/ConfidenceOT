@@ -70,12 +70,16 @@ GSEA_KEY, GSEA_VALUE, GSEA_FDR = "pathway", "NES", "fdr"
 # and are a bit-for-bit identity with rank alone; with the equalisation axis
 # there are eight of them, and tests/test_benchmark_identity.py asserts the
 # identity rather than this figure pretending to show it.
-STEMS = ("raw", "logcpm", "ranknm256")
+#
+# rank256 is a normalisation of its own: it divides each gene by its nonzero
+# median over both sides before ranking, which ranknm256 does not. Without it
+# here its eight arms fell to the bottom of the figure in read order.
+STEMS = ("raw", "logcpm", "rank256", "ranknm256")
 TAGS = (("noscale", "scale_genes"), ("ds", "equalise_depth"), ("cos", "cosine"))
 
 
 def factorial_order() -> list[str]:
-    """The twenty-four expressible labels, ordered by the factorial."""
+    """The thirty-two labels, ordered by the factorial."""
     order = []
     for stem in STEMS:
         for bits in range(8):
