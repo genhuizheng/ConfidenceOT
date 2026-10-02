@@ -98,15 +98,22 @@ if (( ${#labels[@]} == 0 )); then
     exit 2
 fi
 
+# Several arms per task: the job reads its node's core count and runs the
+# pseudobulk of every (arm, patient) it owns in one pool, so a task with four
+# arms costs one job against the cap rather than four.
+arms_per_task=${ARMS_PER_TASK:-4}
+tasks=$(( (${#labels[@]} + arms_per_task - 1) / arms_per_task ))
+
 queued=0
 [[ -z "${DRY_RUN:-}" ]] && queued=$(squeue -u "$USER" -p "$partition" -h -r 2>/dev/null | wc -l) || true
-if (( queued + ${#labels[@]} > cap )); then
-    echo "refusing: ${#labels[@]} tasks with $queued already queued on $partition is over $cap" >&2
+if (( queued + tasks > cap )); then
+    echo "refusing: $tasks tasks with $queued already queued on $partition is over $cap" >&2
     exit 3
 fi
 
 echo "dataset      $dataset ($accession), block $block"
 echo "arms         ${#labels[@]} with a gate${absent:+, absent: ${absent[*]}}"
+echo "tasks        $tasks, $arms_per_task arms each"
 echo "manifest     $source (original counts)"
 echo "lesion size  $size_csv"
 echo "gene sets    $gmt"
@@ -122,13 +129,14 @@ export_list+=",CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCES
 export_list+=",CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=$source,CONFIDENCEOT_METASTASIS_SIZE_CSV=$size_csv"
 export_list+=",CONFIDENCEOT_DOWNSTREAM_ROOT=$out_root,CONFIDENCEOT_HUMAN_GMT=$gmt"
 export_list+=",CONFIDENCEOT_FACTORIAL_LABELS=${labels[*]}"
+export_list+=",CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=$arms_per_task"
 if [[ -n "$malignant_column" ]]; then
     export_list+=",CONFIDENCEOT_MALIGNANT_COLUMN=$malignant_column"
 else
     export_list+=",CONFIDENCEOT_MALIGNANT_ANNOTATIONS=$annotations"
 fi
 
-command=(sbatch --parsable --partition="$partition" --array=0-$(( ${#labels[@]} - 1 ))
+command=(sbatch --parsable --partition="$partition" --array=0-$(( tasks - 1 ))
          --export="$export_list" "$repo/cancer_metastasis/tacc_factorial_downstream.slurm")
 if [[ -n "${DRY_RUN:-}" ]]; then
     echo
@@ -136,7 +144,7 @@ if [[ -n "${DRY_RUN:-}" ]]; then
 else
     job=$("${command[@]}" | tail -n 1 | tr -dc '0-9_')
     echo
-    echo "submitted    $job (array 0-$(( ${#labels[@]} - 1 )))"
+    echo "submitted    $job (array 0-$(( tasks - 1 )), $arms_per_task arms per task)"
 fi
 
 echo

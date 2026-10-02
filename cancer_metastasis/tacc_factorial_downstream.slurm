@@ -3,7 +3,6 @@
 #SBATCH -p gg
 #SBATCH -N 1
 #SBATCH -n 1
-#SBATCH -c 16
 #SBATCH -t 12:00:00
 #SBATCH -A MCB26031
 #SBATCH -o /scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results/logs/factdeg_%A_%a.out
@@ -85,35 +84,37 @@ if (( ${#labels[@]} == 0 )); then
     exit 2
 fi
 
+# ---- which arms this task owns ---------------------------------------------
+# Several arms per task, because one arm per task left a node doing one
+# patient at a time. The arms of one task share the node and, more usefully,
+# its page cache: every arm reads the same ORIGINAL counts for a patient and
+# differs only in which gate it joins, so the pseudobulk below runs patient by
+# patient across the arms and the reads after the first are served from memory
+# rather than from Lustre.
+#
+# The core count is read off the node. No -c is requested: the node is
+# allocated whole either way, and a number written here would only be a guess
+# at what the node already says.
+arms_per_task=${CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK:-4}
+cores=${CONFIDENCEOT_DOWNSTREAM_CORES:-$(nproc)}
+threads_per_worker=${CONFIDENCEOT_DOWNSTREAM_THREADS_PER_WORKER:-4}
+workers=${CONFIDENCEOT_DOWNSTREAM_WORKERS:-$(( cores / threads_per_worker ))}
+(( workers < 1 )) && workers=1
+
 task=${SLURM_ARRAY_TASK_ID:?submit as an array over the labels}
-if (( task >= ${#labels[@]} )); then
-    echo "task $task is past the ${#labels[@]} labels; nothing to do"
+first=$(( task * arms_per_task ))
+if (( first >= ${#labels[@]} )); then
+    echo "task $task starts at arm $first, past the ${#labels[@]} labels; nothing to do"
     exit 0
 fi
-label=${labels[$task]}
-gate=$factorial/$block/$label
-out=$out_root/$block/$accession/$label
-trimmed=$out/manifest_trimmed.csv
-four_state=$out/four_state
-deg=$out/deg
-gsea=$out/gsea
+mine=("${labels[@]:first:arms_per_task}")
 
 echo "block      $block"
 echo "accession  $accession"
-echo "label      $label"
-echo "gate       $gate"
+echo "arms       ${mine[*]}"
 echo "manifest   $source_manifest (original counts)"
 echo "gene sets  $gmt"
-echo "out        $out"
-
-if [[ ! -d "$gate" ]]; then
-    echo "no gate for this arm: $gate" >&2
-    exit 2
-fi
-if [[ "$force" != "1" && -f "$out/DONE" ]]; then
-    echo "already complete; set CONFIDENCEOT_DOWNSTREAM_FORCE=1 to redo"
-    exit 0
-fi
+echo "parallel   $workers pseudobulk workers x $threads_per_worker threads on $cores cores"
 
 # The compartment the pseudobulk uses must be the one the gate used, or a
 # patient's pseudobulk mixes two definitions of malignant.
@@ -136,59 +137,159 @@ fi
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"
-export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16 NUMEXPR_NUM_THREADS=16
 export PYTHONUNBUFFERED=1
-rm -rf "$four_state" "$deg" "$gsea"
-mkdir -p "$out" "$four_state" "$deg" "$gsea"
-
 stamp() { echo "===== $1 $(date --iso-8601=seconds) ====="; }
+# One arm's directory, recomputed from the label wherever it is needed, so a
+# background job never reads a path left in a variable by the loop that
+# launched it.
+arm_dir() { echo "$out_root/$block/$accession/$1"; }
+fail_arm() {
+    # $1 = label, rest = reason. The arm stops; the task carries on with the
+    # others, which share nothing with it but the node.
+    local label=$1
+    shift
+    echo "$*" >> "$(arm_dir "$label")/FAILED"
+    echo "===== ARM FAILED $label: $* =====" >&2
+}
 
-stamp "trim"
-python cancer_metastasis/35_trim_manifest_to_gate.py \
-    "$source_manifest" "$trimmed" --gate-root "$gate" --dataset-id "$accession"
-
-stamp "pseudobulk"
-patients=$(python cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py \
-    "$trimmed" "$gate" "$four_state" --print-patient-count "${extra[@]}")
-echo "patients   $patients"
-# Anything but a positive integer here -- a warning printed to stdout, an
-# empty trim -- would make the loop below run zero times in silence, and the
-# DEG would then fit an empty cohort and the arm would be marked DONE.
-if ! [[ "$patients" =~ ^[0-9]+$ ]] || (( patients < 1 )); then
-    echo "patient count is not a positive integer: '$patients'" >&2
-    echo "  the trimmed manifest may hold no pairs of $accession gated by $label" >&2
-    exit 2
+# ---- 1. per arm: trim and count -------------------------------------------
+declare -A patients_of=()
+active=()
+for label in "${mine[@]}"; do
+    out=$(arm_dir "$label")
+    gate=$factorial/$block/$label
+    if [[ "$force" != "1" && -f "$out/DONE" ]]; then
+        echo "$label already complete; set CONFIDENCEOT_DOWNSTREAM_FORCE=1 to redo"
+        continue
+    fi
+    rm -rf "$out"
+    mkdir -p "$out/four_state" "$out/deg" "$out/gsea" "$out/logs"
+    if [[ ! -d "$gate" ]]; then
+        fail_arm "$label" "no gate at $gate"
+        continue
+    fi
+    stamp "trim $label"
+    if ! python cancer_metastasis/35_trim_manifest_to_gate.py \
+        "$source_manifest" "$out/manifest_trimmed.csv" \
+        --gate-root "$gate" --dataset-id "$accession" > "$out/logs/trim.log" 2>&1; then
+        fail_arm "$label" "trim failed, see $out/logs/trim.log"
+        continue
+    fi
+    count=$(OMP_NUM_THREADS=1 python cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py \
+        "$out/manifest_trimmed.csv" "$gate" "$out/four_state" --print-patient-count "${extra[@]}" \
+        2> "$out/logs/count.log") || count=""
+    # Anything but a positive integer -- a warning printed to stdout, an empty
+    # trim -- would make the pseudobulk run zero patients in silence, the DEG
+    # would fit an empty cohort, and the arm would be marked DONE.
+    if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count < 1 )); then
+        fail_arm "$label" "patient count is not a positive integer: '$count'; the trim may hold no pairs of $accession gated by $label"
+        continue
+    fi
+    patients_of[$label]=$count
+    active+=("$label")
+    echo "$label: $count patients"
+done
+if (( ${#active[@]} == 0 )); then
+    echo "no arm of this task has work to do"
+    for label in "${mine[@]}"; do [[ -f "$(arm_dir "$label")/FAILED" ]] && exit 1; done
+    exit 0
 fi
-failures=0
-for (( index = 0; index < patients; index++ )); do
-    if ! python cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py \
-        "$trimmed" "$gate" "$four_state" --index "$index" "${extra[@]}"; then
-        failures=$(( failures + 1 ))
-        echo "  patient $index failed" >&2
+
+# ---- 2. pseudobulk, every (arm, patient) in one pool, patient by patient ---
+pseudobulk_one() {
+    local label=$1 index=$2
+    local out
+    out=$(arm_dir "$label")
+    if ! OMP_NUM_THREADS=$threads_per_worker OPENBLAS_NUM_THREADS=$threads_per_worker \
+         MKL_NUM_THREADS=$threads_per_worker NUMEXPR_NUM_THREADS=$threads_per_worker \
+         python cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py \
+            "$out/manifest_trimmed.csv" "$factorial/$block/$label" "$out/four_state" \
+            --index "$index" "${extra[@]}" > "$out/logs/patient_${index}.log" 2>&1; then
+        # A missing patient does not make the DEG fail: it is silently absent
+        # from the fit. So any patient failing stops its arm before the DEG.
+        echo "$index" >> "$out/PSEUDOBULK_FAILED"
+    fi
+}
+stamp "pseudobulk ${#active[@]} arms"
+most=0
+for label in "${active[@]}"; do (( patients_of[$label] > most )) && most=${patients_of[$label]}; done
+for (( index = 0; index < most; index++ )); do
+    for label in "${active[@]}"; do
+        (( index < patients_of[$label] )) || continue
+        pseudobulk_one "$label" "$index" &
+        while (( $(jobs -rp | wc -l) >= workers )); do
+            wait -n || true
+        done
+    done
+done
+wait || true
+
+ready=()
+for label in "${active[@]}"; do
+    failed_file=$(arm_dir "$label")/PSEUDOBULK_FAILED
+    if [[ -s "$failed_file" ]]; then
+        fail_arm "$label" "$(wc -l < "$failed_file") of ${patients_of[$label]} patients failed to pseudobulk; not fitting a partial cohort (patients: $(tr '\n' ' ' < "$failed_file"))"
+    else
+        ready+=("$label")
     fi
 done
-# A missing patient does not make the DEG fail: it is silently absent from the
-# fit. So a failure here stops the arm rather than producing a result that
-# looks complete and is not.
-if (( failures > 0 )); then
-    echo "$failures of $patients patients failed to pseudobulk; not fitting a partial cohort" >&2
-    exit 1
+
+# ---- 3 and 4. DEG, then GSEA, the arms side by side ------------------------
+# The cores are shared between the arms still standing, so two arms left get
+# half the node each rather than a quarter with the rest idle.
+share=$cores
+(( ${#ready[@]} > 0 )) && share=$(( cores / ${#ready[@]} ))
+(( share < 1 )) && share=1
+
+deg_one() {
+    local label=$1 out
+    out=$(arm_dir "$label")
+    if ! OMP_NUM_THREADS=$share OPENBLAS_NUM_THREADS=$share MKL_NUM_THREADS=$share NUMEXPR_NUM_THREADS=$share \
+        python cancer_metastasis/13_run_paired_pydeseq2.py \
+            "$out/four_state" "$out/deg" \
+            --minimum-cells-per-patient-status "$minimum_cells" \
+            --minimum-total-count 10 \
+            --maximum-fdr 0.05 \
+            --absolute-log2-fold-change-thresholds 0.5 1.0 \
+            --n-cpus "$share" > "$out/logs/deg.log" 2>&1; then
+        fail_arm "$label" "paired DEG failed, see $out/logs/deg.log"
+    fi
+}
+gsea_one() {
+    local label=$1 out
+    out=$(arm_dir "$label")
+    [[ -f "$out/FAILED" ]] && return 0
+    if ! OMP_NUM_THREADS=$share OPENBLAS_NUM_THREADS=$share MKL_NUM_THREADS=$share NUMEXPR_NUM_THREADS=$share \
+        python cancer_metastasis/15_run_pydeseq2_gseapy.py \
+            "$out/deg" "$gmt" "$out/gsea" \
+            --permutations 2000 --threads "$share" --minimum-size 10 --maximum-size 500 \
+            > "$out/logs/gsea.log" 2>&1; then
+        fail_arm "$label" "GSEA failed, see $out/logs/gsea.log"
+    fi
+}
+
+if (( ${#ready[@]} > 0 )); then
+    stamp "paired DEG ${#ready[@]} arms, $share cores each"
+    for label in "${ready[@]}"; do deg_one "$label" & done
+    wait || true
+    stamp "GSEA, hallmark, ${#ready[@]} arms"
+    for label in "${ready[@]}"; do gsea_one "$label" & done
+    wait || true
 fi
 
-stamp "paired DEG"
-python cancer_metastasis/13_run_paired_pydeseq2.py \
-    "$four_state" "$deg" \
-    --minimum-cells-per-patient-status "$minimum_cells" \
-    --minimum-total-count 10 \
-    --maximum-fdr 0.05 \
-    --absolute-log2-fold-change-thresholds 0.5 1.0 \
-    --n-cpus 16
-
-stamp "GSEA, hallmark"
-python cancer_metastasis/15_run_pydeseq2_gseapy.py \
-    "$deg" "$gmt" "$gsea" \
-    --permutations 2000 --threads 16 --minimum-size 10 --maximum-size 500
-
-printf 'block=%s\naccession=%s\nlabel=%s\ngate=%s\ngene_sets=%s\npatients=%s\n' \
-    "$block" "$accession" "$label" "$gate" "$gmt" "$patients" > "$out/DONE"
-stamp "done"
+# ---- per arm: DONE, or the reason it is not --------------------------------
+failed_any=0
+for label in "${mine[@]}"; do
+    out=$(arm_dir "$label")
+    if [[ -f "$out/FAILED" ]]; then
+        failed_any=1
+        echo "$label: FAILED -- $(tail -1 "$out/FAILED")"
+    elif [[ -n "${patients_of[$label]:-}" ]]; then
+        printf 'block=%s\naccession=%s\nlabel=%s\ngate=%s\ngene_sets=%s\npatients=%s\n' \
+            "$block" "$accession" "$label" "$factorial/$block/$label" "$gmt" \
+            "${patients_of[$label]}" > "$out/DONE"
+        echo "$label: done, ${patients_of[$label]} patients"
+    fi
+done
+stamp "task finished"
+exit $failed_any

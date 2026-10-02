@@ -282,11 +282,36 @@ if [[ "$scope" == "malignant" ]]; then
     fi
 fi
 
-failures=0
-failed_rows=()
-for (( index = worker; index < pairs; index += workers )); do
+# Several pairs at once. This loop used to run one pair at a time, each solve
+# using solver_workers cores for its calibration on a job that had asked for
+# 72 -- an eighth of the node. The pairs are independent and write to their
+# own directories, so they now run cores / solver_workers at a time.
+#
+# fit_many parallelises with threads, not processes, so a pair already has
+# solver_workers threads doing NumPy. With several pairs running, each gets one
+# BLAS thread: nine pairs of eight solver threads is 72 threads on 72 cores,
+# where the inherited OMP_NUM_THREADS would have put several hundred there.
+# One pair at a time keeps the thread count it always had.
+pair_parallel=${CONFIDENCEOT_FACTORIAL_PAIR_PARALLEL:-$(( ${SLURM_CPUS_PER_TASK:-72} / solver_workers ))}
+(( pair_parallel < 1 )) && pair_parallel=1
+pair_threads=$OMP_NUM_THREADS
+(( pair_parallel > 1 )) && pair_threads=1
+# Each pair's own log, because nine solvers printing into one file interleave
+# into something nobody can read. The START, COMPLETE and FAILED lines still go
+# to the task's log, and a failure copies the end of its pair log to stderr so
+# the traceback is where it was always looked for.
+pair_logs=$result/logs/fact_${SLURM_ARRAY_JOB_ID:-local}_${SLURM_ARRAY_TASK_ID:-0}
+mkdir -p "$pair_logs"
+failed_file=$(mktemp)
+echo "$label worker $worker: $pair_parallel pairs at a time, $pair_threads BLAS thread(s) each, logs in $pair_logs"
+
+run_pair() {
+    local index=$1
+    local log=$pair_logs/${label}_${index}.log
     echo "===== START $label index=$index $(date --iso-8601=seconds) ====="
-    if python cancer_metastasis/02_run_pair.py "$manifest" "$output_root" \
+    if OMP_NUM_THREADS=$pair_threads OPENBLAS_NUM_THREADS=$pair_threads \
+       MKL_NUM_THREADS=$pair_threads NUMEXPR_NUM_THREADS=$pair_threads \
+       python cancer_metastasis/02_run_pair.py "$manifest" "$output_root" \
         --index "$index" \
         "${scope_args[@]}" \
         "${allow[@]}" \
@@ -304,21 +329,31 @@ for (( index = worker; index < pairs; index += workers )); do
         --calibration-grid-size 5 \
         --tolerance 1e-4 \
         --workers "$solver_workers" \
-        --device "$device"; then
+        --device "$device" > "$log" 2>&1; then
         echo "===== COMPLETE $label index=$index $(date --iso-8601=seconds) ====="
     else
-        status=$?
-        failures=$(( failures + 1 ))
-        failed_rows+=("$index:$status")
+        local status=$?
+        echo "$index:$status" >> "$failed_file"
         # To stdout as well as stderr. A failure written only to stderr sits
         # in a different file from the unit lines, and an array whose tasks
         # all "finished" is how twelve labels of nothing got mistaken for
         # twelve labels of results once already.
-        echo "===== FAILED $label index=$index exit=$status $(date --iso-8601=seconds) ====="
-        echo "===== FAILED $label index=$index exit=$status =====" >&2
+        echo "===== FAILED $label index=$index exit=$status $(date --iso-8601=seconds) log=$log ====="
+        { echo "===== FAILED $label index=$index exit=$status ====="; tail -20 "$log"; } >&2
     fi
-done
+}
 
+for (( index = worker; index < pairs; index += workers )); do
+    run_pair "$index" &
+    while (( $(jobs -rp | wc -l) >= pair_parallel )); do
+        wait -n || true
+    done
+done
+wait || true
+
+failures=$(wc -l < "$failed_file")
+failed_rows=($(cat "$failed_file"))
+rm -f "$failed_file"
 echo "$label worker $worker finished with $failures failed pair(s)"
 if (( failures > 0 )); then
     echo "failed rows: ${failed_rows[*]}"

@@ -162,33 +162,65 @@ ds_blocks=$(printf '%s\n' "${!ds_by_block[@]}" | sort)
 rm -rf "$out/diagnostics/source" "$out/diagnostics/target" \
        "$out/diagnostics/source_ds" "$out/diagnostics/target_ds"
 
+# Every invocation below is independent -- each writes its own directory -- so
+# they run at once instead of one after another: two sides times one
+# original-counts table and one equalised table per block. They used to run
+# in sequence under set -e, so the first failure ended the job with the rest
+# never attempted. Now every one runs, each to its own log, and the job stops
+# before the pooling if any failed: pooling around a missing table would
+# write a summary that looks complete and is not.
+diag_logs=$out/diagnostics/logs
+mkdir -p "$diag_logs"
+diag_failed=$(mktemp)
+diagnose() {
+    local what=$1 log=$2
+    shift 2
+    echo "===== START $what $(date --iso-8601=seconds) ====="
+    if OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+        python cancer_metastasis/25_diagnose_gate_covariates.py "$@" > "$log" 2>&1; then
+        echo "===== COMPLETE $what $(date --iso-8601=seconds) ====="
+    else
+        echo "$what" >> "$diag_failed"
+        echo "===== FAILED $what, log $log ====="
+        { echo "===== FAILED $what ====="; tail -20 "$log"; } >&2
+    fi
+}
+
 for side in source target; do
     if (( ${#datasets[@]} > 0 )); then
-        echo "===== $side, original counts ====="
-        python cancer_metastasis/25_diagnose_gate_covariates.py \
+        diagnose "$side, original counts" "$diag_logs/${side}.log" \
             "$out/diagnostics/$side" \
             "${datasets[@]}" \
             --scope "scope_$scope" \
             --budget-tag "$budget_tag" \
             --method "$method" \
-            --side "$side"
+            --side "$side" &
     fi
     for block in $ds_blocks; do
         block_args=()
         for label in ${ds_by_block[$block]}; do
             block_args+=(--dataset "${block}__${label}=$out/$block/$label")
         done
-        echo "===== $side, $block, equalised counts, scored on its own pre-equalisation depth ====="
-        python cancer_metastasis/25_diagnose_gate_covariates.py \
+        diagnose "$side, $block, equalised counts on its own pre-equalisation depth" \
+            "$diag_logs/${side}_ds_${block}.log" \
             "$out/diagnostics/${side}_ds/$block" \
             "${block_args[@]}" \
             --scope "scope_$scope" \
             --budget-tag "$budget_tag" \
             --method "$method" \
             --side "$side" \
-            --predownsample-depth "${depth_by_block[$block]}"
+            --predownsample-depth "${depth_by_block[$block]}" &
     done
 done
+wait || true
+
+if [[ -s "$diag_failed" ]]; then
+    echo "$(wc -l < "$diag_failed") diagnostic run(s) failed, so nothing is pooled:" >&2
+    cat "$diag_failed" >&2
+    rm -f "$diag_failed"
+    exit 1
+fi
+rm -f "$diag_failed"
 
 python - "$out" <<'PY'
 import sys
