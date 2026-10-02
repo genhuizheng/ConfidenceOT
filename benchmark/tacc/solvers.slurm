@@ -56,6 +56,12 @@ seed=${CONFIDENCEOT_BENCH_SEED:-20260925}
 epsilon=${CONFIDENCEOT_BENCH_EPSILON:-0.1}
 reg_m=${CONFIDENCEOT_SOLVER_REG_M:-1.0}
 uot_method=${CONFIDENCEOT_SOLVER_UOT_METHOD:-sinkhorn_stabilized}
+# Partial OT's transported mass, one or several values. Empty runs the
+# runner's own sweep; "0.85" is the single value of the earlier Splatter
+# comparison, 1 minus its 15% rejection budget.
+partial_mass=${CONFIDENCEOT_SOLVER_PARTIAL_MASS:-}
+mass_args=()
+for value in $partial_mass; do mass_args+=(--partial-mass "$value"); done
 force=${CONFIDENCEOT_SOLVER_FORCE:-0}
 
 cd "$repo"
@@ -108,6 +114,7 @@ echo "label       $label"
 echo "work list   $worklist"
 echo "seed        $seed"
 echo "uot method  $uot_method"
+echo "partial m   ${partial_mass:-the default sweep}"
 
 failures=0
 for (( unit = start; unit < stop; unit++ )); do
@@ -127,7 +134,8 @@ for (( unit = start; unit < stop; unit++ )); do
         --seed "$seed" \
         --epsilon "$epsilon" \
         --reg-m "$reg_m" \
-        --uot-method "$uot_method"; then
+        --uot-method "$uot_method" \
+        "${mass_args[@]}"; then
         echo "===== COMPLETE $pair_id $(date --iso-8601=seconds) ====="
     else
         status=$?
