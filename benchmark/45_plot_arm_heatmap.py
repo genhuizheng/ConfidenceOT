@@ -123,6 +123,30 @@ def build_matrix(table: pd.DataFrame) -> tuple[np.ndarray, list[tuple[str, str, 
     return values, columns
 
 
+def undefined_reason(table: pd.DataFrame, values: np.ndarray) -> str:
+    """Name the cause of the grey cells, but only if every one of them has it.
+
+    The one cause seen so far: in every run behind the cell the gate kept no
+    source cell, so no target cell has a kept partner and the target's cost
+    has nothing to be measured against -- the correlation is undefined, not
+    zero. That is checked per cell rather than assumed, and if any grey cell
+    has another cause the legend says only that it is undefined.
+    """
+    reasons = []
+    for i, j in zip(*np.where(np.isnan(values))):
+        _group, _title, case, _column, _transform = READOUTS[j // len(LEVELS)]
+        level = LEVELS[j % len(LEVELS)][0]
+        runs = table[(table["preprocessing"] == ARMS[i])
+                     & (table["biological_case"] == case)
+                     & (table["technical_level"] == level)]
+        every_source_rejected = (len(runs) > 0 and bool(
+            (runs["source_rejected_n"] == runs["source_cells_n"]).all()))
+        reasons.append(every_source_rejected)
+    if reasons and all(reasons):
+        return "undefined: every\nsource cell rejected,\nso the target has\nnothing to measure\nagainst"
+    return "undefined"
+
+
 def main() -> None:
     args = parse_args()
     table = pd.read_csv(args.metrics_csv)
@@ -142,7 +166,7 @@ def main() -> None:
 
     n_rows, n_cols = values.shape
     cell_w, cell_h = 0.38, 0.235
-    left, right, top, bottom = 2.25, 1.15, 1.85, 1.05
+    left, right, top, bottom = 2.25, 1.55, 1.85, 1.05
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -227,17 +251,21 @@ def main() -> None:
     bar.ax.tick_params(labelsize=6.6, colors=MUTED, length=2)
     bar.outline.set_visible(False)
     bar.set_label("error (0 = ideal)", fontsize=7.0, color=INK)
+    # The note can run to five lines, so it is centred on a swatch set well
+    # above the colour bar rather than hung below one sitting on top of it.
+    bar_top = bottom + min(2.6, n_rows * cell_h)
+    swatch_y = bar_top + 0.62
     swatch = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w,
-                           (bottom + min(2.6, n_rows * cell_h) + 0.25) / fig_h,
-                           0.13 / fig_w, 0.13 / fig_h])
+                           swatch_y / fig_h, 0.13 / fig_w, 0.13 / fig_h])
     swatch.set_facecolor(UNDEFINED)
     swatch.set_xticks([])
     swatch.set_yticks([])
     for spine in swatch.spines.values():
         spine.set_visible(False)
     fig.text((left + n_cols * cell_w + 0.52) / fig_w,
-             (bottom + min(2.6, n_rows * cell_h) + 0.315) / fig_h,
-             "undefined", fontsize=6.6, color=MUTED, va="center")
+             (swatch_y + 0.065) / fig_h,
+             undefined_reason(table, values), fontsize=6.4, color=MUTED,
+             va="center", linespacing=1.1)
 
     for suffix in ("png", "pdf"):
         fig.savefig(args.output_dir / f"arm_error_heatmap.{suffix}", dpi=220)
