@@ -24,7 +24,24 @@ checkable: the run records ``cost_scale``, ``cost_median`` and ``cost_max``
 in run.json, and this file rebuilds the cost and refuses to continue unless
 all three agree. A silent geometry mismatch would make every comparison here
 meaningless while looking entirely normal, so it is an error rather than a
-warning.
+warning. It runs before any solver does, since at N = 10,000 the POT solvers
+take the better part of an hour and a wrong matrix would waste all of it.
+
+To pass that check the cost is rebuilt along the runner's own path, not a
+copy of it: the sides through ``load_exact_side``, every field of the label
+forwarded to ``prepare_joint_representation`` (``equalise_depth`` included,
+without which a _ds label rebuilds itself under the name of the arm without
+it), the PCA seeded with ``seed + index`` and the scale drawn from
+``default_rng(seed + index * 104729)``, with the seed the runs were made with.
+The truth tables of the conditions name no cells; they are in the h5ad's
+order, as ``40_score.py`` reads them, so the gate is aligned on the files'
+own cell names.
+
+**The EMD solvers must reach the optimum.** Traditional OT and Partial OT are
+network simplex, and POT stops it at 100,000 iterations unless told
+otherwise -- well short of the optimum at N = 10,000. A plan cut off there is
+not the method's answer, so the cap is lifted out of the way and a plan POT
+does not report as optimal fails the pair.
 
 **POT's partial OT does not give a binary score.** This repository's own
 ``traditional_ot.partial`` solves an exact cardinality matching, so every
@@ -50,6 +67,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -87,7 +105,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scope", default="all")
     parser.add_argument("--n-hvg", type=int, default=2000)
     parser.add_argument("--n-pcs", type=int, default=30)
-    parser.add_argument("--seed", type=int, default=20260101)
+    parser.add_argument(
+        "--seed", type=int, default=20260925,
+        help="The seed the ConfidenceOT runs were made with: ot_array.slurm's "
+             "CONFIDENCEOT_BENCH_SEED, whose default this is. The PCA and the "
+             "cost scale are both drawn from it, so any other seed builds a "
+             "different matrix and the geometry check refuses it.")
     parser.add_argument("--epsilon", type=float, default=0.10)
     parser.add_argument("--reg-m", type=float, default=1.0,
                         help="Vanilla UOT's marginal penalty, POT's reg_m")
@@ -106,49 +129,74 @@ def parse_args() -> argparse.Namespace:
         "--partial-mass", type=float, action="append", default=None,
         help="Transported mass for Partial OT; repeat to sweep. Default "
              "0.99 0.95 0.90 0.85 0.80 0.70.")
-    parser.add_argument("--max-iterations", type=int, default=20_000)
+    parser.add_argument("--max-iterations", type=int, default=20_000,
+                        help="Sinkhorn iterations for Vanilla UOT")
+    parser.add_argument(
+        "--emd-iterations", type=int, default=1_000_000_000,
+        help="Network-simplex iteration cap for Traditional OT and Partial OT. "
+             "It only has to be large enough never to bind: the solver stops "
+             "at the optimum. POT's own default of 100,000 stops well short "
+             "of it at N = 10,000, and a Partial OT plan cut off there puts "
+             "mass on the dummy point that the optimum would not, which "
+             "changes which cells it rejects.")
     return parser.parse_args()
 
 
+def side_paths(row: pd.Series, side: str) -> list[str]:
+    """The files of one side, read the way 02_run_pair.py reads them."""
+    column = f"{side}_h5ads_json"
+    if column in row and pd.notna(row[column]):
+        return [str(value) for value in json.loads(str(row[column]))]
+    return [str(row[f"{side}_h5ad"])]
+
+
 def geometry(row: pd.Series, args: argparse.Namespace):
-    """The representation and cost, built the way 02_run_pair.py builds them."""
-    import anndata as ad
-    from common import prepare_joint_representation
+    """The representation and cost, built the way 02_run_pair.py builds them.
+
+    Every step is the runner's own call with the runner's own arguments: the
+    sides through ``load_exact_side``, every field of the configuration
+    forwarded, the PCA seeded with ``seed + index`` and the scale drawn from
+    ``default_rng(seed + index * 104729)``. Rebuilt any other way the matrix
+    comes out close but not equal, and the geometry check below is there to
+    refuse exactly that. Returns the cost with both sides' cell names, in the
+    order of the files, which is the order of the truth table.
+    """
+    from common import load_exact_side, prepare_joint_representation
+    from confidenceot import squared_euclidean
     from confidenceot.preprocessing import Preprocessing, median_pair_scale
 
     configuration = Preprocessing.from_label(args.preprocessing)
-    source = ad.read_h5ad(str(row["source_h5ad"]))
-    target = ad.read_h5ad(str(row["target_h5ad"]))
+    source = load_exact_side(side_paths(row, "source"), str(row["source_sample"]))
+    target = load_exact_side(side_paths(row, "target"), str(row["target_sample"]))
+    names = {"source": source.obs_names.astype(str).tolist(),
+             "target": target.obs_names.astype(str).tolist()}
     source_pca, target_pca, _, recorded = prepare_joint_representation(
         source, target, n_hvg=args.n_hvg, n_pcs=args.n_pcs,
         seed=args.seed + args.index,
         representation=configuration.normalisation,
         rank_top_n=configuration.rank_top_n,
         cost=configuration.cost,
+        # Recorded rather than applied: a _ds label reads counts that
+        # 27_downsample_counts.py already equalised, and the flag is what
+        # lets the representation carry the label's real name.
+        equalise_depth=configuration.equalise_depth,
+        regress_out=configuration.regress_out,
+        regress_on_ranks=configuration.regress_on_ranks,
         scale_genes=configuration.scale_genes,
         label_stem=configuration.label_stem,
         allow_precomputed=args.preprocessing.startswith("raw"),
     )
     built = recorded.get("label")
-    if built is not None and built != args.preprocessing:
+    if built != args.preprocessing:
         raise SystemExit(
             f"asked for {args.preprocessing} and the representation rebuilt "
             f"itself as {built}")
-    source_pca = np.asarray(source_pca, dtype=np.float64)
-    target_pca = np.asarray(target_pca, dtype=np.float64)
-    # cost='cosine' means the rows are L2-normalised before the distance and
-    # before the scale, so the factor of two cancels and the cost is
-    # (1 - cos) / median(1 - cos). Done here exactly as the library does it,
-    # which the recorded scale then confirms.
-    if configuration.cost == "cosine":
-        from confidenceot.preprocessing import unit_rows
-        source_pca = unit_rows(source_pca)
-        target_pca = unit_rows(target_pca)
-    difference = source_pca[:, None, :] - target_pca[None, :, :]
-    cost = np.einsum("ijk,ijk->ij", difference, difference)
-    scale = median_pair_scale(source_pca, target_pca,
-                              seed=args.seed + args.index)
-    return cost / scale, float(scale)
+    # cost='cosine' has already L2-normalised the rows inside
+    # prepare_joint_representation, before the scale, as in the runner.
+    rng = np.random.default_rng(args.seed + args.index * 104729)
+    scale = median_pair_scale(source_pca, target_pca, rng=rng)
+    cost = squared_euclidean(source_pca, target_pca) / scale
+    return np.asarray(cost, dtype=np.float64), float(scale), names
 
 
 def check_geometry(cost: np.ndarray, scale: float, run_directory: Path) -> dict:
@@ -210,22 +258,47 @@ def main() -> None:
     truth = pd.read_csv(row["truth_csv"])
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    cost, scale = geometry(row, args)
+    cost, scale, names = geometry(row, args)
     n, m = cost.shape
     a, b = np.full(n, 1.0 / n), np.full(m, 1.0 / m)
-    sides = {}
+    sides, ids = {}, {}
     for side, expected in (("source", n), ("target", m)):
         block = truth[truth["side"].eq(side)]
         if len(block) != expected:
             raise SystemExit(
                 f"{side}: {len(block)} truth rows against {expected} cells")
         sides[side] = block["should_reject"].to_numpy(dtype=bool)
+        # The conditions' truth tables carry no cell names: they are written
+        # in the h5ad's order, as 40_score.py reads them. Named or not, the
+        # names used below are the files' own.
+        if ("observation_id" in block
+                and block["observation_id"].astype(str).tolist() != names[side]):
+            raise SystemExit(
+                f"{side}: the truth table names its cells in another order "
+                f"than the h5ad")
+        ids[side] = names[side]
 
     masses = args.partial_mass or [0.99, 0.95, 0.90, 0.85, 0.80, 0.70]
     scored = []
     provenance = {"pair_id": pair_id, "preprocessing": args.preprocessing,
-                  "cost_scale": scale, "n_source": int(n), "n_target": int(m),
-                  "pot_version": ot.__version__}
+                  "seed": args.seed, "cost_scale": scale, "n_source": int(n),
+                  "n_target": int(m), "pot_version": ot.__version__}
+
+    # Before any solver runs: the POT solvers take hours at N = 10,000, and a
+    # cost that is not the run's would make all of it worthless.
+    run_directory = None
+    if args.confidenceot_root is not None:
+        found = sorted((args.confidenceot_root / pair_id /
+                        f"scope_{args.scope}").glob("budget_*"))
+        ran = [path for path in found
+               if (path / "cell_confidence.csv").exists()]
+        if not ran:
+            raise SystemExit(
+                f"no completed ConfidenceOT run under "
+                f"{args.confidenceot_root / pair_id}")
+        run_directory = ran[-1]
+        provenance["geometry_check"] = check_geometry(cost, scale, run_directory)
+        provenance["confidenceot_run"] = str(run_directory)
 
     def add(method: str, plan=None, gate=None, score=None,
             kind="mass_deficit") -> None:
@@ -248,10 +321,20 @@ def main() -> None:
                     f"score_{method.replace(' ', '_').replace('=', '')}"
                     f"_{side}.npy", result.score)
 
-    add("Traditional OT", plan=ot.emd(a, b, cost, numItermax=args.max_iterations))
-    vanilla = ot.unbalanced.sinkhorn_unbalanced(
+    plan, record = ot.emd(a, b, cost, numItermax=args.emd_iterations, log=True)
+    # result_code 1 is POT's "optimal". Anything else is a plan the network
+    # simplex stopped on, and it is not the method's answer.
+    provenance["traditional_ot"] = {"result_code": int(record["result_code"]),
+                                    "warning": record["warning"]}
+    if int(record["result_code"]) != 1:
+        raise SystemExit(f"Traditional OT did not reach the optimum: "
+                         f"{record['warning']}")
+    add("Traditional OT", plan=plan)
+    del plan
+    vanilla, record = ot.unbalanced.sinkhorn_unbalanced(
         a, b, cost, reg=args.epsilon, reg_m=args.reg_m,
-        method=args.uot_method, numItermax=args.max_iterations)
+        method=args.uot_method, numItermax=args.max_iterations, log=True)
+    errors = record.get("err", [])
     # A solver that underflowed returns a plan carrying almost no mass, and
     # every cell then reads as unmatched. That is a failure to report, not a
     # rejection rate to publish, so it is recorded and flagged rather than
@@ -260,6 +343,8 @@ def main() -> None:
         "method": args.uot_method,
         "transported_mass": float(vanilla.sum()),
         "finite": bool(np.isfinite(vanilla).all()),
+        "error_checks": len(errors),
+        "last_error": float(errors[-1]) if len(errors) else None,
     }
     if not np.isfinite(vanilla).all() or vanilla.sum() < 1e-3:
         provenance["vanilla_uot"]["degenerate"] = True
@@ -267,41 +352,33 @@ def main() -> None:
               f"{vanilla.sum():.3g} total mass; its rejection rate is a "
               f"solver failure, not a result")
     add("Vanilla UOT", plan=vanilla)
+    del vanilla
     for mass in masses:
-        add(f"Partial OT m={mass:.2f}",
-            plan=ot.partial.partial_wasserstein(a, b, cost, m=float(mass)))
+        try:
+            plan = ot.partial.partial_wasserstein(
+                a, b, cost, m=float(mass), numItermax=args.emd_iterations)
+        except ValueError as error:
+            # POT raises this for any warning from the EMD inside, including
+            # the iteration cap, whatever the message says about dummies.
+            raise SystemExit(f"Partial OT m={mass:.2f}: {error}") from error
+        add(f"Partial OT m={mass:.2f}", plan=plan)
+        del plan
 
-    if args.confidenceot_root is not None:
-        found = sorted((args.confidenceot_root / pair_id /
-                        f"scope_{args.scope}").glob("budget_*"))
-        ran = [path for path in found
-               if (path / "cell_confidence.csv").exists()]
-        if not ran:
-            raise SystemExit(
-                f"no completed ConfidenceOT run under "
-                f"{args.confidenceot_root / pair_id}")
-        run_directory = ran[-1]
-        provenance["geometry_check"] = check_geometry(cost, scale, run_directory)
-        provenance["confidenceot_run"] = str(run_directory)
-        index = {side: truth[truth["side"].eq(side)]["observation_id"]
-                 .astype(str).tolist() for side in ("source", "target")
-                 if "observation_id" in truth}
-        if len(index) == 2:
-            stored = confidenceot_from_disk(run_directory, index)
-            add("ConfidenceOT M4-E",
-                gate={side: stored[side]["gate"] for side in stored},
-                score={side: stored[side]["score"] for side in stored},
-                kind="decision_cost")
-        else:
-            print("the truth table has no observation_id, so the stored gate "
-                  "cannot be aligned to it; ConfidenceOT is left out")
+    if run_directory is not None:
+        stored = confidenceot_from_disk(run_directory, ids)
+        add("ConfidenceOT M4-E",
+            gate={side: stored[side]["gate"] for side in stored},
+            score={side: stored[side]["score"] for side in stored},
+            kind="decision_cost")
 
-    frame = summary_frame(scored)
+    # Both helpers read .summary; the records carry the pair and the label
+    # besides, so they are wrapped rather than rebuilt from the SideScores.
+    wrapped = [SimpleNamespace(summary=record) for record in scored]
+    frame = summary_frame(wrapped)
     frame.to_csv(args.output_dir / "solver_comparison.csv", index=False)
     (args.output_dir / "provenance.json").write_text(
         json.dumps(provenance, indent=2), encoding="utf-8")
-    print(summary_table([type("S", (), {"summary": record})()
-                         for record in scored]))
+    print(summary_table(wrapped))
     print()
     print(f"wrote {args.output_dir / 'solver_comparison.csv'}")
 
