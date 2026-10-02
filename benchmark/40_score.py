@@ -101,13 +101,38 @@ def readouts(path: str) -> pd.DataFrame:
         index=pd.Index(data.obs_names.astype(str), name="observation_id"))
 
 
+COUPLING_COLUMNS = ("same_population_mass", "coupling_nuisance_rho",
+                    "transported_mass", "asserted_mass", "false_asserted_mass",
+                    "asserted_same_population_fraction")
+
+
 def coupling_metrics(plan: np.ndarray, source_group: np.ndarray,
                      target_group: np.ndarray, source_value: np.ndarray,
-                     target_value: np.ndarray) -> dict:
+                     target_value: np.ndarray, source_kept: np.ndarray,
+                     target_kept: np.ndarray) -> dict:
+    """What the transport did, and separately what the gate stands behind.
+
+    ``same_population_mass`` is over the whole plan, and it describes the
+    backbone: where the transport put mass, gate or no gate. It is not what
+    ConfidenceOT asserts. The transport runs over every cell -- a rejected
+    one pays the rejection cost instead of its own -- so a rejected cell still
+    carries mass, and on the disjoint case most of the plan is exactly that:
+    rejected sources sending mass into retained targets. Scoring the whole
+    plan charges the method for mass it explicitly disowned.
+
+    What it does assert is the block between retained cells on both sides.
+    ``false_asserted_mass`` is the cross-population mass inside that block,
+    and its ideal is 0 in every case: nothing wrong asserted when everything
+    is shared, the unmatched population not asserted when one is missing, and
+    nothing at all when nothing is shared. That makes it the one metric that
+    reads the disjoint case correctly. Rejecting every source cell empties the
+    block whatever the target gate says, so a one-sided reject-all is a
+    complete answer here rather than half of one, and a rate-based reading
+    that demands both sides reach 1.0 marks it wrong.
+    """
     mass = plan.sum()
     if mass <= 0 or plan.shape != (source_group.size, target_group.size):
-        return {"same_population_mass": float("nan"),
-                "coupling_nuisance_rho": float("nan")}
+        return {name: float("nan") for name in COUPLING_COLUMNS}
     # Mass carried from each source population to each target population,
     # as one population-by-population table; the same-population mass is its
     # diagonal. This replaced a boolean mask the size of the plan, built from
@@ -121,11 +146,24 @@ def coupling_metrics(plan: np.ndarray, source_group: np.ndarray,
     source_onehot = (source_group[:, None] == labels[None, :]).astype(np.float64)
     target_onehot = (target_group[:, None] == labels[None, :]).astype(np.float64)
     by_population = source_onehot.T @ plan @ target_onehot
+    # The same table restricted to retained cells on both sides: zeroing a
+    # rejected cell's one-hot row removes its mass from every entry.
+    kept_by_population = (
+        (source_onehot * source_kept[:, None]).T
+        @ plan
+        @ (target_onehot * target_kept[:, None]))
+    asserted = float(kept_by_population.sum())
+    asserted_same = float(np.trace(kept_by_population))
     row = plan.sum(axis=1)
     centre = np.where(row > 0, plan @ target_value / np.where(row > 0, row, 1.0),
                       np.nan)
     return {"same_population_mass": float(np.trace(by_population) / mass),
-            "coupling_nuisance_rho": correlation(source_value, centre)}
+            "coupling_nuisance_rho": correlation(source_value, centre),
+            "transported_mass": float(mass),
+            "asserted_mass": asserted,
+            "false_asserted_mass": asserted - asserted_same,
+            "asserted_same_population_fraction": (
+                asserted_same / asserted if asserted > 0 else float("nan"))}
 
 
 def diagnostics(run: Path) -> dict:
@@ -155,6 +193,7 @@ def score_pair(run: Path, truth: pd.DataFrame, row: pd.Series) -> list[dict]:
         record: dict = {"method": str(method)}
         group_of: dict[str, np.ndarray] = {}
         value_of: dict[str, np.ndarray] = {}
+        kept_of: dict[str, np.ndarray] = {}
         for side in ("source", "target"):
             cells = block[block["side"] == side]
             answer = truth[truth["side"] == side]
@@ -180,6 +219,7 @@ def score_pair(run: Path, truth: pd.DataFrame, row: pd.Series) -> list[dict]:
             detected = joined["detected_genes"].to_numpy(dtype=float)
             group_of[side] = answer["group"].to_numpy()
             value_of[side] = total
+            kept_of[side] = retained.astype(np.float64)
 
             matched = ~should_reject
             record[f"{side}_false_rejection_rate"] = float(
@@ -209,10 +249,10 @@ def score_pair(run: Path, truth: pd.DataFrame, row: pd.Series) -> list[dict]:
                 plan = np.asarray(handle["coupling"], dtype=np.float64)
             record.update(coupling_metrics(
                 plan, group_of["source"], group_of["target"],
-                value_of["source"], value_of["target"]))
+                value_of["source"], value_of["target"],
+                kept_of["source"], kept_of["target"]))
         else:
-            record.update({"same_population_mass": float("nan"),
-                           "coupling_nuisance_rho": float("nan")})
+            record.update({name: float("nan") for name in COUPLING_COLUMNS})
         record.update(summary)
         rows.append(record)
     return rows
