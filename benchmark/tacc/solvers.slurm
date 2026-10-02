@@ -44,7 +44,17 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}
 worklist=${CONFIDENCEOT_BENCH_WORKLIST:-$root/worklist_1000_5000_10000.csv}
 label=${CONFIDENCEOT_SOLVER_LABEL:?Set CONFIDENCEOT_SOLVER_LABEL to the locked configuration}
-out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers/$label}
+# 1 runs only Oracle-budget Partial OT (50_solver_comparison.py
+# --oracle-budget), into its own tree so it can never be read as one of the
+# usable methods.
+oracle_budget=${CONFIDENCEOT_SOLVER_ORACLE_BUDGET:-0}
+mode_args=()
+if [[ "$oracle_budget" == "1" ]]; then
+    mode_args=(--oracle-budget)
+    out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers_oracle_budget/$label}
+else
+    out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers/$label}
+fi
 # Empty means every size in the work list; "1000 5000" runs those alone, so
 # the small sizes can come back before the N = 10,000 pairs are queued.
 sizes=${CONFIDENCEOT_SOLVER_SIZES:-}
@@ -135,7 +145,7 @@ for (( unit = start; unit < stop; unit++ )); do
         --epsilon "$epsilon" \
         --reg-m "$reg_m" \
         --uot-method "$uot_method" \
-        "${mass_args[@]}"; then
+        "${mass_args[@]}" "${mode_args[@]}"; then
         echo "===== COMPLETE $pair_id $(date --iso-8601=seconds) ====="
     else
         status=$?

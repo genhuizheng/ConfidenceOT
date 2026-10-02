@@ -129,6 +129,13 @@ def parse_args() -> argparse.Namespace:
         "--partial-mass", type=float, action="append", default=None,
         help="Transported mass for Partial OT; repeat to sweep. Default "
              "0.99 0.95 0.90 0.85 0.80 0.70.")
+    parser.add_argument(
+        "--oracle-budget", action="store_true",
+        help="Run only Partial OT, at the budget read off the truth: m = 1 in "
+             "all_shared, 1 minus the unmatched mass fraction of the side that "
+             "has it in population_lost and population_emerged, 0 in "
+             "populations_disjoint. An upper-bound analysis, written as its own "
+             "solver; give it its own output directory.")
     parser.add_argument("--max-iterations", type=int, default=20_000,
                         help="Sinkhorn iterations for Vanilla UOT")
     parser.add_argument(
@@ -321,55 +328,73 @@ def main() -> None:
                     f"score_{method.replace(' ', '_').replace('=', '')}"
                     f"_{side}.npy", result.score)
 
-    plan, record = ot.emd(a, b, cost, numItermax=args.emd_iterations, log=True)
-    # result_code 1 is POT's "optimal". Anything else is a plan the network
-    # simplex stopped on, and it is not the method's answer.
-    provenance["traditional_ot"] = {"result_code": int(record["result_code"]),
-                                    "warning": record["warning"]}
-    if int(record["result_code"]) != 1:
-        raise SystemExit(f"Traditional OT did not reach the optimum: "
-                         f"{record['warning']}")
-    add("Traditional OT", plan=plan)
-    del plan
-    vanilla, record = ot.unbalanced.sinkhorn_unbalanced(
-        a, b, cost, reg=args.epsilon, reg_m=args.reg_m,
-        method=args.uot_method, numItermax=args.max_iterations, log=True)
-    errors = record.get("err", [])
-    # A solver that underflowed returns a plan carrying almost no mass, and
-    # every cell then reads as unmatched. That is a failure to report, not a
-    # rejection rate to publish, so it is recorded and flagged rather than
-    # scored in silence.
-    provenance["vanilla_uot"] = {
-        "method": args.uot_method,
-        "transported_mass": float(vanilla.sum()),
-        "finite": bool(np.isfinite(vanilla).all()),
-        "error_checks": len(errors),
-        "last_error": float(errors[-1]) if len(errors) else None,
-    }
-    if not np.isfinite(vanilla).all() or vanilla.sum() < 1e-3:
-        provenance["vanilla_uot"]["degenerate"] = True
-        print(f"WARNING: the unbalanced solver returned "
-              f"{vanilla.sum():.3g} total mass; its rejection rate is a "
-              f"solver failure, not a result")
-    add("Vanilla UOT", plan=vanilla)
-    del vanilla
-    for mass in masses:
+    if args.oracle_budget:
+        # The budget read off the truth: the mass Partial OT would have to be
+        # told to leave behind. Only the simulation knows it, so this is an
+        # upper-bound analysis and never a method; nothing else is run with it.
+        case = str(row["biological_case"])
+        m = {"all_shared": 1.0, "populations_disjoint": 0.0,
+             "population_lost": 1.0 - float(sides["source"].mean()),
+             "population_emerged": 1.0 - float(sides["target"].mean())}[case]
+        provenance["oracle_budget"] = {"biological_case": case, "m": m}
         try:
             plan = ot.partial.partial_wasserstein(
-                a, b, cost, m=float(mass), numItermax=args.emd_iterations)
+                a, b, cost, m=m, numItermax=args.emd_iterations)
         except ValueError as error:
-            # POT raises this for any warning from the EMD inside, including
-            # the iteration cap, whatever the message says about dummies.
-            raise SystemExit(f"Partial OT m={mass:.2f}: {error}") from error
-        add(f"Partial OT m={mass:.2f}", plan=plan)
+            raise SystemExit(f"Oracle-budget Partial OT m={m:.4f}: {error}") from error
+        provenance["oracle_budget"]["transported_mass"] = float(plan.sum())
+        add("Oracle-budget Partial OT", plan=plan)
         del plan
+    else:
+        plan, record = ot.emd(a, b, cost, numItermax=args.emd_iterations, log=True)
+        # result_code 1 is POT's "optimal". Anything else is a plan the network
+        # simplex stopped on, and it is not the method's answer.
+        provenance["traditional_ot"] = {"result_code": int(record["result_code"]),
+                                        "warning": record["warning"]}
+        if int(record["result_code"]) != 1:
+            raise SystemExit(f"Traditional OT did not reach the optimum: "
+                             f"{record['warning']}")
+        add("Traditional OT", plan=plan)
+        del plan
+        vanilla, record = ot.unbalanced.sinkhorn_unbalanced(
+            a, b, cost, reg=args.epsilon, reg_m=args.reg_m,
+            method=args.uot_method, numItermax=args.max_iterations, log=True)
+        errors = record.get("err", [])
+        # A solver that underflowed returns a plan carrying almost no mass, and
+        # every cell then reads as unmatched. That is a failure to report, not a
+        # rejection rate to publish, so it is recorded and flagged rather than
+        # scored in silence.
+        provenance["vanilla_uot"] = {
+            "method": args.uot_method,
+            "transported_mass": float(vanilla.sum()),
+            "finite": bool(np.isfinite(vanilla).all()),
+            "error_checks": len(errors),
+            "last_error": float(errors[-1]) if len(errors) else None,
+        }
+        if not np.isfinite(vanilla).all() or vanilla.sum() < 1e-3:
+            provenance["vanilla_uot"]["degenerate"] = True
+            print(f"WARNING: the unbalanced solver returned "
+                  f"{vanilla.sum():.3g} total mass; its rejection rate is a "
+                  f"solver failure, not a result")
+        add("Vanilla UOT", plan=vanilla)
+        del vanilla
+        for mass in masses:
+            try:
+                plan = ot.partial.partial_wasserstein(
+                    a, b, cost, m=float(mass), numItermax=args.emd_iterations)
+            except ValueError as error:
+                # POT raises this for any warning from the EMD inside, including
+                # the iteration cap, whatever the message says about dummies.
+                raise SystemExit(f"Partial OT m={mass:.2f}: {error}") from error
+            add(f"Partial OT m={mass:.2f}", plan=plan)
+            del plan
 
-    if run_directory is not None:
-        stored = confidenceot_from_disk(run_directory, ids)
-        add("ConfidenceOT M4-E",
-            gate={side: stored[side]["gate"] for side in stored},
-            score={side: stored[side]["score"] for side in stored},
-            kind="decision_cost")
+        if run_directory is not None:
+            stored = confidenceot_from_disk(run_directory, ids)
+            add("ConfidenceOT M4-E",
+                gate={side: stored[side]["gate"] for side in stored},
+                score={side: stored[side]["score"] for side in stored},
+                kind="decision_cost")
 
     # Both helpers read .summary; the records carry the pair and the label
     # besides, so they are wrapped rather than rebuilt from the SideScores.

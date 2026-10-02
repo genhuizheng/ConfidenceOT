@@ -63,7 +63,7 @@ ARMS = ["ranknm256_noscale_ds_cos", "ranknm256_noscale_cos", "raw"]
 # (name in solver_comparison.csv, name on the figure), in the figure's order.
 SOLVERS = [("ConfidenceOT M4-E", "ConfidenceOT"), ("Vanilla UOT", "Vanilla UOT"),
            ("Partial OT m=0.85", "Partial OT (m = 0.85)"),
-           ("Traditional OT", "Traditional OT")]
+           ("Traditional OT", "Balanced OT")]
 CASES = ("all_shared", "population_lost", "population_emerged", "populations_disjoint")
 PAIR = re.compile(r"^N(\d+)_rep(\d+)_(L\d_[a-z_]+?)_(" + "|".join(CASES) + r")$")
 # The side directional F1 is read on, as the earlier benchmark chose it.
@@ -231,13 +231,14 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
                 fontsize=7.2, fontweight="semibold", color=INK)
 
     fig.text(0.3 / fig_w, 1 - 0.18 / fig_h,
-             "Rejected fraction for each solver and preprocessing arm",
+             "Fixed operating point: rejected fraction for each solver and arm",
              fontsize=10.5, fontweight="semibold", color=INK, va="top")
     over = ("mean over 3 sizes x 5 replicates" if complete else
             "mean over the pairs that finished (15 per cell when complete)")
     fig.text(0.3 / fig_w, 1 - 0.42 / fig_h,
-             f"Native-depth simulation, {over}. ConfidenceOT by its M4-E gate; the POT "
-             "solvers reject a cell that transports less than half its mass.",
+             f"Native-depth simulation, {over}. ConfidenceOT by its M4-E gate; UOT and "
+             "Partial OT reject a cell with more than half its mass untransported; Balanced "
+             "OT transports all of it.",
              fontsize=7.4, color=MUTED, va="top")
     fig.text(0.3 / fig_w, 1 - 0.62 / fig_h,
              "Ground truth under each column: 0 = those cells all have a match and "
@@ -310,7 +311,7 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
     fig.legend(handles=handles, frameon=False, fontsize=7.4, ncol=3,
                loc="upper left", bbox_to_anchor=(0.08, 0.835))
     pairs = int(summary["count"].max()) if summary["count"].notna().any() else 0
-    fig.text(0.09, 0.97, "Directional F1 for each solver and preprocessing arm",
+    fig.text(0.09, 0.97, "Fixed operating point: directional F1 for each solver and arm",
              fontsize=10.5, fontweight="semibold", color=INK, va="top")
     fig.text(0.09, 0.915,
              "F1 of rejection on the side holding the cells to reject: the source in "
