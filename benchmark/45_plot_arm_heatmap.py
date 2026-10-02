@@ -81,10 +81,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("metrics_csv", type=Path)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--method", default="M4-E")
-    parser.add_argument("--best", default="ranknm256_noscale_ds_cos",
-                        help="Arm to mark as best in this simulation")
-    parser.add_argument("--current", default="rank256_ds_cos",
-                        help="Arm to mark as the current default")
+    # No arm is marked. On these 24 columns every arm is Pareto-undominated,
+    # and "best" changes with the criterion -- the smallest worst-case error and
+    # the smallest mean error pick different arms -- so a mark would be a
+    # judgement printed as a finding. --mark outlines an arm without naming it
+    # best; say what the outline means in the caption that goes with it.
+    parser.add_argument("--mark", action="append", default=[],
+                        help="Outline this arm's row; may be repeated")
     return parser.parse_args()
 
 
@@ -127,7 +130,7 @@ def main() -> None:
 
     n_rows, n_cols = values.shape
     cell_w, cell_h = 0.30, 0.235
-    left, right, top, bottom = 3.30, 1.15, 1.55, 0.55
+    left, right, top, bottom = 2.25, 1.15, 1.55, 0.55
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -144,21 +147,7 @@ def main() -> None:
     ax.set_ylim(n_rows, 0)
     ax.set_xticks([])
     ax.set_yticks(np.arange(n_rows) + 0.5)
-    labels = []
-    for arm in ARMS:
-        note = ""
-        if arm == args.best:
-            note = "   best in simulation"
-        elif arm == args.current:
-            note = "   current default"
-        labels.append(arm + note)
-    ax.set_yticklabels(labels, fontsize=7.4, color=INK)
-    for tick, arm in zip(ax.get_yticklabels(), ARMS):
-        if arm == args.best:
-            tick.set_fontweight("bold")
-        elif arm == args.current:
-            tick.set_color(MUTED)
-            tick.set_fontstyle("italic")
+    ax.set_yticklabels(ARMS, fontsize=7.4, color=INK)
     ax.tick_params(axis="y", length=0, pad=4)
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -169,9 +158,13 @@ def main() -> None:
     for boundary in range(len(LEVELS), n_cols, len(LEVELS)):
         ax.axvline(boundary, color="#ffffff", linewidth=4.5)
 
-    # Outline the two marked rows so they can be followed across the figure.
-    for arm, style in ((args.best, "-"), (args.current, "--")):
+    # Outline any row asked for, so it can be followed across the figure.
+    unknown = [arm for arm in args.mark if arm not in ARMS]
+    if unknown:
+        raise SystemExit(f"--mark names arms that are not in the factorial: {unknown}")
+    for arm in args.mark:
         i = ARMS.index(arm)
+        style = "-"
         # Above the separators, which would otherwise cut the outline into
         # pieces at every readout boundary.
         ax.add_patch(Rectangle((0, i), n_cols, 1, fill=False, edgecolor=INK,
