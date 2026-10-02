@@ -41,7 +41,9 @@ The matrices behind the figure are the ones
         --analysis ...
 
 --separate draws one figure per analysis instead of one with a panel each;
-give it --vmax so they share a scale.
+give it --vmax so they share a scale. --slide draws the same figure to sit on
+a 16:9 slide at its own size, so its type is as large on the slide as it is
+here: no header, which the slide's own text replaces, and shorter rows.
 """
 
 from __future__ import annotations
@@ -159,6 +161,10 @@ def parse_args() -> argparse.Namespace:
                              "drawing --separate, so the figures share one scale")
     parser.add_argument("--separate", action="store_true",
                         help="One figure per --analysis instead of one with a panel each")
+    parser.add_argument("--slide", action="store_true",
+                        help="Lay the figure out to sit on a 16:9 slide at its own size: no "
+                             "header, since the slide carries the title and the notes, and "
+                             "shorter rows. Writes <name>_slide.png beside the full figure")
     return parser.parse_args()
 
 
@@ -241,12 +247,13 @@ def main() -> None:
     panels = [load(item, spec["prefix"]) for item in args.analysis]
     for panel in panels:
         choose_features(panel, args)
+    suffix = "_slide" if args.slide else ""
     if args.separate:
         for panel in panels:
             slug = "".join(c if c.isalnum() else "_" for c in panel["title"].lower()).strip("_")
-            draw([panel], args, spec, f"retained_side_{args.readout}_{slug}")
+            draw([panel], args, spec, f"retained_side_{args.readout}_{slug}{suffix}")
     else:
-        draw(panels, args, spec, f"retained_side_{args.readout}")
+        draw(panels, args, spec, f"retained_side_{args.readout}{suffix}")
 
 
 def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) -> None:
@@ -256,20 +263,24 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
                   default=1.0)
     vmax = args.vmax if args.vmax is not None else largest
 
-    cell_w, cell_h = 0.24, 0.22
+    # Inches. On a slide the figure is shown at its own size, so the type sizes
+    # stay as they are and the rows and gaps shrink instead.
+    slide = args.slide
+    cell_w, cell_h = (0.165, 0.12) if slide else (0.24, 0.22)
     names = [display_name(f) for p in panels for f in p["features"]] or ["none"]
     left = max(1.6, 0.35 + 0.062 * max(len(name) for name in names))
-    count_w, right = 0.45, 1.05
+    count_w, right = 0.45, (0.8 if slide else 1.05)
     grid_w = n_arms * cell_w
     fig_w = left + grid_w + count_w + right
     text_x = 0.3
     chars = max(40, int((fig_w - text_x - 0.3) / 0.062))
-    wrapped = [part for line in header_lines(panels, args, spec)
-               for part in textwrap.wrap(line, chars)]
-    header_h = 0.40 + 0.135 * len(wrapped) + 0.1
-    title_h, retained_h, panel_gap = 0.58, 0.24, 0.22
+    wrapped = [] if slide else [part for line in header_lines(panels, args, spec)
+                                for part in textwrap.wrap(line, chars)]
+    header_h = 0.08 if slide else 0.40 + 0.135 * len(wrapped) + 0.1
+    title_h, retained_h, panel_gap = (0.36, 0.19, 0.07) if slide else (0.58, 0.24, 0.22)
     heights = [max(len(p["features"]), 1) * cell_h for p in panels]
-    strip_h = 0.22 + len(TAGS) * 0.17 + 0.2
+    strip_row, strip_bottom = (0.13, 0.12) if slide else (0.17, 0.2)
+    strip_h = 0.22 + len(TAGS) * strip_row + strip_bottom
     fig_h = header_h + sum(title_h + h + retained_h + panel_gap for h in heights) + strip_h
     fig = plt.figure(figsize=(fig_w, fig_h))
     cmap = LinearSegmentedColormap.from_list("retained", RAMP)
@@ -280,10 +291,11 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
         return fig.add_axes([x0 / fig_w, (fig_h - y_top - height) / fig_h,
                              width / fig_w, height / fig_h])
 
-    fig.text(text_x / fig_w, 1 - 0.15 / fig_h, spec["title"],
-             fontsize=10.5, fontweight="semibold", color=INK, va="top")
-    fig.text(text_x / fig_w, 1 - 0.40 / fig_h, "\n".join(wrapped),
-             fontsize=7.2, color=MUTED, va="top", linespacing=1.35)
+    if not slide:
+        fig.text(text_x / fig_w, 1 - 0.15 / fig_h, spec["title"],
+                 fontsize=10.5, fontweight="semibold", color=INK, va="top")
+        fig.text(text_x / fig_w, 1 - 0.40 / fig_h, "\n".join(wrapped),
+                 fontsize=7.2, color=MUTED, va="top", linespacing=1.35)
 
     y = header_h
     mesh, first_grid = None, None
@@ -292,10 +304,14 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
         subtitle = f"{panel['patients']} patients"
         if args.readout == "deg":
             subtitle += f", {panel['eligible']} genes with a dot in any arm"
-        fig.text(left / fig_w, 1 - (y + 0.06) / fig_h, panel["title"], fontsize=8.6,
-                 fontweight="semibold", color=INK, va="top")
-        fig.text(left / fig_w, 1 - (y + 0.24) / fig_h, subtitle, fontsize=7.0,
-                 color=MUTED, va="top")
+        if slide:
+            fig.text(left / fig_w, 1 - (y + 0.02) / fig_h, f"{panel['title']} ({subtitle})",
+                     fontsize=8.6, fontweight="semibold", color=INK, va="top")
+        else:
+            fig.text(left / fig_w, 1 - (y + 0.06) / fig_h, panel["title"], fontsize=8.6,
+                     fontweight="semibold", color=INK, va="top")
+            fig.text(left / fig_w, 1 - (y + 0.24) / fig_h, subtitle, fontsize=7.0,
+                     color=MUTED, va="top")
         y += title_h
         ax = axes_at(left, y, grid_w, height)
         values = ((-panel["effect"][features]).clip(lower=0).to_numpy(dtype=float).T
@@ -344,7 +360,7 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
 
     # The design strip: which options each column carries, under its normalisation.
     y += 0.02
-    sax = axes_at(left, y, grid_w, strip_h - 0.2)
+    sax = axes_at(left, y, grid_w, strip_h - strip_bottom)
     sax.set_xlim(0, n_arms)
     rows = 1 + len(TAGS)
     sax.set_ylim(rows, 0)
