@@ -275,7 +275,11 @@ if [[ "$stage" == "all" || "$stage" == "metrics" ]] || \
     depend=()
     [[ -n "$ot_id" && "$ot_id" != "DRYRUN" ]] && \
         depend=(--dependency=afterany:"$ot_id")
-    submit "scoring" "${depend[@]}" "${where[@]}" \
+    # --time reaches scoring as well as the OT array. It was kept off scoring
+    # on the grounds that scoring is fixed and small; it ran for three hours,
+    # and a dev queue's two-hour ceiling refuses its eight-hour request
+    # outright rather than trimming it.
+    submit "scoring" "${depend[@]}" "${where[@]}" "${wall[@]}" \
         --export=ALL,CONFIDENCEOT_BENCH_ROOT="$root",CONFIDENCEOT_REPO="$repo" \
         "$repo/benchmark/tacc/metrics.slurm" > /dev/null
 fi
