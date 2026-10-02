@@ -31,6 +31,9 @@ cells are the ones whose retained side looks different.
     python cancer_metastasis/43_retained_side_heatmap.py OUT_DIR --readout gsea \\
         --analysis "Ovarian GSE180661::<41_ output dir>::<downstream analysis dir>" \\
         --analysis ...
+
+Genes run to thirty columns a panel, so --separate draws one figure per
+analysis instead of one wide figure; give it --vmax so they share a scale.
 """
 
 from __future__ import annotations
@@ -79,7 +82,10 @@ def parse_args() -> argparse.Namespace:
                         help="deg: the dot also needs log2FC <= -this")
     parser.add_argument("--vmax", type=float, default=None,
                         help="Top of the colour scale; larger values saturate. "
-                             "Defaults to the largest value shown")
+                             "Defaults to the largest value shown. Pass it when "
+                             "drawing --separate, so the figures share one scale")
+    parser.add_argument("--separate", action="store_true",
+                        help="One figure per --analysis instead of one with a panel each")
     return parser.parse_args()
 
 
@@ -143,19 +149,65 @@ def main() -> None:
     panels = [load(item, spec["prefix"]) for item in args.analysis]
     for panel in panels:
         choose_columns(panel, args)
+    if args.separate:
+        for panel in panels:
+            slug = "".join(c if c.isalnum() else "_" for c in panel["title"].lower()).strip("_")
+            draw([panel], args, spec, f"retained_side_{args.readout}_{slug}")
+    else:
+        draw(panels, args, spec, f"retained_side_{args.readout}")
+
+
+def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict) -> list[str]:
+    if args.readout == "gsea":
+        dot_text = "Dot: FDR < 0.05."
+        columns_text = (f"Columns: pathways with a dot in at least {args.min_arms_fraction:.0%} "
+                        "of the arms.")
+    else:
+        dot_text = (f"Dot: FDR < 0.05 and at least {2 ** args.minimum_log2fc:g}-fold "
+                    "higher in retained.")
+        columns_text = (f"Columns: the genes with the most dots, at most {args.top}, ties by "
+                        "median log2FC.")
+    method = "paired PyDESeq2" + (", hallmark GSEA" if args.readout == "gsea" else "")
+    lines = [f"Primary rejected vs primary retained ({method}). Colour: -{spec['effect']} where it "
+             f"is higher in retained, white otherwise. {dot_text}",
+             f"{columns_text} Number under a name: arms with a dot. Right of a panel: the arm's "
+             "retained fraction."]
+    ties = [f"{p['title']}: {p['tie_note']}" for p in panels if p.get("tie_note")]
+    if ties:
+        lines.append("Cut at the last count shown -- " + "; ".join(ties))
+    return lines
+
+
+def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) -> None:
+    import textwrap
+
     n_arms = len(ARMS)
-    largest = max(float((-panel["effect"][panel["columns"]]).clip(lower=0).max().max())
-                  for panel in panels if panel["columns"])
+    shown = [p for p in panels if p["columns"]]
+    largest = max((float((-p["effect"][p["columns"]]).clip(lower=0).max().max()) for p in shown),
+                  default=1.0)
     vmax = args.vmax if args.vmax is not None else largest
 
     cell_w, cell_h = 0.27, 0.2
-    left, right, top, bottom = 2.0, 0.9, 3.35, 0.35
-    # Heights above the grid, in inches: the names rise to about 1.9, so the
-    # panel title sits above them and the figure title above that.
-    title_y, patients_y = -2.30 / cell_h, -2.08 / cell_h
+    left, right, bottom = 2.0, 0.9, 0.35
     gap, frac_w = 0.25, 0.42
     widths = [max(len(p["columns"]), 1) * cell_w for p in panels]
-    fig_w = left + sum(widths) + len(panels) * (frac_w + gap) + right
+    # A narrow panel still needs room for the header, which is wrapped to the
+    # width rather than allowed to run off the edge.
+    fig_w = max(6.5, left + sum(widths) + len(panels) * (frac_w + gap) + right)
+    text_x = 0.35
+    chars = max(40, int((fig_w - text_x - 0.3) / 0.062))
+    wrapped = [part for line in header_lines(panels, args, spec)
+               for part in textwrap.wrap(line, chars)]
+    # Heights above the grid, in inches. The rotated names rise as far as the
+    # longest one, so the panel title sits just above that rather than above
+    # room kept for pathway names when the columns are genes.
+    longest = max((len(f.replace("HALLMARK_", "")) for p in panels for f in p["columns"]),
+                  default=4)
+    names_top = 0.31 + 0.052 * longest
+    patients_in, title_in = names_top + 0.14, names_top + 0.36
+    header_bottom = 0.40 + 0.135 * len(wrapped)
+    top = header_bottom + 0.14 + title_in + 0.16
+    title_y, patients_y = -title_in / cell_h, -patients_in / cell_h
     fig_h = top + n_arms * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
     cmap = LinearSegmentedColormap.from_list("retained", RAMP)
@@ -212,30 +264,13 @@ def main() -> None:
                  rotation=90)
         x += width + frac_w + gap
 
-    if args.readout == "gsea":
-        dot_text = "Dot: FDR < 0.05."
-        columns_text = (f"Columns: pathways with a dot in at least {args.min_arms_fraction:.0%} "
-                        "of the arms.")
-    else:
-        dot_text = (f"Dot: FDR < 0.05 and at least {2 ** args.minimum_log2fc:g}-fold "
-                    "higher in retained.")
-        columns_text = f"Columns: the {args.top} genes with the most dots, ties by median log2FC."
-    fig.text(left / fig_w, 1 - 0.15 / fig_h, spec["title"],
+    fig.text(text_x / fig_w, 1 - 0.15 / fig_h, spec["title"],
              fontsize=10.5, fontweight="semibold", color=INK, va="top")
-    fig.text(left / fig_w, 1 - 0.40 / fig_h,
-             f"Primary rejected vs primary retained (paired PyDESeq2{', hallmark GSEA' if args.readout == 'gsea' else ''}). "
-             f"Colour: -{spec['effect']} where it is higher in retained, white otherwise. {dot_text}",
-             fontsize=7.2, color=MUTED, va="top")
-    fig.text(left / fig_w, 1 - 0.58 / fig_h,
-             f"{columns_text} Number under a name: arms with a dot. Right of a panel: the arm's "
-             "retained fraction.",
-             fontsize=7.2, color=MUTED, va="top")
-    ties = [f"{p['title']}: {p['tie_note']}" for p in panels if p.get("tie_note")]
-    if ties:
-        fig.text(left / fig_w, 1 - 0.76 / fig_h, "Cut at the last count shown -- " + "; ".join(ties),
-                 fontsize=6.6, color=MUTED, va="top")
+    fig.text(text_x / fig_w, 1 - 0.40 / fig_h, "\n".join(wrapped),
+             fontsize=7.2, color=MUTED, va="top", linespacing=1.35)
     if mesh is not None:
-        cax = fig.add_axes([(fig_w - right + 0.25) / fig_w, bottom / fig_h,
+        # Beside the last panel, wherever the figure's own edge is.
+        cax = fig.add_axes([(x + 0.05) / fig_w, bottom / fig_h,
                             0.12 / fig_w, min(2.4, n_arms * cell_h) / fig_h])
         bar = fig.colorbar(mesh, cax=cax, extend="max" if largest > vmax else "neither")
         bar.outline.set_visible(False)
@@ -243,7 +278,6 @@ def main() -> None:
         bar.set_label(spec["colour"], fontsize=6.6, color=INK)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"retained_side_{args.readout}"
     for suffix in ("png", "pdf"):
         fig.savefig(args.out_dir / f"{stem}.{suffix}", dpi=220)
     plt.close(fig)
