@@ -53,18 +53,30 @@ ARMS = [f"{n}{'_noscale' * s}{'_ds' * q}{'_cos' * c}"
 ARMS = [a for n in ("raw", "logcpm", "rank256", "ranknm256") for a in (
     n, f"{n}_cos", f"{n}_ds", f"{n}_ds_cos", f"{n}_noscale", f"{n}_noscale_cos",
     f"{n}_noscale_ds", f"{n}_noscale_ds_cos")]
-LEVELS = [("L0_matched", "L0"), ("L1_depth", "L1"), ("L2_depth_dropout", "L2")]
+LEVELS = [("L0_matched", "matched"), ("L1_depth", "depth mismatch"),
+          ("L2_depth_dropout", "depth + dropout")]
 
+# Named with the benchmark schematic's own words (figures/schematic/benchmark):
+# its three cases with their ground truth, its levels, kept and rejected,
+# shared and unmatched, nCount. The one quantity the schematic has no word for
+# is the transport the gate leaves standing between cells it keeps, called
+# kept mass here and defined in the subtitle.
+GROUPS = {
+    "Case 1: all populations shared": "reject nothing",
+    "Case 2: one population unmatched": "reject only that population",
+    "Case 3: no population shared": "reject everything",
+    "depends on nCount": "Case 1",
+}
 # (group, column title, case, column, transform)
 READOUTS = [
-    ("asserts a wrong match", "nothing\nshared", "populations_disjoint", "false_asserted_mass", None),
-    ("asserts a wrong match", "all\nshared", "all_shared", "false_asserted_mass", None),
-    ("rejects a matched cell", "all shared\nsource", "all_shared", "source_false_rejection_rate", None),
-    ("rejects a matched cell", "all shared\ntarget", "all_shared", "target_false_rejection_rate", None),
-    ("rejects a matched cell", "emerged\nsource", "population_emerged", "source_false_rejection_rate", None),
-    ("keeps an unmatched cell", "lost\nsource", "population_lost", "source_recall", "missed"),
-    ("keeps an unmatched cell", "emerged\ntarget", "population_emerged", "target_recall", "missed"),
-    ("follows depth", "all shared\ntarget", "all_shared", "target_rho_cost_total_counts", "abs"),
+    ("Case 1: all populations shared", "source\nrejected", "all_shared", "source_false_rejection_rate", None),
+    ("Case 1: all populations shared", "target\nrejected", "all_shared", "target_false_rejection_rate", None),
+    ("Case 1: all populations shared", "kept mass,\nwrong population", "all_shared", "false_asserted_mass", None),
+    ("Case 2: one population unmatched", "unmatched kept\n(on source)", "population_lost", "source_recall", "missed"),
+    ("Case 2: one population unmatched", "unmatched kept\n(on target)", "population_emerged", "target_recall", "missed"),
+    ("Case 2: one population unmatched", "source rejected\n(target unmatched)", "population_emerged", "source_false_rejection_rate", None),
+    ("Case 3: no population shared", "kept\nmass", "populations_disjoint", "false_asserted_mass", None),
+    ("depends on nCount", "|\u03c1(cost, nCount)|\ntarget", "all_shared", "target_rho_cost_total_counts", "abs"),
 ]
 
 # The reference sequential ramp, light to dark, with white prepended so an
@@ -123,14 +135,14 @@ def main() -> None:
 
     # The table view, so no value has to be read off a colour.
     frame = pd.DataFrame(values, index=ARMS,
-                         columns=[f"{g} | {t.replace(chr(10), ' ')} | {s}"
-                                  for g, t, s in columns])
+                         columns=[f"{g} | {c.replace(chr(10), ' ')} | {s}"
+                                  for g, c, s in columns])
     frame.index.name = "arm"
     frame.round(4).to_csv(args.output_dir / "arm_error_heatmap_values.csv")
 
     n_rows, n_cols = values.shape
-    cell_w, cell_h = 0.30, 0.235
-    left, right, top, bottom = 2.25, 1.15, 1.55, 0.55
+    cell_w, cell_h = 0.38, 0.235
+    left, right, top, bottom = 2.25, 1.15, 1.85, 1.05
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -173,27 +185,39 @@ def main() -> None:
 
     # Level labels under every block, readout titles above, group names above those.
     for col, (_, _, short) in enumerate(columns):
-        ax.text(col + 0.5, n_rows + 0.55, short, ha="center", va="top",
-                fontsize=6.6, color=MUTED)
+        ax.text(col + 0.5, n_rows + 0.35, short, ha="center", va="top",
+                rotation=90, fontsize=6.4, color=MUTED)
     groups: dict[str, list[int]] = {}
     for j, (group, title, *_rest) in enumerate(READOUTS):
         start = j * len(LEVELS)
         ax.text(start + len(LEVELS) / 2, -0.55, title, ha="center", va="bottom",
-                fontsize=7.0, color=INK, linespacing=1.05)
+                fontsize=6.8, color=INK, linespacing=1.05)
         groups.setdefault(group, []).append(start)
     for group, starts in groups.items():
         a, b = min(starts), max(starts) + len(LEVELS)
-        ax.text((a + b) / 2, -2.55, group, ha="center", va="bottom",
-                fontsize=7.6, fontweight="semibold", color=INK)
-        ax.plot([a + 0.15, b - 0.15], [-2.35, -2.35], color=RULE, linewidth=1.0,
+        ax.plot([a + 0.15, b - 0.15], [-2.45, -2.45], color=RULE, linewidth=1.0,
                 clip_on=False)
+        ax.text((a + b) / 2, -2.7, GROUPS[group], ha="center", va="bottom",
+                fontsize=6.8, color=MUTED)
+        # A title over a three-column block is wider than the block, and two
+        # such blocks sit side by side, so theirs are broken onto two lines.
+        title = group
+        if b - a <= len(LEVELS):
+            title = (group.replace(": ", ":\n") if ": " in group
+                     else group.replace(" on ", "\non ", 1))
+        ax.text((a + b) / 2, -3.55, title, ha="center", va="bottom",
+                fontsize=7.2, fontweight="semibold", color=INK, linespacing=1.05)
 
     fig.text(left / fig_w, 1 - 0.18 / fig_h,
-             "Where each preprocessing arm goes wrong",
+             "Gate error for each preprocessing arm",
              fontsize=10.5, fontweight="semibold", color=INK, va="top")
     fig.text(left / fig_w, 1 - 0.42 / fig_h,
-             f"Native-depth simulation, {args.method}. Every cell is an error with 0 "
-             "as its ideal; darker is worse. Mean over 3 sizes x 5 replicates.",
+             f"Native-depth simulation, {args.method}, mean over 3 sizes x 5 replicates. "
+             "Every cell is an error against the case's ground truth; 0 is ideal, darker is worse.",
+             fontsize=7.4, color=MUTED, va="top")
+    fig.text(left / fig_w, 1 - 0.62 / fig_h,
+             "kept mass: transport the gate leaves between cells it keeps on both sides. "
+             "In Case 3 any of it is wrong; in Case 1 the part between different populations is.",
              fontsize=7.4, color=MUTED, va="top")
 
     cax = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w, bottom / fig_h,
