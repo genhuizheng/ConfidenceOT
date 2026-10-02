@@ -1,13 +1,16 @@
-"""What is higher in retained primary cells, for every preprocessing arm.
+"""What is higher on one side of the gate, for every preprocessing arm.
 
 Features as rows -- hallmark pathways (``--readout gsea``) or genes
 (``--readout deg``) -- and the 32 arms of the factorial as columns, one panel
-per analysis. Only the retained side is drawn: the contrast is
-primary_rejected_vs_primary_retained, so a feature is higher in retained where
-its NES or its log2 fold change is negative, and the colour is that magnitude,
--NES or -log2FC. Where a feature is not higher in retained the cell is white;
-nothing about the rejected side is shown, because the question here is what
-the retained cells carry.
+per analysis. One side is drawn at a time. The contrast is
+primary_rejected_vs_primary_retained, so a feature is higher in retained
+primary cells where its NES or its log2 fold change is negative, and higher in
+rejected ones where it is positive. ``--side retained``, the default, colours
+-NES or -log2FC; ``--side rejected`` colours NES or log2FC. Where a feature is
+not higher on the side drawn the cell is white, so each figure answers one
+question -- what that side's cells carry -- and the two sides never share a
+scale. Retained is blue and rejected red, the ends 41_'s RdBu_r gives the same
+contrast, at matched lightness steps.
 
 Every label reads horizontally. Pathways are written the way papers write
 them -- "E2F targets", not HALLMARK_E2F_TARGETS -- from a fixed table of the 50
@@ -17,21 +20,26 @@ marks which of noscale, ds and cos each column carries, under the name of its
 normalisation.
 
 One quantity on one scale, as everywhere else in the project: the colour is
-the retained-side effect and nothing else. Significance is a dot, and the
+the effect on the side drawn and nothing else. Significance is a dot, and the
 number right of a row is how many of the 32 arms carry it -- the agreement
 between arms, which is what a factorial over preprocessing exists to measure.
 
-* **gsea** -- the dot is FDR < 0.05, the call 41_ made. A panel shows the
-  pathways with a dot in at least half of its arms (--min-arms-fraction).
-* **deg** -- the dot is FDR < 0.05 *and* at least two-fold higher in retained
-  (--minimum-log2fc), the floor the DEG prespecification sets. No gene carries
-  that dot in half the arms of any analysis, so a panel shows the --top genes
-  with the most dots instead, ties broken by the median effect.
+* **gsea** -- the dot is FDR < 0.05, the call 41_ made, on the side drawn. A
+  panel shows the pathways with a dot in at least half of its arms
+  (--min-arms-fraction).
+* **deg** -- the dot is FDR < 0.05 *and* at least two-fold higher on the side
+  drawn (--minimum-log2fc), the floor the DEG prespecification sets. A panel
+  shows the --top genes with the most dots, ties broken by the median effect:
+  on the retained side no gene carries that dot in half the arms of any
+  analysis, so the pathways' rule would leave those panels empty.
 
-Under each panel is the arm's retained fraction, the median over patients of
-retained / (retained + rejected) primary cells in the pseudobulk. It is there
-because it explains the columns that disagree: the arms that retain most of
-the cells are the ones whose retained side looks different.
+Under each panel is the arm's fraction of primary cells on the side drawn:
+the median over patients of retained (or rejected) / (retained + rejected)
+cells in the pseudobulk. It is there because the arms split the same cells
+very differently -- 0.12 to 0.73 retained in ovarian -- so each column
+compares a different pair of groups, and a column that disagrees with its
+neighbours is read with its split in view. A grey cell has no value in that
+arm.
 
 The matrices behind the figure are the ones
 41_preprocessing_strategy_heatmaps.py wrote, unfiltered.
@@ -66,8 +74,15 @@ ARMS = [a for n in NORMALISATIONS for a in (
     n, f"{n}_cos", f"{n}_ds", f"{n}_ds_cos", f"{n}_noscale", f"{n}_noscale_cos",
     f"{n}_noscale_ds", f"{n}_noscale_ds_cos")]
 TAGS = ("noscale", "ds", "cos")
-RAMP = ["#ffffff", "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf",
-        "#184f95", "#0d366b"]
+SIDES = {"retained": -1, "rejected": 1}  # the sign that makes the side drawn positive
+# One hue per side. The red has the blue's OKLab lightness and chroma at every
+# step, so the same value looks as strong on either side.
+RAMPS = {
+    "retained": ["#ffffff", "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf",
+                 "#184f95", "#0d366b"],
+    "rejected": ["#ffffff", "#fad6d2", "#f1aea8", "#e4857e", "#d75853", "#b13f3c",
+                 "#892b2a", "#621b1a"],
+}
 UNDEFINED = "#bdbdbd"
 INK, MUTED, FAINT = "#1a1a1a", "#5f5f5a", "#d0d0cc"
 
@@ -126,11 +141,16 @@ HALLMARK = {
     "XENOBIOTIC_METABOLISM": "Xenobiotic metabolism",
 }
 READOUTS = {
-    "gsea": {"prefix": "gsea", "effect": "NES", "colour": "-NES",
-             "title": "Hallmark pathways higher in retained primary cells, per preprocessing arm"},
-    "deg": {"prefix": "deg", "effect": "log2FC", "colour": "-log2FC",
-            "title": "Genes higher in retained primary cells, per preprocessing arm"},
+    "gsea": {"prefix": "gsea", "effect": "NES", "noun": "Hallmark pathways"},
+    "deg": {"prefix": "deg", "effect": "log2FC", "noun": "Genes"},
 }
+
+
+def readout_spec(readout: str, side: str) -> dict:
+    spec = dict(READOUTS[readout], side=side, sign=SIDES[side])
+    spec["colour"] = ("-" if SIDES[side] < 0 else "") + spec["effect"]
+    spec["title"] = f"{spec['noun']} higher in {side} primary cells, per preprocessing arm"
+    return spec
 
 
 def display_name(feature: str) -> str:
@@ -145,6 +165,9 @@ def parse_args() -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("out_dir", type=Path)
     parser.add_argument("--readout", choices=sorted(READOUTS), default="gsea")
+    parser.add_argument("--side", choices=sorted(SIDES), default="retained",
+                        help="Which side of the gate to draw: what is higher in retained "
+                             "or in rejected primary cells")
     parser.add_argument("--analysis", action="append", required=True,
                         metavar="TITLE::STRATEGY_DIR::DOWNSTREAM_DIR",
                         help="41_'s output directory and the downstream analysis "
@@ -168,7 +191,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load(spec: str, prefix: str) -> dict:
+def load(spec: str, prefix: str, side: str) -> dict:
     parts = spec.split("::")
     if len(parts) != 3:
         raise SystemExit(f"--analysis wants TITLE::STRATEGY_DIR::DOWNSTREAM_DIR, got {spec!r}")
@@ -186,7 +209,8 @@ def load(spec: str, prefix: str) -> dict:
         cells = meta.pivot_table(index="patient_id", columns="comparison_status",
                                  values="cell_n", aggfunc="sum")
         # reference is retained and case is rejected in this contrast.
-        fraction[arm] = float((cells["reference"] / cells.sum(axis=1)).median())
+        status = "reference" if side == "retained" else "case"
+        fraction[arm] = float((cells[status] / cells.sum(axis=1)).median())
         done = (downstream / arm / "DONE").read_text(encoding="utf-8")
         patients.update(line.split("=", 1)[1] for line in done.splitlines()
                         if line.startswith("patients="))
@@ -195,18 +219,20 @@ def load(spec: str, prefix: str) -> dict:
 
 
 def choose_features(panel: dict, args: argparse.Namespace) -> None:
-    effect, called = panel["effect"], panel["called"]
+    # Signed so that the side drawn is positive: -effect for retained.
+    effect = SIDES[args.side] * panel["effect"]
+    called = panel["called"]
     if args.readout == "gsea":
-        dots = called & (effect < 0)
+        dots = called & (effect > 0)
     else:
-        dots = called & (effect <= -args.minimum_log2fc)
+        dots = called & (effect >= args.minimum_log2fc)
     counts = dots.sum(axis=0)
     order = pd.DataFrame({"n": counts, "median": effect.median(axis=0)})
     if args.readout == "gsea":
         order = order[order["n"] >= args.min_arms_fraction * len(ARMS)]
     else:
         order = order[order["n"] > 0]
-    order = order.sort_values(["n", "median"], ascending=[False, True])
+    order = order.sort_values(["n", "median"], ascending=[False, False])
     if args.readout == "deg":
         # How many genes share the last count shown, so a cut through a tie
         # is reported rather than hidden.
@@ -217,24 +243,28 @@ def choose_features(panel: dict, args: argparse.Namespace) -> None:
                                  f"{int((shown['n'] == last).sum())} shown")
         order = shown
     panel["features"] = list(order.index)
+    panel["side_effect"] = effect
     panel["counts"] = counts
     panel["dots"] = dots
     panel["eligible"] = int((counts > 0).sum())
 
 
 def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict) -> list[str]:
+    side = spec["side"]
     if args.readout == "gsea":
         dot_text = "Dot: FDR < 0.05."
         rows_text = f"Rows: pathways with a dot in at least {args.min_arms_fraction:.0%} of the arms."
     else:
         dot_text = (f"Dot: FDR < 0.05 and at least {2 ** args.minimum_log2fc:g}-fold "
-                    "higher in retained.")
+                    f"higher in {side}.")
         rows_text = f"Rows: the genes with the most dots, at most {args.top}, ties by median log2FC."
     method = "paired PyDESeq2" + (", hallmark GSEA" if args.readout == "gsea" else "")
-    lines = [f"Primary rejected vs primary retained ({method}). Colour: -{spec['effect']} where it "
-             f"is higher in retained, white otherwise. {dot_text}",
+    if any(p["side_effect"][p["features"]].isna().any().any() for p in panels if p["features"]):
+        dot_text += " Grey: no value in that arm."
+    lines = [f"Primary rejected vs primary retained ({method}). Colour: {spec['colour']} where it "
+             f"is higher in {side}, white otherwise. {dot_text}",
              f"{rows_text} Number right of a row: arms with a dot. Under a panel: each arm's "
-             "retained fraction. Columns: the 32 arms, marked by the strip at the bottom."]
+             f"{side} fraction. Columns: the 32 arms, marked by the strip at the bottom."]
     ties = [f"{p['title']}: {p['tie_note']}" for p in panels if p.get("tie_note")]
     if ties:
         lines.append("Cut at the last count shown -- " + "; ".join(ties) + ".")
@@ -243,23 +273,24 @@ def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict) -> li
 
 def main() -> None:
     args = parse_args()
-    spec = READOUTS[args.readout]
-    panels = [load(item, spec["prefix"]) for item in args.analysis]
+    spec = readout_spec(args.readout, args.side)
+    panels = [load(item, spec["prefix"], args.side) for item in args.analysis]
     for panel in panels:
         choose_features(panel, args)
+    stem = f"{args.side}_side_{args.readout}"
     suffix = "_slide" if args.slide else ""
     if args.separate:
         for panel in panels:
             slug = "".join(c if c.isalnum() else "_" for c in panel["title"].lower()).strip("_")
-            draw([panel], args, spec, f"retained_side_{args.readout}_{slug}{suffix}")
+            draw([panel], args, spec, f"{stem}_{slug}{suffix}")
     else:
-        draw(panels, args, spec, f"retained_side_{args.readout}{suffix}")
+        draw(panels, args, spec, f"{stem}{suffix}")
 
 
 def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) -> None:
     n_arms = len(ARMS)
     shown = [p for p in panels if p["features"]]
-    largest = max((float((-p["effect"][p["features"]]).clip(lower=0).max().max()) for p in shown),
+    largest = max((float(p["side_effect"][p["features"]].clip(lower=0).max().max()) for p in shown),
                   default=1.0)
     vmax = args.vmax if args.vmax is not None else largest
 
@@ -277,13 +308,14 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
     wrapped = [] if slide else [part for line in header_lines(panels, args, spec)
                                 for part in textwrap.wrap(line, chars)]
     header_h = 0.08 if slide else 0.40 + 0.135 * len(wrapped) + 0.1
-    title_h, retained_h, panel_gap = (0.36, 0.19, 0.07) if slide else (0.58, 0.24, 0.22)
+    title_h, fraction_h, panel_gap = (0.36, 0.19, 0.07) if slide else (0.58, 0.24, 0.22)
     heights = [max(len(p["features"]), 1) * cell_h for p in panels]
     strip_row, strip_bottom = (0.13, 0.12) if slide else (0.17, 0.2)
     strip_h = 0.22 + len(TAGS) * strip_row + strip_bottom
-    fig_h = header_h + sum(title_h + h + retained_h + panel_gap for h in heights) + strip_h
+    fig_h = header_h + sum(title_h + h + fraction_h + panel_gap for h in heights) + strip_h
     fig = plt.figure(figsize=(fig_w, fig_h))
-    cmap = LinearSegmentedColormap.from_list("retained", RAMP)
+    side = spec["side"]
+    cmap = LinearSegmentedColormap.from_list(side, RAMPS[side])
     cmap.set_bad(UNDEFINED)
 
     def axes_at(x0: float, y_top: float, width: float, height: float):
@@ -314,7 +346,7 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
                      color=MUTED, va="top")
         y += title_h
         ax = axes_at(left, y, grid_w, height)
-        values = ((-panel["effect"][features]).clip(lower=0).to_numpy(dtype=float).T
+        values = (panel["side_effect"][features].clip(lower=0).to_numpy(dtype=float).T
                   if features else np.zeros((1, n_arms)))
         mesh = ax.pcolormesh(np.ma.masked_invalid(values), cmap=cmap, vmin=0.0, vmax=vmax,
                              edgecolors="#ffffff", linewidth=1.0)
@@ -346,17 +378,17 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
                 color=MUTED, clip_on=False)
         first_grid = first_grid or (y, height)
         y += height
-        # Each arm's retained fraction, under its column.
-        rax = axes_at(left, y + 0.03, grid_w, retained_h - 0.06)
+        # Each arm's fraction of cells on the side drawn, under its column.
+        rax = axes_at(left, y + 0.03, grid_w, fraction_h - 0.06)
         rax.set_xlim(0, n_arms)
         rax.set_ylim(0, 1)
         rax.axis("off")
         for j, arm in enumerate(ARMS):
             rax.text(j + 0.5, 0.5, f"{panel['fraction'][arm]:.2f}".lstrip("0"), ha="center",
                      va="center", fontsize=5.6, color=MUTED)
-        rax.text(-0.3, 0.5, "retained fraction", ha="right", va="center", fontsize=6.4,
+        rax.text(-0.3, 0.5, f"{side} fraction", ha="right", va="center", fontsize=6.4,
                  color=MUTED)
-        y += retained_h + panel_gap
+        y += fraction_h + panel_gap
 
     # The design strip: which options each column carries, under its normalisation.
     y += 0.02
@@ -384,7 +416,7 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
         bar.outline.set_visible(False)
         bar.ax.tick_params(labelsize=6.0, colors=MUTED, length=2)
         # Above the bar rather than along it, so that it reads horizontally too.
-        cax.set_title(f"{spec['colour']}\nhigher in\nretained", fontsize=6.6, color=INK,
+        cax.set_title(f"{spec['colour']}\nhigher in\n{side}", fontsize=6.6, color=INK,
                       loc="left", pad=6)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
