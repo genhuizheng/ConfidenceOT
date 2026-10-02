@@ -11,14 +11,21 @@ before anything is submitted:
    ``21_prepare_four_state_malignant_pseudobulk.py`` and
    ``13_run_paired_pydeseq2.py`` key a patient on ``patient_id`` alone, so an
    ID shared by two deposits would pool two people into one pseudobulk.
-2. **The deposits measure the same genes.** ``13_`` takes the union of the
-   patients' genes and fills a gene a matrix lacks with 0, so a gene missing
-   from one deposit is tested on the other deposits' patients only.
+2. **The genes the merged fit can use.** A pseudobulk lists only the genes its
+   patient had counts for and ``13_`` fills the rest with 0, so a merged run
+   is restricted to the genes every deposit measured
+   (``tools/shared_gene_universe.py``, which the job runs itself). This says
+   how many that is.
 3. **Each patient has both states under each arm's gate.** The paired DEG
    keeps a patient only with at least ``--minimum-cells`` retained and as many
    rejected primary cells. Counted with ``21_``'s own functions -- the same
    largest-lesion choice, the same M4-E gate, the same calibration refusal --
    so the count is the one the pseudobulk will see, not a second estimate.
+
+Everything is read on the pairs the gates actually cover. The manifest the
+expression stages read lists more pairs than the factorial ran -- the
+factorial's own manifest was trimmed to the evaluable ones -- and the job
+trims to the gate root before anything else, so this does the same.
 
 Usage:
 
@@ -29,26 +36,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib.util
-import json
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-HERE = Path(__file__).resolve().parent.parent
-
-
-def load_pseudobulk_module():
-    """21_ itself, so its grouping and gate reading are not copied here."""
-    # 21_ imports common, and common imports confidenceot from src/.
-    sys.path.insert(0, str(HERE.parent / "src"))
-    sys.path.insert(0, str(HERE))
-    spec = importlib.util.spec_from_file_location(
-        "pseudobulk", HERE / "21_prepare_four_state_malignant_pseudobulk.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from shared_gene_universe import deposit_genes, load_pseudobulk_module  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,11 +54,18 @@ def parse_args() -> argparse.Namespace:
                         help="The factorial block, e.g. preprocessing_factorial/uniform")
     parser.add_argument("--dataset-id", action="append", required=True,
                         dest="dataset_ids", metavar="GSE")
+    parser.add_argument("--scope", default="scope_malignant")
     parser.add_argument("--metastasis-size-csv", type=Path, default=None,
                         help="Defaults to downsample_per_sample.csv beside the "
                              "block's PREDOWNSAMPLE_DEPTH record")
     parser.add_argument("--minimum-cells", type=int, default=10)
     return parser.parse_args()
+
+
+def gated_pairs(gate_root: Path, scope: str) -> set[str]:
+    """The pairs 35_trim_manifest_to_gate.py would keep for this gate root."""
+    return {path.parents[2].name
+            for path in gate_root.glob(f"*/{scope}/*/cell_confidence.csv")}
 
 
 def main() -> None:
@@ -75,42 +76,41 @@ def main() -> None:
     unknown = [value for value in args.dataset_ids if value not in known]
     if unknown:
         raise SystemExit(f"dataset_id {unknown} not in {args.manifest_csv}")
-    manifest = manifest[manifest["dataset_id"].astype(str).isin(args.dataset_ids)].copy()
+    listed = manifest[manifest["dataset_id"].astype(str).isin(args.dataset_ids)].copy()
+
+    arms = sorted(path.name for path in args.block_dir.iterdir() if path.is_dir())
+    gated = {label: gated_pairs(args.block_dir / label, args.scope) for label in arms}
+    in_any = set.union(*gated.values())
+    in_every = set.intersection(*gated.values())
+    pairs = listed[listed["pair_id"].astype(str).isin(in_any)].copy()
 
     print("== pairs ==")
+    print(f"listed in the manifest: {len(listed)}; gated in any arm: {len(pairs)}; "
+          f"gated in all {len(arms)} arms: "
+          f"{int(listed['pair_id'].astype(str).isin(in_every).sum())}")
     columns = ["pair_id", "dataset_id", "patient_id", "source_sample", "target_sample"]
-    print(manifest[columns].to_string(index=False))
+    print(pairs[columns].to_string(index=False))
+    print(f"per deposit: {pairs['dataset_id'].value_counts().to_dict()}")
 
     print("\n== 1. patient IDs ==")
-    deposits = manifest.groupby(manifest["patient_id"].astype(str))["dataset_id"].nunique()
+    deposits = pairs.groupby(pairs["patient_id"].astype(str))["dataset_id"].nunique()
     shared = sorted(deposits.index[deposits > 1])
-    pairs_per_patient = manifest.groupby(manifest["patient_id"].astype(str)).size()
-    print(f"{len(manifest)} pairs, {manifest['patient_id'].nunique()} patients, "
-          f"{manifest['dataset_id'].nunique()} deposits")
+    per_patient = pairs.groupby(pairs["patient_id"].astype(str)).size()
+    print(f"{len(pairs)} pairs, {pairs['patient_id'].nunique()} patients, "
+          f"{pairs['dataset_id'].nunique()} deposits")
     print(f"patients with more than one pair: "
-          f"{pairs_per_patient[pairs_per_patient > 1].to_dict() or 'none'}")
+          f"{per_patient[per_patient > 1].to_dict() or 'none'}")
     print(f"patient_id shared by two deposits: {shared or 'none'}")
 
     print("\n== 2. genes ==")
-    import anndata as ad
-
-    genes_by_deposit: dict[str, set[str]] = {}
-    for deposit, table in manifest.groupby("dataset_id"):
-        paths = set()
-        for column in ("source_h5ads_json", "target_h5ads_json"):
-            for value in table[column]:
-                paths.update(json.loads(str(value)))
-        symbols: set[str] = set()
-        for path in sorted(paths):
-            data = ad.read_h5ad(path, backed="r")
-            symbols |= set(pseudobulk.gene_symbols(data))
-            data.file.close()
-        genes_by_deposit[str(deposit)] = symbols
-        print(f"{deposit}: {len(symbols)} gene symbols over {len(paths)} h5ad file(s)")
-    shared_genes = set.intersection(*genes_by_deposit.values())
-    union_genes = set.union(*genes_by_deposit.values())
-    print(f"in every deposit: {len(shared_genes)}; in any: {len(union_genes)}; "
-          f"in only some: {len(union_genes - shared_genes)}")
+    found = deposit_genes(pairs, pseudobulk)
+    for deposit, record in found.items():
+        print(f"{deposit}: {len(record['any'])} gene symbols in any of "
+              f"{record['files']} file(s), {len(record['every'])} in every one")
+    common = set.intersection(*(record["any"] for record in found.values()))
+    union = set.union(*(record["any"] for record in found.values()))
+    print(f"measured in every deposit: {len(common)} (the merged fit uses these); "
+          f"in any: {len(union)}")
 
     print(f"\n== 3. patients usable per arm (>= {args.minimum_cells} retained and "
           f">= {args.minimum_cells} rejected primary cells, M4-E) ==")
@@ -118,30 +118,26 @@ def main() -> None:
     if size_csv is None:
         record = args.block_dir / "PREDOWNSAMPLE_DEPTH"
         size_csv = Path(record.read_text(encoding="utf-8").strip()).parent / "downsample_per_sample.csv"
-    groups = pseudobulk.analysis_groups(manifest, None, "source090")
-    sizes, _ = pseudobulk.metastasis_sizes(manifest, size_csv)
-    groups, _ = pseudobulk.designate_metastasis(groups, sizes)
-    patients = sorted(groups["patient_id"].astype(str).unique())
-    print(f"after the largest-lesion choice: {len(patients)} patients, "
-          f"{len(groups)} primary-metastasis groups")
-    arms = sorted(path.name for path in args.block_dir.iterdir() if path.is_dir())
     for label in arms:
         gate_root = args.block_dir / label
+        trimmed = listed[listed["pair_id"].astype(str).isin(gated[label])].copy()
+        if trimmed.empty:
+            print(f"{label:28s} no gated pair")
+            continue
+        groups = pseudobulk.analysis_groups(trimmed, None, "source090")
+        sizes, _ = pseudobulk.metastasis_sizes(trimmed, size_csv)
+        groups, _ = pseudobulk.designate_metastasis(groups, sizes)
+        patients = sorted(groups["patient_id"].astype(str).unique())
         usable, notes = 0, []
         for patient in patients:
             retained = rejected = 0
             for row in groups[groups["patient_id"].astype(str).eq(patient)].itertuples():
                 pair = pseudobulk.pair_id(patient, str(row.source_sample), str(row.target_sample))
-                try:
-                    refusal = pseudobulk.calibration_refusal(pseudobulk.read_run(gate_root, pair))
-                    gate = pseudobulk.read_gate(gate_root, pair, "source", "baseline")
-                except (RuntimeError, FileNotFoundError) as error:
-                    notes.append(f"{patient}: {error}")
-                    continue
+                refusal = pseudobulk.calibration_refusal(pseudobulk.read_run(gate_root, pair))
                 if refusal is not None:
                     notes.append(f"{patient}: excluded, {refusal}")
                     continue
-                flags = gate["baseline_rejected"].astype(bool)
+                flags = pseudobulk.read_gate(gate_root, pair, "source", "baseline")["baseline_rejected"].astype(bool)
                 rejected += int(flags.sum())
                 retained += int((~flags).sum())
             ok = retained >= args.minimum_cells and rejected >= args.minimum_cells

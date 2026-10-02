@@ -212,6 +212,18 @@ PYPATIENT
         fail_arm "$label" "a patient_id is shared across deposits, see $out/logs/patients.log"
         continue
     fi
+    # A merged run fits only the genes every deposit measured. A pseudobulk
+    # lists the genes its patient had counts for, and the DEG fills the rest
+    # with 0, which across deposits would read a gene one of them never
+    # measured as zero counts in its patients. A single deposit skips this, so
+    # its fit is the one it always was.
+    if (( ${#accessions[@]} > 1 )); then
+        if ! python cancer_metastasis/tools/shared_gene_universe.py \
+            "$out/manifest_trimmed.csv" "$out/shared_genes.txt" > "$out/logs/genes.log" 2>&1; then
+            fail_arm "$label" "could not list the shared genes, see $out/logs/genes.log"
+            continue
+        fi
+    fi
     count=$(OMP_NUM_THREADS=1 python cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py \
         "$out/manifest_trimmed.csv" "$gate" "$out/four_state" --print-patient-count "${extra[@]}" \
         2> "$out/logs/count.log") || count=""
@@ -281,6 +293,8 @@ share=$cores
 deg_one() {
     local label=$1 out
     out=$(arm_dir "$label")
+    local universe=()
+    [[ -f "$out/shared_genes.txt" ]] && universe=(--gene-universe "$out/shared_genes.txt")
     if ! OMP_NUM_THREADS=$share OPENBLAS_NUM_THREADS=$share MKL_NUM_THREADS=$share NUMEXPR_NUM_THREADS=$share \
         python cancer_metastasis/13_run_paired_pydeseq2.py \
             "$out/four_state" "$out/deg" \
@@ -288,6 +302,7 @@ deg_one() {
             --minimum-total-count 10 \
             --maximum-fdr 0.05 \
             --absolute-log2-fold-change-thresholds 0.5 1.0 \
+            "${universe[@]}" \
             --n-cpus "$share" > "$out/logs/deg.log" 2>&1; then
         fail_arm "$label" "paired DEG failed, see $out/logs/deg.log"
     fi

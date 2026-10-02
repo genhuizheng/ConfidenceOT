@@ -187,6 +187,14 @@ def main() -> None:
              "patient in turn, which is the literal form of the differential "
              "expression prespecification's third disqualifier.")
     parser.add_argument("--minimum-total-count", type=int, default=10)
+    parser.add_argument(
+        "--gene-universe", type=Path, default=None, metavar="TXT",
+        help="Keep only these genes, one per line. For an analysis that merges "
+             "deposits: each pseudobulk lists only the genes its patient had "
+             "counts for, so the union taken here reads a gene one deposit "
+             "never measured as zero counts in that deposit's patients. Pass "
+             "the genes every deposit measured, from "
+             "tools/shared_gene_universe.py. Unset, nothing changes.")
     parser.add_argument("--n-cpus", type=int, default=16)
     parser.add_argument("--maximum-fdr", type=float, default=0.05)
     parser.add_argument(
@@ -202,6 +210,16 @@ def main() -> None:
         args.group_output_root, args.minimum_cells_per_patient_status,
         frozenset(args.exclude_patients or ())
     )
+    if args.gene_universe is not None:
+        universe = {line.strip() for line in
+                    args.gene_universe.read_text(encoding="utf-8").splitlines()
+                    if line.strip()}
+        if not universe:
+            raise RuntimeError(f"{args.gene_universe} lists no genes")
+        before = counts.shape[1]
+        counts = counts.loc[:, counts.columns.isin(universe)]
+        print(f"gene universe {args.gene_universe}: {counts.shape[1]} of "
+              f"{before} pseudobulk genes kept", flush=True)
     keep = counts.sum(axis=0).ge(args.minimum_total_count)
     counts = counts.loc[:, keep]
     metadata.to_csv(args.output_dir / "pseudobulk_sample_metadata.csv")
