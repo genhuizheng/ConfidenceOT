@@ -52,10 +52,13 @@ pancancer=${PANCANCER_MANIFEST:-$result/manifest/pancancer_20260924/pair_manifes
 # The single deposits stay reachable under their own names.
 malignant_column=
 annotations=
-name=
+# Not "name": the file check below loops over a variable of that name, and a
+# loop variable keeps its last value -- which once sent every analysis into
+# one directory called gmt.
+analysis=
 case "$dataset" in
     ovarian)     accession=GSE180661; block=uniform; source=$pancancer; malignant_column=malignant ;;
-    colorectal)  accession="GSE225857 GSE178318 GSE315534"; name=colorectal
+    colorectal)  accession="GSE225857 GSE178318 GSE315534"; analysis=colorectal
                  block=uniform; source=$pancancer; malignant_column=malignant ;;
     colorectal_GSE225857) accession=GSE225857; block=uniform; source=$pancancer; malignant_column=malignant ;;
     colorectal_GSE178318) accession=GSE178318; block=uniform; source=$pancancer; malignant_column=malignant ;;
@@ -74,7 +77,7 @@ case "$dataset" in
         exit 2 ;;
 esac
 # A single deposit is named by its accession, as before.
-name=${name:-$accession}
+analysis=${analysis:-$accession}
 
 block_dir=$factorial/$block
 if [[ ! -d "$block_dir" ]]; then
@@ -135,11 +138,11 @@ if [[ -n "$malignant_column" ]]; then
 else
     echo "malignant    cell_type in $annotations (deposit labels)"
 fi
-echo "output       $out_root/$block/$name/<label>/"
+echo "output       $out_root/$block/$analysis/<label>/"
 
 export_list="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$factorial"
 export_list+=",CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession"
-export_list+=",CONFIDENCEOT_DOWNSTREAM_NAME=$name"
+export_list+=",CONFIDENCEOT_DOWNSTREAM_NAME=$analysis"
 export_list+=",CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=$source,CONFIDENCEOT_METASTASIS_SIZE_CSV=$size_csv"
 export_list+=",CONFIDENCEOT_DOWNSTREAM_ROOT=$out_root,CONFIDENCEOT_HUMAN_GMT=$gmt"
 export_list+=",CONFIDENCEOT_FACTORIAL_LABELS=${labels[*]}"
@@ -163,7 +166,7 @@ fi
 
 echo
 echo "heatmaps, once every arm has its DONE file:"
-root=$out_root/$block/$name
+root=$out_root/$block/$analysis
 contrast=primary_rejected_vs_primary_retained
 printf 'python %s/cancer_metastasis/41_preprocessing_strategy_heatmaps.py %s/heatmaps' "$repo" "$root"
 for label in "${labels[@]}"; do
