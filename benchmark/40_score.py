@@ -108,13 +108,23 @@ def coupling_metrics(plan: np.ndarray, source_group: np.ndarray,
     if mass <= 0 or plan.shape != (source_group.size, target_group.size):
         return {"same_population_mass": float("nan"),
                 "coupling_nuisance_rho": float("nan")}
-    same = np.zeros_like(plan, dtype=bool)
-    for label in np.unique(source_group):
-        same |= np.outer(source_group == label, target_group == label)
+    # Mass carried from each source population to each target population,
+    # as one population-by-population table; the same-population mass is its
+    # diagonal. This replaced a boolean mask the size of the plan, built from
+    # one outer product per label and then used to index the plan -- at
+    # N=10000 that was 10^8 booleans allocated six times per coupling, and it
+    # was most of why scoring took three hours. Labels are the union of both
+    # sides, so a population present on one side only contributes a zero
+    # column or row and therefore nothing to the diagonal, which is what
+    # populations_disjoint needs: no mass can be same-population there.
+    labels = np.union1d(source_group, target_group)
+    source_onehot = (source_group[:, None] == labels[None, :]).astype(np.float64)
+    target_onehot = (target_group[:, None] == labels[None, :]).astype(np.float64)
+    by_population = source_onehot.T @ plan @ target_onehot
     row = plan.sum(axis=1)
     centre = np.where(row > 0, plan @ target_value / np.where(row > 0, row, 1.0),
                       np.nan)
-    return {"same_population_mass": float(plan[same].sum() / mass),
+    return {"same_population_mass": float(np.trace(by_population) / mass),
             "coupling_nuisance_rho": correlation(source_value, centre)}
 
 

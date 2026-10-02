@@ -41,30 +41,62 @@ rm -rf "$root/metrics"
 mkdir -p "$root/metrics"
 
 shopt -s nullglob
+# Every configuration of a condition in one pass. Twelve separate invocations
+# re-read the same h5ads twelve times for readouts that do not depend on the
+# preprocessing, and paid twelve interpreter startups to do it. That is what
+# ran the scoring past its two-hour wall with every one of the 1,620 runs
+# already finished. The run roots do not depend on the condition, so they are
+# listed once.
+roots=()
+for run_root in "$root"/runs/*; do
+    [[ -d "$run_root" ]] || continue
+    roots+=(--run-root "$run_root")
+done
+if (( ${#roots[@]} == 0 )); then
+    echo "no run roots under $root/runs" >&2
+    exit 2
+fi
+
+# The conditions are independent -- each writes its own table -- and they
+# used to run one after another on a job that had asked for sixteen cores.
+# The fifteen N=10000 conditions dominate, so sixteen at once puts all of them
+# in the first wave and the wall becomes roughly one of them rather than the
+# sum. One BLAS thread per scorer, or sixteen scorers each starting a thread
+# per core put 256 threads on sixteen cores.
+parallel=${CONFIDENCEOT_BENCH_SCORE_PARALLEL:-${SLURM_CPUS_PER_TASK:-16}}
+echo "scoring $(ls "$root"/conditions/*/*/*/manifest.csv | wc -l) conditions, $parallel at a time"
+
+score_one() {
+    # A failure is written down rather than returned: under set -e the exit
+    # status of a background job would either be lost or, through wait,
+    # kill the loop with the other scorers still running.
+    local manifest=$1 tag=$2
+    if ! OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+        python "$repo/benchmark/40_score.py" \
+            "${roots[@]}" \
+            --manifest "$manifest" \
+            --scope all \
+            --out "$root/metrics/${tag}.csv" > "$root/metrics/${tag}.log" 2>&1; then
+        echo "$tag" >> "$root/metrics/FAILED"
+    fi
+}
+
 for manifest in "$root"/conditions/*/*/*/manifest.csv; do
     level_dir=$(dirname "$manifest")
     replicate_dir=$(dirname "$level_dir")
     tag=$(basename "$(dirname "$replicate_dir")")_$(basename "$replicate_dir")_$(basename "$level_dir")
-    # Every configuration of this condition in one pass. Twelve separate
-    # invocations re-read the same h5ads twelve times for readouts that do
-    # not depend on the preprocessing, and paid twelve interpreter startups
-    # to do it. That is what ran the scoring past its two-hour wall with
-    # every one of the 1,620 runs already finished.
-    roots=()
-    for run_root in "$root"/runs/*; do
-        [[ -d "$run_root" ]] || continue
-        roots+=(--run-root "$run_root")
+    score_one "$manifest" "$tag" &
+    while (( $(jobs -rp | wc -l) >= parallel )); do
+        wait -n || true
     done
-    if (( ${#roots[@]} == 0 )); then
-        echo "no run roots under $root/runs" >&2
-        exit 2
-    fi
-    python "$repo/benchmark/40_score.py" \
-        "${roots[@]}" \
-        --manifest "$manifest" \
-        --scope all \
-        --out "$root/metrics/${tag}.csv"
 done
+wait || true
+
+if [[ -s "$root/metrics/FAILED" ]]; then
+    echo "$(wc -l < "$root/metrics/FAILED") condition(s) failed to score:" >&2
+    cat "$root/metrics/FAILED" >&2
+    echo "each has its own log in $root/metrics/<condition>.log" >&2
+fi
 
 python - "$root" <<'PY'
 import sys
