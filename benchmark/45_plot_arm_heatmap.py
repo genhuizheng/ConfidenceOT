@@ -13,21 +13,28 @@ honesty: a 0.28 means 28% of something went wrong in every column, so the
 scale runs 0 to 1 throughout rather than being stretched per column to make
 small errors look large.
 
-The eight readouts are grouped by the kind of mistake, because the arms fail in
-different ways and a single score would hide which:
+The readouts are grouped by the benchmark's cases, each under its ground truth,
+because the arms fail in different ways and a single score would hide which:
 
-* **asserts a wrong match** -- false asserted mass, the cross-population mass
-  between retained cells. Its ideal is 0 in every case. On its own it rewards
-  rejecting everything, which is why it is never read without the next group.
-* **rejects a matched cell** -- the false rejection rate where a match exists,
-  including the source side of population_emerged.
-* **keeps an unmatched cell** -- one minus recall on the side that has the
-  unmatched population.
-* **follows depth** -- |rho(decision cost, total counts)| on the target, the
-  side the levels degrade.
+* **Case 1: all populations shared** -- reject nothing. Source rejected, target
+  rejected, and the kept mass between different populations.
+* **Case 2: one population unmatched** -- reject only that population. The
+  unmatched cells kept, on whichever side has them, and the source cells
+  rejected when the unmatched population is on the target.
+* **Case 3: no population shared** -- reject everything, so any kept mass is
+  wrong. On its own that column rewards rejecting everything, which is why it
+  is never read without the rejection columns.
+* **depends on nCount** -- |rho(decision cost, nCount)| on the target in
+  Case 1, the side the levels degrade.
 
-Grey is undefined and white is zero. They are different claims, and the
-project's other heatmaps already draw them that way.
+The levels print as L0 / L1 / L2, always in that order; the caption defines
+them (matched, depth mismatch, depth + dropout).
+
+White is zero and grey is undefined; they are different claims. One kind of
+undefined cell is drawn rather than left grey: every source cell rejected in
+every run, so the target's correlation has nothing to be computed against.
+That is the worst outcome the gate has, so it is drawn at the maximum error of
+1.0 and crossed. Only the drawing changes; the values table keeps it undefined.
 
     python benchmark/45_plot_arm_heatmap.py benchmark_results/native/benchmark_metrics.csv \\
         benchmark_results/native/heatmaps
@@ -53,8 +60,10 @@ ARMS = [f"{n}{'_noscale' * s}{'_ds' * q}{'_cos' * c}"
 ARMS = [a for n in ("raw", "logcpm", "rank256", "ranknm256") for a in (
     n, f"{n}_cos", f"{n}_ds", f"{n}_ds_cos", f"{n}_noscale", f"{n}_noscale_cos",
     f"{n}_noscale_ds", f"{n}_noscale_ds_cos")]
-LEVELS = [("L0_matched", "matched"), ("L1_depth", "depth mismatch"),
-          ("L2_depth_dropout", "depth + dropout")]
+# Shown as L0 / L1 / L2 under every block, always in that order. What each
+# means -- matched, depth mismatch, depth + dropout -- goes in the caption once
+# rather than under each of twenty-four columns.
+LEVELS = [("L0_matched", "L0"), ("L1_depth", "L1"), ("L2_depth_dropout", "L2")]
 
 # Named with the benchmark schematic's own words (figures/schematic/benchmark):
 # its three cases with their ground truth, its levels, kept and rejected,
@@ -123,28 +132,30 @@ def build_matrix(table: pd.DataFrame) -> tuple[np.ndarray, list[tuple[str, str, 
     return values, columns
 
 
-def undefined_reason(table: pd.DataFrame, values: np.ndarray) -> str:
-    """Name the cause of the grey cells, but only if every one of them has it.
+def collapsed_cells(table: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+    """Which undefined cells are a collapse, checked against the runs.
 
-    The one cause seen so far: in every run behind the cell the gate kept no
-    source cell, so no target cell has a kept partner and the target's cost
-    has nothing to be measured against -- the correlation is undefined, not
-    zero. That is checked per cell rather than assumed, and if any grey cell
-    has another cause the legend says only that it is undefined.
+    A cell is a collapse when its metric is undefined and, in every run behind
+    it, the gate rejected every source cell. Then no target cell has a kept
+    partner and the target's cost has nothing to be measured against, so the
+    correlation cannot be computed. That is the worst outcome the gate has,
+    and leaving it grey would make it look like missing data next to arms that
+    were merely bad, so it is DRAWN at the maximum error of 1.0.
+
+    Drawn, not stored: the values table keeps the metric undefined, because a
+    correlation of 1.0 is a claim the data does not make. An undefined cell
+    with any other cause is not a collapse and stays grey.
     """
-    reasons = []
+    collapsed = np.zeros(values.shape, dtype=bool)
     for i, j in zip(*np.where(np.isnan(values))):
         _group, _title, case, _column, _transform = READOUTS[j // len(LEVELS)]
         level = LEVELS[j % len(LEVELS)][0]
         runs = table[(table["preprocessing"] == ARMS[i])
                      & (table["biological_case"] == case)
                      & (table["technical_level"] == level)]
-        every_source_rejected = (len(runs) > 0 and bool(
-            (runs["source_rejected_n"] == runs["source_cells_n"]).all()))
-        reasons.append(every_source_rejected)
-    if reasons and all(reasons):
-        return "undefined: every\nsource cell rejected,\nso the target has\nnothing to measure\nagainst"
-    return "undefined"
+        collapsed[i, j] = len(runs) > 0 and bool(
+            (runs["source_rejected_n"] == runs["source_cells_n"]).all())
+    return collapsed
 
 
 def main() -> None:
@@ -164,9 +175,15 @@ def main() -> None:
     frame.index.name = "arm"
     frame.round(4).to_csv(args.output_dir / "arm_error_heatmap_values.csv")
 
+    # The plotting layer only: a collapse is drawn at the maximum error. The
+    # table above was written from the unaltered values and keeps it undefined.
+    collapsed = collapsed_cells(table, values)
+    plotted = values.copy()
+    plotted[collapsed] = 1.0
+
     n_rows, n_cols = values.shape
     cell_w, cell_h = 0.38, 0.235
-    left, right, top, bottom = 2.25, 1.55, 1.85, 1.05
+    left, right, top, bottom = 2.25, 1.55, 1.85, 0.55
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -175,10 +192,15 @@ def main() -> None:
 
     cmap = LinearSegmentedColormap.from_list("error", RAMP)
     cmap.set_bad(UNDEFINED)
-    masked = np.ma.masked_invalid(values)
+    masked = np.ma.masked_invalid(plotted)
     # A 2px surface gap between cells, drawn as white cell edges.
     mesh = ax.pcolormesh(masked, cmap=cmap, vmin=0.0, vmax=1.0,
                          edgecolors="#ffffff", linewidth=1.4)
+    # Marked, so a drawn 1.0 cannot be read as a measured one: on the depth
+    # column a bare 1.0 says "perfectly depth-driven", which these are not.
+    for i, j in zip(*np.where(collapsed)):
+        ax.text(j + 0.5, i + 0.5, "\u00d7", ha="center", va="center",
+                fontsize=8.0, color="#ffffff", fontweight="bold")
     ax.set_xlim(0, n_cols)
     ax.set_ylim(n_rows, 0)
     ax.set_xticks([])
@@ -209,8 +231,8 @@ def main() -> None:
 
     # Level labels under every block, readout titles above, group names above those.
     for col, (_, _, short) in enumerate(columns):
-        ax.text(col + 0.5, n_rows + 0.35, short, ha="center", va="top",
-                rotation=90, fontsize=6.4, color=MUTED)
+        ax.text(col + 0.5, n_rows + 0.45, short, ha="center", va="top",
+                fontsize=6.6, color=MUTED)
     groups: dict[str, list[int]] = {}
     for j, (group, title, *_rest) in enumerate(READOUTS):
         start = j * len(LEVELS)
@@ -251,21 +273,33 @@ def main() -> None:
     bar.ax.tick_params(labelsize=6.6, colors=MUTED, length=2)
     bar.outline.set_visible(False)
     bar.set_label("error (0 = ideal)", fontsize=7.0, color=INK)
-    # The note can run to five lines, so it is centred on a swatch set well
-    # above the colour bar rather than hung below one sitting on top of it.
+    # Legend entries for whatever the figure actually contains, set above the
+    # colour bar and clear of its top tick.
     bar_top = bottom + min(2.6, n_rows * cell_h)
-    swatch_y = bar_top + 0.62
-    swatch = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w,
-                           swatch_y / fig_h, 0.13 / fig_w, 0.13 / fig_h])
-    swatch.set_facecolor(UNDEFINED)
-    swatch.set_xticks([])
-    swatch.set_yticks([])
-    for spine in swatch.spines.values():
-        spine.set_visible(False)
-    fig.text((left + n_cols * cell_w + 0.52) / fig_w,
-             (swatch_y + 0.065) / fig_h,
-             undefined_reason(table, values), fontsize=6.4, color=MUTED,
-             va="center", linespacing=1.1)
+    entries = []
+    if collapsed.any():
+        entries.append(("collapse", "every source cell\nrejected: shown as\nmax error 1.0,\nmetric is NA"))
+    if np.isnan(plotted).any():
+        entries.append(("undefined", "undefined"))
+    x_swatch = (left + n_cols * cell_w + 0.32) / fig_w
+    x_note = (left + n_cols * cell_w + 0.52) / fig_w
+    y = bar_top + 0.62
+    for kind, note in entries:
+        swatch = fig.add_axes([x_swatch, y / fig_h, 0.13 / fig_w, 0.13 / fig_h])
+        swatch.set_xticks([])
+        swatch.set_yticks([])
+        for spine in swatch.spines.values():
+            spine.set_visible(False)
+        if kind == "collapse":
+            swatch.set_facecolor(RAMP[-1])
+            swatch.text(0.5, 0.5, "\u00d7", ha="center", va="center",
+                        fontsize=7.0, color="#ffffff", fontweight="bold",
+                        transform=swatch.transAxes)
+        else:
+            swatch.set_facecolor(UNDEFINED)
+        fig.text(x_note, (y + 0.065) / fig_h, note, fontsize=6.4, color=MUTED,
+                 va="center", linespacing=1.1)
+        y += 0.55
 
     for suffix in ("png", "pdf"):
         fig.savefig(args.output_dir / f"arm_error_heatmap.{suffix}", dpi=220)
