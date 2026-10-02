@@ -57,7 +57,13 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 factorial=${CONFIDENCEOT_FACTORIAL_ROOT:-$result/preprocessing_factorial}
 block=${CONFIDENCEOT_FACTORIAL_BLOCK:-}
-accession=${CONFIDENCEOT_DOWNSTREAM_ACCESSION:-}
+# One deposit, or several merged into one cancer-level analysis. Several are
+# pooled into one paired fit, ~ patient + status: each patient sits inside one
+# deposit, so the patient term absorbs every deposit-level difference and the
+# retained-versus-rejected effect is still estimated within patients. A merged
+# run names its own directory, since no single accession describes it.
+accessions=(${CONFIDENCEOT_DOWNSTREAM_ACCESSION:-})
+analysis=${CONFIDENCEOT_DOWNSTREAM_NAME:-}
 source_manifest=${CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST:-}
 size_csv=${CONFIDENCEOT_METASTASIS_SIZE_CSV:-}
 labels=(${CONFIDENCEOT_FACTORIAL_LABELS:-})
@@ -67,12 +73,23 @@ gmt=${CONFIDENCEOT_HUMAN_GMT:-$gmt_root/h.all.v2025.1.Hs.symbols.gmt}
 minimum_cells=${CONFIDENCEOT_MINIMUM_CELLS_PER_STATUS:-10}
 force=${CONFIDENCEOT_DOWNSTREAM_FORCE:-0}
 
-for name in block accession; do
-    if [[ -z "${!name}" ]]; then
-        echo "$name is required (CONFIDENCEOT_FACTORIAL_BLOCK, CONFIDENCEOT_DOWNSTREAM_ACCESSION)" >&2
+if [[ -z "$block" ]]; then
+    echo "block is required (CONFIDENCEOT_FACTORIAL_BLOCK)" >&2
+    exit 2
+fi
+if (( ${#accessions[@]} == 0 )); then
+    echo "accession is required (CONFIDENCEOT_DOWNSTREAM_ACCESSION, space separated for a merged run)" >&2
+    exit 2
+fi
+if [[ -z "$analysis" ]]; then
+    if (( ${#accessions[@]} > 1 )); then
+        echo "several accessions need a name for the merged run (CONFIDENCEOT_DOWNSTREAM_NAME)" >&2
         exit 2
     fi
-done
+    analysis=${accessions[0]}
+fi
+dataset_args=()
+for one in "${accessions[@]}"; do dataset_args+=(--dataset-id "$one"); done
 for name in source_manifest size_csv gmt; do
     if [[ ! -f "${!name}" ]]; then
         echo "$name does not exist: '${!name}'" >&2
@@ -110,7 +127,8 @@ fi
 mine=("${labels[@]:first:arms_per_task}")
 
 echo "block      $block"
-echo "accession  $accession"
+echo "analysis   $analysis"
+echo "accession  ${accessions[*]}"
 echo "arms       ${mine[*]}"
 echo "manifest   $source_manifest (original counts)"
 echo "gene sets  $gmt"
@@ -142,7 +160,7 @@ stamp() { echo "===== $1 $(date --iso-8601=seconds) ====="; }
 # One arm's directory, recomputed from the label wherever it is needed, so a
 # background job never reads a path left in a variable by the loop that
 # launched it.
-arm_dir() { echo "$out_root/$block/$accession/$1"; }
+arm_dir() { echo "$out_root/$block/$analysis/$1"; }
 fail_arm() {
     # $1 = label, rest = reason. The arm stops; the task carries on with the
     # others, which share nothing with it but the node.
@@ -171,8 +189,27 @@ for label in "${mine[@]}"; do
     stamp "trim $label"
     if ! python cancer_metastasis/35_trim_manifest_to_gate.py \
         "$source_manifest" "$out/manifest_trimmed.csv" \
-        --gate-root "$gate" --dataset-id "$accession" > "$out/logs/trim.log" 2>&1; then
+        --gate-root "$gate" "${dataset_args[@]}" > "$out/logs/trim.log" 2>&1; then
         fail_arm "$label" "trim failed, see $out/logs/trim.log"
+        continue
+    fi
+    # 21_ and 13_ key a patient on patient_id alone, so an ID that two deposits
+    # share would pool two people into one pseudobulk. Refused, not repaired.
+    if ! python - "$out/manifest_trimmed.csv" > "$out/logs/patients.log" 2>&1 <<'PYPATIENT'
+import sys
+
+import pandas as pd
+
+table = pd.read_csv(sys.argv[1])
+deposits = table.groupby(table["patient_id"].astype(str))["dataset_id"].nunique()
+shared = sorted(deposits.index[deposits > 1])
+if shared:
+    raise SystemExit(f"patient_id shared by more than one deposit: {shared}")
+print(f"{table['patient_id'].nunique()} patients in "
+      f"{table['dataset_id'].nunique()} deposit(s), no patient_id shared")
+PYPATIENT
+    then
+        fail_arm "$label" "a patient_id is shared across deposits, see $out/logs/patients.log"
         continue
     fi
     count=$(OMP_NUM_THREADS=1 python cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py \
@@ -182,7 +219,7 @@ for label in "${mine[@]}"; do
     # trim -- would make the pseudobulk run zero patients in silence, the DEG
     # would fit an empty cohort, and the arm would be marked DONE.
     if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count < 1 )); then
-        fail_arm "$label" "patient count is not a positive integer: '$count'; the trim may hold no pairs of $accession gated by $label"
+        fail_arm "$label" "patient count is not a positive integer: '$count'; the trim may hold no pairs of ${accessions[*]} gated by $label"
         continue
     fi
     patients_of[$label]=$count
@@ -285,8 +322,8 @@ for label in "${mine[@]}"; do
         failed_any=1
         echo "$label: FAILED -- $(tail -1 "$out/FAILED")"
     elif [[ -n "${patients_of[$label]:-}" ]]; then
-        printf 'block=%s\naccession=%s\nlabel=%s\ngate=%s\ngene_sets=%s\npatients=%s\n' \
-            "$block" "$accession" "$label" "$factorial/$block/$label" "$gmt" \
+        printf 'block=%s\nanalysis=%s\naccession=%s\nlabel=%s\ngate=%s\ngene_sets=%s\npatients=%s\n' \
+            "$block" "$analysis" "${accessions[*]}" "$label" "$factorial/$block/$label" "$gmt" \
             "${patients_of[$label]}" > "$out/DONE"
         echo "$label: done, ${patients_of[$label]} patients"
     fi

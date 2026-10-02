@@ -43,12 +43,23 @@ pancancer=${PANCANCER_MANIFEST:-$result/manifest/pancancer_20260924/pair_manifes
 # The accession, the block it was gated in, the manifest whose ORIGINAL counts
 # the expression stages read, and the malignant compartment -- which must be
 # the one the gate used.
+#
+# colorectal is the cancer, not a deposit: its evaluable pairs are split over
+# three deposits (GSE225857 4, GSE178318 2, GSE315534 1), none of which can
+# carry a paired fit alone, so they are merged into one analysis named for the
+# cancer. One paired fit over all of them is valid because each patient sits
+# inside one deposit; the job refuses the merge if a patient_id is shared.
+# The single deposits stay reachable under their own names.
 malignant_column=
 annotations=
+name=
 case "$dataset" in
     ovarian)     accession=GSE180661; block=uniform; source=$pancancer; malignant_column=malignant ;;
-    colorectal)  accession=GSE315534; block=uniform; source=$pancancer; malignant_column=malignant ;;
-    colorectal2) accession=GSE178318; block=uniform; source=$pancancer; malignant_column=malignant ;;
+    colorectal)  accession="GSE225857 GSE178318 GSE315534"; name=colorectal
+                 block=uniform; source=$pancancer; malignant_column=malignant ;;
+    colorectal_GSE225857) accession=GSE225857; block=uniform; source=$pancancer; malignant_column=malignant ;;
+    colorectal_GSE178318) accession=GSE178318; block=uniform; source=$pancancer; malignant_column=malignant ;;
+    colorectal_GSE315534) accession=GSE315534; block=uniform; source=$pancancer; malignant_column=malignant ;;
     breast)      accession=GSE167036; block=uniform; source=$pancancer; malignant_column=malignant ;;
     gastric)     accession=GSE163558; block=uniform; source=$pancancer; malignant_column=malignant ;;
     pancreatic)  accession=GSE197177; block=uniform; source=$pancancer; malignant_column=malignant ;;
@@ -59,9 +70,11 @@ case "$dataset" in
         source=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
         annotations="Epithelial|Basal Epithelial|Neuroendocrine" ;;
     *)
-        echo "Usage: $0 {ovarian|colorectal|colorectal2|breast|gastric|pancreatic|headneck|headneck2|prostate}" >&2
+        echo "Usage: $0 {ovarian|prostate|colorectal|colorectal_GSE225857|colorectal_GSE178318|colorectal_GSE315534|breast|gastric|pancreatic|headneck|headneck2}" >&2
         exit 2 ;;
 esac
+# A single deposit is named by its accession, as before.
+name=${name:-$accession}
 
 block_dir=$factorial/$block
 if [[ ! -d "$block_dir" ]]; then
@@ -122,10 +135,11 @@ if [[ -n "$malignant_column" ]]; then
 else
     echo "malignant    cell_type in $annotations (deposit labels)"
 fi
-echo "output       $out_root/$block/$accession/<label>/"
+echo "output       $out_root/$block/$name/<label>/"
 
 export_list="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$factorial"
 export_list+=",CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession"
+export_list+=",CONFIDENCEOT_DOWNSTREAM_NAME=$name"
 export_list+=",CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=$source,CONFIDENCEOT_METASTASIS_SIZE_CSV=$size_csv"
 export_list+=",CONFIDENCEOT_DOWNSTREAM_ROOT=$out_root,CONFIDENCEOT_HUMAN_GMT=$gmt"
 export_list+=",CONFIDENCEOT_FACTORIAL_LABELS=${labels[*]}"
@@ -149,7 +163,7 @@ fi
 
 echo
 echo "heatmaps, once every arm has its DONE file:"
-root=$out_root/$block/$accession
+root=$out_root/$block/$name
 contrast=primary_rejected_vs_primary_retained
 printf 'python %s/cancer_metastasis/41_preprocessing_strategy_heatmaps.py %s/heatmaps' "$repo" "$root"
 for label in "${labels[@]}"; do
