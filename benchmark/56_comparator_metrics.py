@@ -116,10 +116,57 @@ def composition(u: np.ndarray, truth: np.ndarray) -> dict:
             if truth.any() else np.nan}
 
 
+def global_max_f1(scores: list, truths: list) -> dict:
+    """The one cutoff, u > tau, with the largest F1 over a whole set of pair-sides.
+
+    Every pair-side weighs the same, whatever its number of cells, so the
+    N = 10,000 pairs do not set the cutoff for the N = 1,000 ones. Every
+    distinct score is a candidate, plus rejecting everything; ties go to the
+    larger cutoff, which rejects less, as in comparator_rejection.py. It is
+    chosen with the truth: an oracle, an upper bound, not a usable rule.
+    """
+    u = np.concatenate(scores)
+    t = np.concatenate(truths).astype(bool)
+    w = np.concatenate([np.full(s.size, 1.0 / s.size) for s in scores])
+    order = np.argsort(-u, kind="stable")
+    u, t, w = u[order], t[order], w[order]
+    ends = np.append(np.flatnonzero(np.diff(u)), u.size - 1)
+    tp = np.cumsum(w * t)[ends]
+    called = np.cumsum(w)[ends]
+    fp = called - tp
+    fn = float((w * t).sum()) - tp
+    f1 = 2 * tp / (2 * tp + fp + fn)
+    best = int(np.argmax(f1))  # the first maximum rejects the fewest cells
+    tau = float(u[ends[best] + 1]) if ends[best] + 1 < u.size else float("-inf")
+    return {"threshold": tau, "pooled_f1": float(f1[best]),
+            "pooled_precision": float(tp[best] / called[best]),
+            "pooled_recall": float(tp[best] / (tp[best] + fn[best]))}
+
+
+def two_strategies(set1: list, optimal: list) -> str:
+    """Rejected fraction per case and side, and directional F1, by strategy."""
+    rows = pd.DataFrame(set1 + optimal)
+    rows["strategy"] = np.where(rows["decision"].str.contains("oracle"),
+                                "optimal threshold (oracle)",
+                                np.where(rows["solver"].isin(["ConfidenceOT", "Balanced OT"]),
+                                         "own rule", "fixed u > 0.5"))
+    table = (rows.groupby(["arm", "solver", "strategy", "biological_case", "side"])
+             ["rejected_fraction"].mean().unstack(["biological_case", "side"]).round(2))
+    # Directional F1: the side holding the cells to reject, as in 55_.
+    directional = rows[[(case, side) in (("population_lost", "source"),
+                                         ("population_emerged", "target"),
+                                         ("populations_disjoint", "source"))
+                        for case, side in zip(rows["biological_case"], rows["side"])]]
+    table[("directional", "F1")] = (directional.groupby(["arm", "solver", "strategy"])["f1"]
+                                    .mean().round(2))
+    return table.to_string()
+
+
 def main() -> None:
     args = parse_args()
     arms = args.arm or list(ARMS)
     set1, set2, set3 = [], [], []
+    pooled = {}  # (arm, solver) -> [(row, u, truth)] for the one-threshold sweep
     for arm in arms:
         pairs = sorted((args.bench_root / args.solvers_dir / arm).glob("*/solver_comparison.csv"))
         if not pairs:
@@ -165,6 +212,8 @@ def main() -> None:
                                          f"stored fixed-cutoff counts")
                     set1.append({**base, "solver": solver, "side": side,
                                  "decision": f"u > {FIXED_CUTOFF}", **result})
+                    pooled.setdefault((arm, solver), []).append(
+                        ({**base, "solver": solver, "side": side}, u, should[side]))
                     if UNMATCHED_SIDE.get(case) == side:
                         area = areas(u, should[side])
                         oracle = oracle_cutoffs(u, should[side])
@@ -182,6 +231,8 @@ def main() -> None:
                     set1.append({**base, "solver": ORACLE_PARTIAL, "side": side,
                                  "decision": f"u > {FIXED_CUTOFF}, m from the truth",
                                  **counts(u > FIXED_CUTOFF, should[side])})
+                    pooled.setdefault((arm, ORACLE_PARTIAL), []).append(
+                        ({**base, "solver": ORACLE_PARTIAL, "side": side}, u, should[side]))
                     if UNMATCHED_SIDE.get(case) == side:
                         area = areas(u, should[side])
                         oracle = oracle_cutoffs(u, should[side])
@@ -219,13 +270,30 @@ def main() -> None:
                                    "recall_like": part["recall_like"]})
                 set3.append(record)
 
+    optimal, thresholds = [], []
+    for (arm, solver), entries in pooled.items():
+        chosen = global_max_f1([u for _, u, _ in entries], [t for _, _, t in entries])
+        thresholds.append({"arm": arm, "solver": solver, **chosen,
+                           "pair_sides": len(entries), "analysis": "oracle / upper bound"})
+        for row, u, truth in entries:
+            optimal.append({**row, "decision": f"u > {chosen['threshold']:.4g}, one "
+                            f"max-F1 threshold for the arm (oracle)",
+                            "threshold": chosen["threshold"], **counts(u > chosen["threshold"], truth)})
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for name, rows in (("set1_fixed_operating_point", set1),
                        ("set2_oracle_threshold", set2),
-                       ("set3_partial_ot_budget", set3)):
+                       ("set3_partial_ot_budget", set3),
+                       ("set2_one_threshold", optimal),
+                       ("set2_one_threshold_values", thresholds)):
         frame = pd.DataFrame(rows)
         frame.to_csv(args.output_dir / f"{name}.csv", index=False)
         print(f"{name}: {len(frame)} rows -> {args.output_dir / (name + '.csv')}")
+    if optimal:
+        print("\nthe one max-F1 threshold per arm and solver (oracle / upper bound):")
+        print(pd.DataFrame(thresholds).round(4).to_string(index=False))
+        print("\ntwo strategies, rejected fraction per case and side, mean over pairs:")
+        print(two_strategies(set1, optimal))
     if set3:
         frame = pd.DataFrame(set3)
         print("\nset 3, mean over pairs:")
