@@ -27,8 +27,13 @@ meaningless while looking entirely normal, so it is an error rather than a
 warning. It runs before any solver does, since at N = 10,000 the POT solvers
 take the better part of an hour and a wrong matrix would waste all of it.
 
-To pass that check the cost is rebuilt along the runner's own path, not a
-copy of it: the sides through ``load_exact_side``, every field of the label
+The cost is taken from the run itself where it can be: ``02_run_pair.py
+--save-pairing-edges`` saves the joint PCA coordinates its cost was built
+from, and read back as float32 they reproduce the run's cost to every digit.
+Recomputing the PCA on another node does not promise that, and a pair whose
+recomputed scale drifted past the tolerance below failed for it. Only a run
+without saved coordinates falls back to rebuilding the cost from the counts,
+along the runner's own path, not a copy of it: the sides through ``load_exact_side``, every field of the label
 forwarded to ``prepare_joint_representation`` (``equalise_depth`` included,
 without which a _ds label rebuilds itself under the name of the arm without
 it), the PCA seeded with ``seed + index`` and the scale drawn from
@@ -206,6 +211,37 @@ def geometry(row: pd.Series, args: argparse.Namespace):
     return np.asarray(cost, dtype=np.float64), float(scale), names
 
 
+def geometry_from_run(run_directory: Path, args: argparse.Namespace):
+    """The cost ConfidenceOT used, from the joint PCA coordinates it saved.
+
+    ``02_run_pair.py --save-pairing-edges`` writes the coordinates its cost
+    was built from. Read back as float32, the dtype the runner computed in,
+    and scaled with the runner's own generator, they give its cost_scale,
+    cost_median and cost_max to every digit, which recomputing the PCA on
+    another node does not promise. None when the run did not save them.
+    """
+    from confidenceot import squared_euclidean
+    from confidenceot.preprocessing import median_pair_scale
+
+    path = run_directory / "joint_pca_coordinates.csv.gz"
+    if not path.exists():
+        return None
+    coordinates = pd.read_csv(path)
+    columns = sorted((c for c in coordinates.columns if c.startswith("PC")),
+                     key=lambda c: int(c[2:]))
+    # The runner names its sides for the cancer data: primary is the source.
+    blocks = {side: coordinates[coordinates["side"] == label]
+              for side, label in (("source", "primary"), ("target", "metastasis"))}
+    source_pca = blocks["source"][columns].to_numpy(dtype=np.float32)
+    target_pca = blocks["target"][columns].to_numpy(dtype=np.float32)
+    rng = np.random.default_rng(args.seed + args.index * 104729)
+    scale = median_pair_scale(source_pca, target_pca, rng=rng)
+    cost = squared_euclidean(source_pca, target_pca) / scale
+    names = {side: block["observation_id"].astype(str).tolist()
+             for side, block in blocks.items()}
+    return np.asarray(cost, dtype=np.float64), float(scale), names
+
+
 def check_geometry(cost: np.ndarray, scale: float, run_directory: Path) -> dict:
     """Refuse a comparison whose cost is not the one ConfidenceOT saw."""
     record = json.loads((run_directory / "run.json").read_text(encoding="utf-8"))
@@ -265,7 +301,23 @@ def main() -> None:
     truth = pd.read_csv(row["truth_csv"])
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    cost, scale, names = geometry(row, args)
+    run_directory = None
+    if args.confidenceot_root is not None:
+        found = sorted((args.confidenceot_root / pair_id /
+                        f"scope_{args.scope}").glob("budget_*"))
+        ran = [path for path in found
+               if (path / "cell_confidence.csv").exists()]
+        if not ran:
+            raise SystemExit(
+                f"no completed ConfidenceOT run under "
+                f"{args.confidenceot_root / pair_id}")
+        run_directory = ran[-1]
+    built = None if run_directory is None else geometry_from_run(run_directory, args)
+    geometry_source = "the run's joint PCA coordinates"
+    if built is None:
+        built = geometry(row, args)
+        geometry_source = "rebuilt from the counts"
+    cost, scale, names = built
     n, m = cost.shape
     a, b = np.full(n, 1.0 / n), np.full(m, 1.0 / m)
     sides, ids = {}, {}
@@ -293,17 +345,8 @@ def main() -> None:
 
     # Before any solver runs: the POT solvers take hours at N = 10,000, and a
     # cost that is not the run's would make all of it worthless.
-    run_directory = None
-    if args.confidenceot_root is not None:
-        found = sorted((args.confidenceot_root / pair_id /
-                        f"scope_{args.scope}").glob("budget_*"))
-        ran = [path for path in found
-               if (path / "cell_confidence.csv").exists()]
-        if not ran:
-            raise SystemExit(
-                f"no completed ConfidenceOT run under "
-                f"{args.confidenceot_root / pair_id}")
-        run_directory = ran[-1]
+    provenance["geometry_source"] = geometry_source
+    if run_directory is not None:
         provenance["geometry_check"] = check_geometry(cost, scale, run_directory)
         provenance["confidenceot_run"] = str(run_directory)
 
