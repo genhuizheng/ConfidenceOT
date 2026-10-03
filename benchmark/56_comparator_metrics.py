@@ -175,6 +175,23 @@ def main() -> None:
                                      "precision": oracle.get("oracle_f1_precision", np.nan),
                                      "recall": oracle.get("oracle_f1_recall", np.nan),
                                      "f1": oracle.get("oracle_f1_f1", np.nan)})
+                # The oracle-budget run, under its own name, where it exists.
+                oracle_directory = args.bench_root / args.oracle_dir / arm / pair_id
+                if (oracle_directory / "solver_comparison.csv").exists():
+                    u = np.load(score_file(oracle_directory, ORACLE_PARTIAL, side))
+                    set1.append({**base, "solver": ORACLE_PARTIAL, "side": side,
+                                 "decision": f"u > {FIXED_CUTOFF}, m from the truth",
+                                 **counts(u > FIXED_CUTOFF, should[side])})
+                    if UNMATCHED_SIDE.get(case) == side:
+                        area = areas(u, should[side])
+                        oracle = oracle_cutoffs(u, should[side])
+                        set2.append({**base, "solver": ORACLE_PARTIAL, "side": side,
+                                     "analysis": "oracle / upper bound",
+                                     "roc_auc": area["roc_auc"], "pr_auc": area["pr_auc"],
+                                     "max_f1_threshold": oracle.get("oracle_f1_cutoff", np.nan),
+                                     "precision": oracle.get("oracle_f1_precision", np.nan),
+                                     "recall": oracle.get("oracle_f1_recall", np.nan),
+                                     "f1": oracle.get("oracle_f1_f1", np.nan)})
                 balanced = np.load(score_file(directory, "Traditional OT", side))
                 set1.append({**base, "solver": "Balanced OT", "side": side,
                              "decision": "none: every unit of mass is transported",
