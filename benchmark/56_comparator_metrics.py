@@ -162,6 +162,68 @@ def two_strategies(set1: list, optimal: list) -> str:
     return table.to_string()
 
 
+# The heatmap's readouts, as (column, case, side, which cells): "all" is the
+# whole side, "unmatched" the population that should be rejected, "matched"
+# the cells that have a partner. The ideal value is 1 for unmatched cells and
+# Case 3, 0 otherwise.
+MASS_READOUTS = [
+    ("Case 1 source", "all_shared", "source", "all", 0),
+    ("Case 1 target", "all_shared", "target", "all", 0),
+    ("lost: source unmatched", "population_lost", "source", "unmatched", 1),
+    ("lost: source matched", "population_lost", "source", "matched", 0),
+    ("lost: target", "population_lost", "target", "all", 0),
+    ("emerged: source", "population_emerged", "source", "all", 0),
+    ("emerged: target unmatched", "population_emerged", "target", "unmatched", 1),
+    ("emerged: target matched", "population_emerged", "target", "matched", 0),
+    ("Case 3 source", "populations_disjoint", "source", "all", 1),
+    ("Case 3 target", "populations_disjoint", "target", "all", 1),
+]
+
+
+def mass_rejection(pooled: dict, set1: list) -> pd.DataFrame:
+    """The share of a set of cells' own mass that was not transported.
+
+    No cutoff. Every cell weighs 1/n on its side, so for UOT and Partial OT
+    it is the mean u over the set. ConfidenceOT's gate removes a rejected
+    cell's whole mass, so its rejected fraction already is this quantity,
+    split into unmatched and matched by its counts. Balanced OT transports
+    everything: 0.
+    """
+    rows = []
+    for (arm, solver), entries in pooled.items():
+        for row, u, truth in entries:
+            rows.append({**row, "all": float(u.mean()),
+                         "unmatched": float(u[truth].mean()) if truth.any() else np.nan,
+                         "matched": float(u[~truth].mean()) if (~truth).any() else np.nan})
+    for row in set1:
+        if row["solver"] == "ConfidenceOT":
+            tp, fp, fn, tn = row["tp"], row["fp"], row["fn"], row["tn"]
+            rows.append({key: row[key] for key in ("arm", "pair_id", "biological_case",
+                                                   "technical_level", "side", "solver")}
+                        | {"all": (tp + fp) / (tp + fp + fn + tn),
+                           "unmatched": tp / (tp + fn) if tp + fn else np.nan,
+                           "matched": fp / (fp + tn) if fp + tn else np.nan})
+        elif row["solver"] == "Balanced OT":
+            rows.append({key: row[key] for key in ("arm", "pair_id", "biological_case",
+                                                   "technical_level", "side", "solver")}
+                        | {"all": 0.0,
+                           "unmatched": 0.0 if row["n_should_reject"] else np.nan,
+                           "matched": 0.0 if row["n_should_reject"] < row["n_cells"] else np.nan})
+    return pd.DataFrame(rows)
+
+
+def mass_summary(frame: pd.DataFrame) -> str:
+    columns = {}
+    for name, case, side, which, _ in MASS_READOUTS:
+        part = frame[(frame["biological_case"] == case) & (frame["side"] == side)]
+        columns[name] = part.groupby(["arm", "solver"])[which].mean()
+    table = pd.DataFrame(columns).round(2)
+    ideal = pd.DataFrame([[truth for *_, truth in MASS_READOUTS]],
+                         index=pd.MultiIndex.from_tuples([("ideal", "")], names=["arm", "solver"]),
+                         columns=table.columns)
+    return pd.concat([ideal, table]).to_string()
+
+
 def main() -> None:
     args = parse_args()
     arms = args.arm or list(ARMS)
@@ -280,7 +342,9 @@ def main() -> None:
                             f"max-F1 threshold for the arm (oracle)",
                             "threshold": chosen["threshold"], **counts(u > chosen["threshold"], truth)})
 
+    mass = mass_rejection(pooled, set1)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    mass.to_csv(args.output_dir / "set1_mass_rejection.csv", index=False)
     for name, rows in (("set1_fixed_operating_point", set1),
                        ("set2_oracle_threshold", set2),
                        ("set3_partial_ot_budget", set3),
@@ -294,6 +358,10 @@ def main() -> None:
         print(pd.DataFrame(thresholds).round(4).to_string(index=False))
         print("\ntwo strategies, rejected fraction per case and side, mean over pairs:")
         print(two_strategies(set1, optimal))
+    if len(mass):
+        print("\nmass rejection, no cutoff: the share of each set's own mass not "
+              "transported, mean over pairs:")
+        print(mass_summary(mass))
     if set3:
         frame = pd.DataFrame(set3)
         print("\nset 3, mean over pairs:")
