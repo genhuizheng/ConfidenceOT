@@ -3,9 +3,10 @@
 The input is ``main_decisions_per_pair.csv`` from ``56_comparator_metrics.py``:
 one row per pair, side and strategy, holding the hard decisions' counts. The
 pairs are the arm heatmap's own -- the native-depth simulation, four cases,
-three technical levels, three sizes, five replicates. Six strategies:
+three technical levels, three sizes, five replicates. Seven strategies:
 
-    ConfidenceOT: native gate
+    ConfidenceOT M4-E: native gate
+    ConfidenceOT M4-R: native gate      (the same run's reversible gate)
     Vanilla UOT: fixed cutoff (u > 0.5)
     Vanilla UOT: global-optimal threshold
     Partial OT (truth-derived m): fixed cutoff (u > 0.5)
@@ -266,8 +267,9 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
     summary.round(4).to_csv(out / "method_comparison_f1.csv", index=False)
     by_case.round(4).to_csv(out / "method_comparison_f1_by_case.csv", index=False)
 
-    fig, ax = plt.subplots(figsize=(10.6, 4.9))
-    fig.subplots_adjust(left=0.065, right=0.99, top=0.74, bottom=0.15)
+    # Wide enough that every strategy's label has its own column.
+    fig, ax = plt.subplots(figsize=(1.7 * len(STRATEGIES) + 0.9, 5.1))
+    fig.subplots_adjust(left=0.065, right=0.99, top=0.74, bottom=0.17)
     width, gap = 0.26, 0.02
     handles = []
     for k, (arm, colour) in enumerate(zip(ARMS, ARM_COLOURS)):
@@ -283,7 +285,11 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
                 ax.text(xi, min(value + spread, 1.0) + 0.025, f"{value:.2f}",
                         ha="center", va="bottom", fontsize=6.4, color=INK)
     ax.set_xticks(np.arange(len(STRATEGIES)))
-    ax.set_xticklabels([s.replace(": ", "\n") for s in STRATEGIES], fontsize=7.4, color=INK)
+    labels = []
+    for strategy in STRATEGIES:
+        method, rule = strategy.split(": ", 1)
+        labels.append(method.replace(" (", "\n(") + "\n" + rule)
+    ax.set_xticklabels(labels, fontsize=7.4, color=INK)
     ax.set_ylim(0, 1.1)
     ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax.tick_params(axis="y", labelsize=7, colors=MUTED, length=0)

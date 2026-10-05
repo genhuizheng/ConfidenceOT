@@ -48,10 +48,13 @@ transported mass, which should be 0; all_shared has no unmatched population.
 **The main comparison** (``main_*.csv``) is four methods at three arms.
 Partial OT in it is the truth-derived-m run read from ``--oracle-dir``, shown
 as "Partial OT (truth-derived m)"; the fixed m = 0.85 run stays in sets 1-3
-for reference and is not part of it. Six strategies, as hard decisions per
-pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's native gate,
-Vanilla UOT and Partial OT each at the fixed cutoff u > 0.5 and at the
-global-optimal threshold, and Balanced OT rejecting nothing.
+for reference and is not part of it. Seven strategies, as hard decisions per
+pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's two native
+gates, M4-E and M4-R, both read from the one run (the run fits both, with
+the same cost and the same c; M4-R's file order is trusted only because
+M4-E read the same way reproduces 50_'s name-aligned counts), Vanilla UOT
+and Partial OT each at the fixed cutoff u > 0.5 and at the global-optimal
+threshold, and Balanced OT rejecting nothing.
 
 * **Local-optimal F1**: per pair, the max-F1 threshold chosen with that
   pair's truth, then the pair F1s averaged. Pair-specific, an upper bound.
@@ -71,7 +74,13 @@ global-optimal threshold, and Balanced OT rejecting nothing.
   from each pair's provenance.json (``untransported_plan_mass``). It is a
   property of the transport plan, not of any decision, and is not a rejection
   rate. For Partial OT it equals 1 - m, the budget the truth supplied, which
-  is kept separately as ``partial_m``.
+  is kept separately as ``partial_m``. A KL-UOT plan can create mass, and on
+  raw some diverged to sum(pi) of 1e16, which takes this quantity to -1e16;
+  ``plan_mass_diverged`` flags sum(pi) > 1.5 and the summary counts them.
+* **Transported nominal mass fraction**, per side: each cell's transported
+  mass counted up to its own nominal mass, over the side's nominal mass,
+  which is 1 - mean(u). It is bounded in [0, 1] whatever the plan did, and
+  the summary reports its complement per case and side.
 
 ``audit_emerged_source.csv`` lists, for every population_emerged pair, the
 source side under ConfidenceOT's gate and under Partial OT (truth-derived m):
@@ -111,7 +120,8 @@ ORACLE_PARTIAL = "Oracle-budget Partial OT"
 # in sets 1-3 for reference and is not part of it.
 MAIN_SCORED = {"Vanilla UOT": "Vanilla UOT", ORACLE_PARTIAL: "Partial OT (truth-derived m)"}
 STRATEGIES = [
-    "ConfidenceOT: native gate",
+    "ConfidenceOT M4-E: native gate",
+    "ConfidenceOT M4-R: native gate",
     "Vanilla UOT: fixed cutoff (u > 0.5)",
     "Vanilla UOT: global-optimal threshold",
     "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
@@ -144,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-AUDITED = ["ConfidenceOT: native gate",
+AUDITED = ["ConfidenceOT M4-E: native gate", "ConfidenceOT M4-R: native gate",
            "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
            "Partial OT (truth-derived m): global-optimal threshold"]
 
@@ -259,8 +269,18 @@ def main_comparison(pooled: dict, set1: list) -> tuple:
             ids = {key: row[key] for key in IDENTITY}
             fixed = counts(u > FIXED_CUTOFF, t)
             tuned = counts(u > chosen["threshold"], t)
+            plan_mass = 1.0 - row["untransported_plan_mass"]
             record = {**ids, "method": method,
                       "true_unmatched_fraction": float(t.mean()),
+                      # Each cell's transported mass counted up to its own nominal
+                      # mass, over the side's nominal mass: 1 - mean(u). Bounded, so a
+                      # plan that created mass cannot drive it negative.
+                      "transported_nominal_mass_fraction": float(1.0 - u.mean()),
+                      "untransported_nominal_mass_fraction": float(u.mean()),
+                      "plan_mass": plan_mass,
+                      # A KL-UOT plan carrying more than half again the nominal mass
+                      # did not converge to anything usable; such pairs are counted.
+                      "plan_mass_diverged": bool(not np.isfinite(plan_mass) or plan_mass > 1.5),
                       "untransported_plan_mass": row["untransported_plan_mass"],
                       "partial_m": row.get("partial_m", np.nan),
                       "both_classes": UNMATCHED_SIDE.get(row["biological_case"]) == row["side"]}
@@ -280,9 +300,10 @@ def main_comparison(pooled: dict, set1: list) -> tuple:
             decisions.append({**ids, "strategy": f"{method}: fixed cutoff (u > 0.5)", **fixed})
             decisions.append({**ids, "strategy": f"{method}: global-optimal threshold", **tuned})
     for row in set1:
-        if row["solver"] == "ConfidenceOT":
+        if row["solver"] in ("ConfidenceOT", "ConfidenceOT M4-R"):
+            gate = "M4-R" if row["solver"].endswith("M4-R") else "M4-E"
             decisions.append({**{key: row[key] for key in IDENTITY},
-                              "strategy": "ConfidenceOT: native gate",
+                              "strategy": f"ConfidenceOT {gate}: native gate",
                               **{key: row[key] for key in row if key not in IDENTITY
                                  and key not in ("solver", "decision")}})
         elif row["solver"] == "Balanced OT":
@@ -300,11 +321,14 @@ def score_quality(scores: pd.DataFrame, thresholds: pd.DataFrame) -> pd.DataFram
         ["roc_auc", "pr_auc", "local_optimal_f1", "global_optimal_f1", "fixed_cutoff_f1"]].mean()
     table = table.join(thresholds.set_index(["arm", "method"])[["threshold"]]
                        .rename(columns={"threshold": "global_optimal_threshold"}))
-    # The plan's untransported mass is one number per pair: read it off the source rows.
-    mass = (scores[scores["side"] == "source"]
-            .groupby(["arm", "method", "biological_case"])["untransported_plan_mass"].mean()
-            .unstack("biological_case").add_prefix("untransported_plan_mass: "))
-    return table.join(mass)
+    # The bounded mass readout, per case and side; and how many pairs' plans
+    # diverged, which is one fact per pair, read off the source rows.
+    mass = (scores.groupby(["arm", "method", "biological_case", "side"])
+            ["untransported_nominal_mass_fraction"].mean().unstack(["biological_case", "side"]))
+    mass.columns = [f"untransported nominal mass: {case} {side}" for case, side in mass.columns]
+    diverged = (scores[scores["side"] == "source"].groupby(["arm", "method"])
+                ["plan_mass_diverged"].sum().rename("diverged plans"))
+    return table.join(mass).join(diverged)
 
 
 def decision_summary(decisions: pd.DataFrame) -> str:
@@ -334,7 +358,7 @@ def mass_rejection(pooled: dict, set1: list) -> pd.DataFrame:
                          "unmatched": float(u[truth].mean()) if truth.any() else np.nan,
                          "matched": float(u[~truth].mean()) if (~truth).any() else np.nan})
     for row in set1:
-        if row["solver"] == "ConfidenceOT":
+        if row["solver"] in ("ConfidenceOT", "ConfidenceOT M4-R"):
             tp, fp, fn, tn = row["tp"], row["fp"], row["fn"], row["tn"]
             rows.append({key: row[key] for key in ("arm", "pair_id", "biological_case",
                                                    "technical_level", "side", "solver")}
@@ -375,6 +399,13 @@ def main() -> None:
             base = {"arm": arm, "pair_id": pair_id, "n_cells_nominal": int(n_cells),
                     "replicate": int(replicate), "technical_level": level,
                     "biological_case": case}
+            # Both of ConfidenceOT's gates come from the run 50_ compared against.
+            gates = None
+            fixed_provenance = json.loads((directory / "provenance.json").read_text(encoding="utf-8"))
+            if fixed_provenance.get("confidenceot_run"):
+                gates = pd.read_csv(Path(fixed_provenance["confidenceot_run"]) / "cell_confidence.csv",
+                                    usecols=["side", "method", "retained"])
+                gates["retained"] = gates["retained"].astype(str).str.lower().isin(["true", "1"])
 
             for side in ("source", "target"):
                 # ConfidenceOT: its own gate, as 50_ scored it from the stored run.
@@ -388,6 +419,24 @@ def main() -> None:
                     set1.append({**base, "solver": "ConfidenceOT", "side": side,
                                  "decision": "native M4-E gate",
                                  **counts(predicted, truth_order)})
+                    if gates is not None:
+                        rejected = {}
+                        for gate_name in ("M4-E", "M4-R"):
+                            block = gates[(gates["side"] == side) & (gates["method"] == gate_name)]
+                            if len(block) != should[side].size:
+                                raise SystemExit(f"{directory}: {gate_name} {side} has {len(block)} "
+                                                 f"cells against {should[side].size} truth rows")
+                            rejected[gate_name] = ~block["retained"].to_numpy(dtype=bool)
+                        # The gate file is in the h5ad's order, as the truth is. 50_ aligned
+                        # M4-E by cell name; reading it by position must give the same counts,
+                        # or M4-R's position cannot be trusted either.
+                        check = counts(rejected["M4-E"], should[side])
+                        if (check["tp"], check["fp"]) != (tp, fp):
+                            raise SystemExit(f"{directory}: M4-E {side} read by position does "
+                                             f"not reproduce 50_'s counts")
+                        set1.append({**base, "solver": "ConfidenceOT M4-R", "side": side,
+                                     "decision": "native M4-R gate, same run",
+                                     **counts(rejected["M4-R"], should[side])})
                 for solver in ("Vanilla UOT", FIXED_PARTIAL):
                     u = np.load(score_file(directory, solver, side))
                     if u.size != should[side].size:
@@ -402,9 +451,7 @@ def main() -> None:
                                  "decision": f"u > {FIXED_CUTOFF}", **result})
                     if solver == "Vanilla UOT":
                         # 1 - sum(pi): the source mass is normalised to 1.
-                        provenance = json.loads((directory / "provenance.json")
-                                                .read_text(encoding="utf-8"))
-                        untransported = 1.0 - float(provenance["vanilla_uot"]["transported_mass"])
+                        untransported = 1.0 - float(fixed_provenance["vanilla_uot"]["transported_mass"])
                         pooled.setdefault((arm, solver), []).append(
                             ({**base, "solver": solver, "side": side,
                               "untransported_plan_mass": untransported}, u, should[side]))
