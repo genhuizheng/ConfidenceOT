@@ -62,10 +62,23 @@ global-optimal threshold, and Balanced OT rejecting nothing.
   It is then frozen and applied unchanged to every size, replicate, level,
   case and side. Chosen with the truth: an upper bound.
 * **ROC-AUC, PR-AUC**: UOT and Partial OT only, on those same sides.
-* **Rejected-mass rate** 1 - sum(pi), the source mass being 1, read from
-  each pair's provenance.json. For Partial OT it equals 1 - m, which the
-  truth supplied, so it says nothing about whether the right cells were left
-  behind -- that is what its F1s and set 3 measure.
+* **Hard rejected nominal mass fraction** R_hard = sum_i a_i 1[rejected_i] /
+  sum_i a_i, from each strategy's final hard decision, for all four methods
+  (``hard_rejected_mass_fraction``, with ``retained_mass_fraction`` = 1 -
+  R_hard). With every cell weighing 1/n it equals the rejected-cell fraction,
+  and it is the one rejection quantity comparable across methods.
+* **Untransported plan mass** 1 - sum(pi), the source mass being 1, read
+  from each pair's provenance.json (``untransported_plan_mass``). It is a
+  property of the transport plan, not of any decision, and is not a rejection
+  rate. For Partial OT it equals 1 - m, the budget the truth supplied, which
+  is kept separately as ``partial_m``.
+
+``audit_emerged_source.csv`` lists, for every population_emerged pair, the
+source side under ConfidenceOT's gate and under Partial OT (truth-derived m):
+source cells, those that should be rejected (none), those rejected, the
+rejected-cell fraction, R_hard, the retained mass fraction and the false
+rejection rate -- the quantities that must agree before any claim about why
+the source is rejected.
 
 ConfidenceOT and Balanced OT get no score, no AUC and no threshold:
 ``main_scores_per_pair.csv`` and ``main_score_quality.csv`` hold UOT and
@@ -124,7 +137,38 @@ def parse_args() -> argparse.Namespace:
                         help="Under bench_root: <arm>/<pair_id>/ from solvers.slurm")
     parser.add_argument("--oracle-dir", default="solvers_oracle_budget",
                         help="Under bench_root: the --oracle-budget runs, if any")
+    parser.add_argument("--heatmap-metrics", type=Path, default=None,
+                        help="The arm heatmap's benchmark_metrics.csv, to set its source "
+                             "false rejection rate beside the emerged-source audit; "
+                             "default bench_root/benchmark_metrics.csv when it exists")
     return parser.parse_args()
+
+
+AUDITED = ["ConfidenceOT: native gate",
+           "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
+           "Partial OT (truth-derived m): global-optimal threshold"]
+
+
+def audit_emerged_source(decisions: pd.DataFrame, heatmap: Path | None) -> pd.DataFrame:
+    """The source side of every population_emerged pair, quantity by quantity."""
+    part = decisions[(decisions["biological_case"] == "population_emerged")
+                     & (decisions["side"] == "source")
+                     & decisions["strategy"].isin(AUDITED)]
+    columns = ["strategy", "arm", "pair_id", "n_cells_nominal", "replicate", "technical_level",
+               "n_cells", "n_should_reject", "rejected_n", "rejected_fraction",
+               "hard_rejected_mass_fraction", "retained_mass_fraction", "false_rejection_rate"]
+    audit = part[columns].rename(columns={"n_cells": "source_cells",
+                                          "n_should_reject": "source_should_reject",
+                                          "rejected_n": "source_rejected"})
+    if heatmap is not None and heatmap.exists():
+        reference = pd.read_csv(heatmap)
+        reference = reference[reference["method"] == "M4-E"][
+            ["preprocessing_label", "pair_id", "source_false_rejection_rate"]].rename(
+            columns={"preprocessing_label": "arm",
+                     "source_false_rejection_rate": "heatmap_source_false_rejection_rate"})
+        audit = audit.merge(reference, on=["arm", "pair_id"], how="left")
+        audit.loc[audit["strategy"] != AUDITED[0], "heatmap_source_false_rejection_rate"] = np.nan
+    return audit.sort_values(["strategy", "arm", "pair_id"]).reset_index(drop=True)
 
 
 def score_file(directory: Path, solver: str, side: str) -> Path:
@@ -137,9 +181,14 @@ def counts(predicted: np.ndarray, truth: np.ndarray) -> dict:
     fp = int(np.sum(predicted & ~truth))
     fn = int(np.sum(~predicted & truth))
     tn = int(np.sum(~predicted & ~truth))
+    # Each cell's nominal mass is 1/n on its side; R_hard is the share of it
+    # that the hard decision rejected.
+    mass = np.full(truth.size, 1.0 / truth.size)
+    hard = float(mass[predicted].sum() / mass.sum())
     return {"n_cells": int(truth.size), "n_should_reject": int(truth.sum()),
             "rejected_n": int(predicted.sum()),
             "rejected_fraction": float(predicted.mean()),
+            "hard_rejected_mass_fraction": hard, "retained_mass_fraction": 1.0 - hard,
             "tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "precision": tp / (tp + fp) if tp + fp else np.nan,
             "recall": tp / (tp + fn) if tp + fn else np.nan,
@@ -212,7 +261,7 @@ def main_comparison(pooled: dict, set1: list) -> tuple:
             tuned = counts(u > chosen["threshold"], t)
             record = {**ids, "method": method,
                       "true_unmatched_fraction": float(t.mean()),
-                      "rejected_mass_rate": row["rejected_mass_rate"],
+                      "untransported_plan_mass": row["untransported_plan_mass"],
                       "partial_m": row.get("partial_m", np.nan),
                       "both_classes": UNMATCHED_SIDE.get(row["biological_case"]) == row["side"]}
             if record["both_classes"]:
@@ -251,10 +300,10 @@ def score_quality(scores: pd.DataFrame, thresholds: pd.DataFrame) -> pd.DataFram
         ["roc_auc", "pr_auc", "local_optimal_f1", "global_optimal_f1", "fixed_cutoff_f1"]].mean()
     table = table.join(thresholds.set_index(["arm", "method"])[["threshold"]]
                        .rename(columns={"threshold": "global_optimal_threshold"}))
-    # Rejected-mass rate is one number per pair: read it off the source rows.
+    # The plan's untransported mass is one number per pair: read it off the source rows.
     mass = (scores[scores["side"] == "source"]
-            .groupby(["arm", "method", "biological_case"])["rejected_mass_rate"].mean()
-            .unstack("biological_case").add_prefix("rejected_mass_rate: "))
+            .groupby(["arm", "method", "biological_case"])["untransported_plan_mass"].mean()
+            .unstack("biological_case").add_prefix("untransported_plan_mass: "))
     return table.join(mass)
 
 
@@ -355,10 +404,10 @@ def main() -> None:
                         # 1 - sum(pi): the source mass is normalised to 1.
                         provenance = json.loads((directory / "provenance.json")
                                                 .read_text(encoding="utf-8"))
-                        rejected_mass = 1.0 - float(provenance["vanilla_uot"]["transported_mass"])
+                        untransported = 1.0 - float(provenance["vanilla_uot"]["transported_mass"])
                         pooled.setdefault((arm, solver), []).append(
                             ({**base, "solver": solver, "side": side,
-                              "rejected_mass_rate": rejected_mass}, u, should[side]))
+                              "untransported_plan_mass": untransported}, u, should[side]))
                     if UNMATCHED_SIDE.get(case) == side:
                         area = areas(u, should[side])
                         oracle = oracle_cutoffs(u, should[side])
@@ -380,7 +429,7 @@ def main() -> None:
                                             .read_text(encoding="utf-8"))["oracle_budget"]
                     pooled.setdefault((arm, ORACLE_PARTIAL), []).append(
                         ({**base, "solver": ORACLE_PARTIAL, "side": side,
-                          "rejected_mass_rate": 1.0 - float(provenance["transported_mass"]),
+                          "untransported_plan_mass": 1.0 - float(provenance["transported_mass"]),
                           "partial_m": float(provenance["m"])}, u, should[side]))
                     if UNMATCHED_SIDE.get(case) == side:
                         area = areas(u, should[side])
@@ -423,6 +472,27 @@ def main() -> None:
     mass = mass_rejection(pooled, set1)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mass.to_csv(args.output_dir / "set1_mass_rejection.csv", index=False)
+    heatmap = args.heatmap_metrics or args.bench_root / "benchmark_metrics.csv"
+    audit = audit_emerged_source(decisions, heatmap) if len(decisions) else pd.DataFrame()
+    if len(audit):
+        audit.to_csv(args.output_dir / "audit_emerged_source.csv", index=False)
+        print("\naudit, population_emerged source side, per strategy and arm "
+              "(every pair should have source_should_reject = 0):")
+        print(audit.groupby(["strategy", "arm"]).agg(
+            pairs=("pair_id", "size"), should_reject=("source_should_reject", "sum"),
+            rejected_fraction=("rejected_fraction", "mean"),
+            hard_rejected_mass=("hard_rejected_mass_fraction", "mean"),
+            false_rejection=("false_rejection_rate", "mean"),
+            minimum=("hard_rejected_mass_fraction", "min"),
+            maximum=("hard_rejected_mass_fraction", "max")).round(4).to_string())
+        gaps = {"rejected fraction vs R_hard": (audit["rejected_fraction"]
+                                                - audit["hard_rejected_mass_fraction"]).abs().max(),
+                "R_hard vs false rejection rate": (audit["hard_rejected_mass_fraction"]
+                                                   - audit["false_rejection_rate"]).abs().max()}
+        if "heatmap_source_false_rejection_rate" in audit:
+            gaps["ConfidenceOT vs the arm heatmap"] = (
+                audit["false_rejection_rate"] - audit["heatmap_source_false_rejection_rate"]).abs().max()
+        print("largest disagreement: " + "; ".join(f"{k} {v:.2g}" for k, v in gaps.items()))
     for name, rows in (("set1_fixed_operating_point", set1),
                        ("set2_oracle_threshold", set2),
                        ("set3_partial_ot_budget", set3)):
