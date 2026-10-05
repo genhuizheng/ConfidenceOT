@@ -165,7 +165,7 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
     n_rows = len(rows)
     cell_w, cell_h = 0.38, 0.26
     # The strategy gets a column of its own, left of the arm names.
-    left, right, top, bottom = 4.35, 1.55, 2.05, 0.55
+    left, right, top, bottom = 4.35, 1.55, 2.25, 0.55
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -227,7 +227,9 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
             "mean pair F1 on the sides holding both classes), then applied unchanged "
             "everywhere -- an upper bound.",
             "Partial OT is given m from each pair's truth. Ground truth under each column: "
-            "0 = those cells all have a match and should be kept; 1 = they have none.")):
+            "0 = those cells all have a match and should be kept; 1 = they have none.",
+            "ConfidenceOT M4-R is the same run's reversible gate; its outer loop cycled and "
+            "stopped at the iteration cap in most pairs other than populations_disjoint.")):
         fig.text(0.3 / fig_w, 1 - (0.42 + 0.2 * line) / fig_h, text,
                  fontsize=7.4, color=MUTED, va="top")
     cax = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w, bottom / fig_h,
@@ -311,7 +313,8 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
              fontsize=7.0, color=MUTED, va="top")
     fig.text(0.065, 0.88,
              "The global-optimal threshold and Partial OT's m are taken from the truth: "
-             "upper bounds, not usable rules. ConfidenceOT and the fixed cutoff use no truth.",
+             "upper bounds, not usable rules. ConfidenceOT and the fixed cutoff use no truth. "
+             "M4-R's outer loop cycled in most pairs other than populations_disjoint.",
              fontsize=7.0, color=MUTED, va="top")
     for suffix in ("png", "pdf"):
         fig.savefig(out / f"method_comparison_f1.{suffix}", dpi=220)
