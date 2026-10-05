@@ -1,9 +1,9 @@
-"""Four methods at three preprocessing arms, on the benchmark the arm heatmap used.
+"""Five methods at three preprocessing arms, on the benchmark the arm heatmap used.
 
 The input is ``main_decisions_per_pair.csv`` from ``56_comparator_metrics.py``:
 one row per pair, side and strategy, holding the hard decisions' counts. The
 pairs are the arm heatmap's own -- the native-depth simulation, four cases,
-three technical levels, three sizes, five replicates. Seven strategies:
+three technical levels, three sizes, five replicates. Nine strategies:
 
     ConfidenceOT M4-E: native gate
     ConfidenceOT M4-R: native gate      (the same run's reversible gate)
@@ -11,6 +11,8 @@ three technical levels, three sizes, five replicates. Seven strategies:
     Vanilla UOT: global-optimal threshold
     Partial OT (truth-derived m): fixed cutoff (u > 0.5)
     Partial OT (truth-derived m): global-optimal threshold
+    IC-POT (c_s = c_t = 0.5): fixed cutoff (u > 0.5)
+    IC-POT (c_s = c_t = 0.5): global-optimal threshold
     Balanced OT: no rejection
 
 u is the share of a cell's own mass left untransported. The global-optimal
@@ -18,7 +20,8 @@ threshold is one per method and arm, chosen with the truth to maximise the
 mean pair F1 on the sides holding both classes, then frozen and applied to
 every pair, case and side: an upper bound, not a usable rule. Partial OT is
 given its m from the truth of each pair, so its rejected mass was supplied,
-not found.
+not found. IC-POT runs at the literature's constant unmatched cost (Tripathi
+et al., arXiv:2605.20030), and nothing in it comes from the truth.
 
 Two figures.
 
@@ -165,7 +168,7 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
     n_rows = len(rows)
     cell_w, cell_h = 0.38, 0.26
     # The strategy gets a column of its own, left of the arm names.
-    left, right, top, bottom = 4.35, 1.55, 2.25, 0.55
+    left, right, top, bottom = 4.35, 1.55, 2.45, 0.55
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -228,6 +231,8 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
             "everywhere -- an upper bound.",
             "Partial OT is given m from each pair's truth. Ground truth under each column: "
             "0 = those cells all have a match and should be kept; 1 = they have none.",
+            "IC-POT runs at the literature's constant unmatched cost, c_s = c_t = 0.5 "
+            "(Tripathi et al., arXiv:2605.20030); nothing in it comes from the truth.",
             "ConfidenceOT M4-R is the same run's reversible gate; its outer loop cycled and "
             "stopped at the iteration cap in most pairs other than populations_disjoint.")):
         fig.text(0.3 / fig_w, 1 - (0.42 + 0.2 * line) / fig_h, text,

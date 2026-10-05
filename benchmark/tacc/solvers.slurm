@@ -48,8 +48,19 @@ label=${CONFIDENCEOT_SOLVER_LABEL:?Set CONFIDENCEOT_SOLVER_LABEL to the locked c
 # --oracle-budget), into its own tree so it can never be read as one of the
 # usable methods.
 oracle_budget=${CONFIDENCEOT_SOLVER_ORACLE_BUDGET:-0}
+# A value runs only IC-POT, at that unmatched cost on both sides
+# (50_solver_comparison.py --icpot-cost; the literature's is 0.5), into its
+# own tree as well.
+icpot_cost=${CONFIDENCEOT_SOLVER_ICPOT_COST:-}
+if [[ -n "$icpot_cost" && "$oracle_budget" == "1" ]]; then
+    echo "CONFIDENCEOT_SOLVER_ICPOT_COST and CONFIDENCEOT_SOLVER_ORACLE_BUDGET each run one solver alone; set one" >&2
+    exit 2
+fi
 mode_args=()
-if [[ "$oracle_budget" == "1" ]]; then
+if [[ -n "$icpot_cost" ]]; then
+    mode_args=(--icpot-cost "$icpot_cost")
+    out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers_icpot/$label}
+elif [[ "$oracle_budget" == "1" ]]; then
     mode_args=(--oracle-budget)
     out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers_oracle_budget/$label}
 else
@@ -125,6 +136,7 @@ echo "work list   $worklist"
 echo "seed        $seed"
 echo "uot method  $uot_method"
 echo "partial m   ${partial_mass:-the default sweep}"
+echo "icpot cost  ${icpot_cost:-not run}"
 
 failures=0
 for (( unit = start; unit < stop; unit++ )); do

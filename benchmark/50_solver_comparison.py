@@ -1,9 +1,10 @@
-"""Four solvers on one cost matrix, scored by one rule.
+"""Five solvers on one cost matrix, scored by one rule.
 
 The comparison this file makes is between **solvers**, so everything else has
 to be the same object and not merely the same recipe: one manifest, one
 preprocessing label, one call to ``prepare_joint_representation``, one cost
-matrix. Three of the four solvers then come from POT and the fourth is ours.
+matrix. The comparators then come from POT -- IC-POT as POT's network simplex
+on the paper's own reduction -- and the fifth, ConfidenceOT, is ours.
 
 **Why the comparators come from POT.** A method comparison whose competing
 methods are the proposer's own code invites the reading that they were
@@ -14,6 +15,7 @@ test.
     Traditional OT   ot.emd                              exact, balanced
     Vanilla UOT      ot.unbalanced.sinkhorn_unbalanced   KL-penalised marginals
     Partial OT       ot.partial.partial_wasserstein      fixed transported mass
+    IC-POT           ot.emd on augmented supports        constant unmatched cost
     ConfidenceOT     read from its own completed run
 
 **ConfidenceOT is read, not recomputed.** Its gate comes from a calibration
@@ -61,6 +63,24 @@ parameter that decides that method's entire result -- at m = 0.85 it rejects
 exactly 15% of cells by construction -- and handing it a value near the true
 unmatched fraction is handing it the answer. Every value in the sweep is its
 own row, so the reader sees the curve rather than a point somebody picked.
+
+**IC-POT is run at the literature's constant cost** (``--icpot-cost``, its
+own mode and output directory). Tripathi et al., *Take It or Leave It:
+Intent-Controlled Partial Optimal Transport* (arXiv:2605.20030), price leaving
+a cell unmatched cell by cell, but every such profile in the paper is built
+from side information this simulation does not have: a known selection
+mechanism, class posteriors, sensor maps. What carries over is the constant
+part, c_s = c_t = A with A = 0.5, the value of the paper's open-partial domain
+adaptation runs (its Appendix H), whose source-private and target-private
+classes are this benchmark's population_lost and population_emerged. With
+constant costs only lambda = c_s + c_t matters (its Proposition 2), and a pair
+costing more than lambda carries no mass in any optimum (Proposition 5); the
+cost is median-normalised, so lambda = 1 is its median. Unlike Partial OT,
+nothing is read off the truth. It is solved as the paper's Proposition 6
+states it, balanced OT on supports augmented by one dummy point each, by the
+same network simplex as Traditional OT. ``traditional_ot.icpot`` solves the
+same problem with HiGHS and agreed to 1e-16 on test instances, but as one LP
+variable per admissible pair, which at N = 10,000 is tens of millions.
 
 The rejection rule is ``benchmark/comparator_rejection.py``: one cell-level
 unmatchedness score for the POT solvers, a fixed cutoff at 0.5 as the
@@ -141,6 +161,11 @@ def parse_args() -> argparse.Namespace:
              "has it in population_lost and population_emerged, 0 in "
              "populations_disjoint. An upper-bound analysis, written as its own "
              "solver; give it its own output directory.")
+    parser.add_argument(
+        "--icpot-cost", type=float, default=None,
+        help="Run only IC-POT, with the source and the target unmatched cost "
+             "both set to this value; the literature's is 0.5. Written as its "
+             "own solver; give it its own output directory.")
     parser.add_argument("--max-iterations", type=int, default=20_000,
                         help="Sinkhorn iterations for Vanilla UOT")
     parser.add_argument(
@@ -289,8 +314,34 @@ def confidenceot_from_disk(run_directory: Path, truth_index: dict) -> dict:
     return out
 
 
+def constant_cost_icpot(a: np.ndarray, b: np.ndarray, cost: np.ndarray,
+                        unmatched_cost: float, iterations: int):
+    """IC-POT with c_s = c_t = unmatched_cost, as balanced OT on augmented supports.
+
+    Proposition 6 of Tripathi et al.: one dummy point per side, the dummy
+    target carrying the source's total mass and the dummy source the
+    target's, a cell's cost to the other side's dummy its own unmatched cost,
+    and nothing paid between the two dummies. The real block of the plan is
+    the IC-POT coupling. Returns it with POT's log.
+    """
+    import ot
+
+    n, m = cost.shape
+    augmented = np.zeros((n + 1, m + 1))
+    augmented[:n, :m] = cost
+    augmented[:n, m] = unmatched_cost
+    augmented[n, :m] = unmatched_cost
+    plan, record = ot.emd(np.append(a, b.sum()), np.append(b, a.sum()), augmented,
+                          numItermax=iterations, log=True)
+    return plan[:n, :m], record
+
+
 def main() -> None:
     args = parse_args()
+    if args.icpot_cost is not None and (
+            args.oracle_budget or not np.isfinite(args.icpot_cost) or args.icpot_cost <= 0):
+        raise SystemExit("--icpot-cost takes one positive value and runs on its own, "
+                         "without --oracle-budget")
     import ot
     import ot.partial
     import ot.unbalanced
@@ -371,7 +422,28 @@ def main() -> None:
                     f"score_{method.replace(' ', '_').replace('=', '')}"
                     f"_{side}.npy", result.score)
 
-    if args.oracle_budget:
+    if args.icpot_cost is not None:
+        # The literature's constant cost on both sides; nothing is read off the
+        # truth. With constant costs only lambda = c_s + c_t matters, and a pair
+        # dearer than lambda carries no mass in any optimum, which the record
+        # checks rather than assumes.
+        price = 2.0 * args.icpot_cost
+        plan, record = constant_cost_icpot(a, b, cost, args.icpot_cost, args.emd_iterations)
+        provenance["icpot"] = {
+            "source_unmatched_cost": args.icpot_cost,
+            "target_unmatched_cost": args.icpot_cost,
+            "lambda": price,
+            "result_code": int(record["result_code"]),
+            "warning": record["warning"],
+            "transported_mass": float(plan.sum()),
+            "admissible_pair_fraction": float(np.mean(cost < price)),
+            "mass_on_pairs_above_lambda": float(plan[cost > price].sum()),
+        }
+        if int(record["result_code"]) != 1:
+            raise SystemExit(f"IC-POT did not reach the optimum: {record['warning']}")
+        add("IC-POT", plan=plan)
+        del plan
+    elif args.oracle_budget:
         # The budget read off the truth: the mass Partial OT would have to be
         # told to leave behind. Only the simulation knows it, so this is an
         # upper-bound analysis and never a method; nothing else is run with it.

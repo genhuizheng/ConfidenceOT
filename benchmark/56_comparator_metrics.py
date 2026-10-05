@@ -18,7 +18,8 @@ and the largest u it saved is recorded only as a check that its plan really
 did transport everything.
 
 **2. Score discrimination, oracle / upper bound** (``set2_oracle_threshold.csv``).
-The continuous u of Vanilla UOT and Partial OT (m = 0.85): ROC-AUC, PR-AUC,
+The continuous u of Vanilla UOT and Partial OT (m = 0.85), and of the
+truth-derived-m Partial OT and IC-POT where they were run: ROC-AUC, PR-AUC,
 and precision, recall and F1 at the max-F1 threshold. That threshold is
 chosen per pair with the simulation's ground truth, so it is an upper bound
 on the score and not a rule anyone could apply to real data. One rule only,
@@ -45,16 +46,19 @@ so u times that mass is exactly the cell's untransported mass and the
 coupling is not needed. In populations_disjoint the readout is the total
 transported mass, which should be 0; all_shared has no unmatched population.
 
-**The main comparison** (``main_*.csv``) is four methods at three arms.
+**The main comparison** (``main_*.csv``) is five methods at three arms.
 Partial OT in it is the truth-derived-m run read from ``--oracle-dir``, shown
 as "Partial OT (truth-derived m)"; the fixed m = 0.85 run stays in sets 1-3
-for reference and is not part of it. Seven strategies, as hard decisions per
-pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's two native
-gates, M4-E and M4-R, both read from the one run (the run fits both, with
-the same cost and the same c; M4-R's file order is trusted only because
-M4-E read the same way reproduces 50_'s name-aligned counts), Vanilla UOT
-and Partial OT each at the fixed cutoff u > 0.5 and at the global-optimal
-threshold, and Balanced OT rejecting nothing.
+for reference and is not part of it. IC-POT is the run read from
+``--icpot-dir``, at the literature's constant unmatched cost c_s = c_t = 0.5
+(Tripathi et al., arXiv:2605.20030, the value of their open-partial domain
+adaptation runs); no truth goes into it. Nine strategies, as hard decisions
+per pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's two
+native gates, M4-E and M4-R, both read from the one run (the run fits both,
+with the same cost and the same c; M4-R's file order is trusted only because
+M4-E read the same way reproduces 50_'s name-aligned counts), Vanilla UOT,
+Partial OT and IC-POT each at the fixed cutoff u > 0.5 and at the
+global-optimal threshold, and Balanced OT rejecting nothing.
 
 * **Local-optimal F1**: per pair, the max-F1 threshold chosen with that
   pair's truth, then the pair F1s averaged. Pair-specific, an upper bound.
@@ -64,7 +68,7 @@ threshold, and Balanced OT rejecting nothing.
   population_emerged), so every pair counts once and cells are never pooled.
   It is then frozen and applied unchanged to every size, replicate, level,
   case and side. Chosen with the truth: an upper bound.
-* **ROC-AUC, PR-AUC**: UOT and Partial OT only, on those same sides.
+* **ROC-AUC, PR-AUC**: UOT, Partial OT and IC-POT only, on those same sides.
 * **Hard rejected nominal mass fraction** R_hard = sum_i a_i 1[rejected_i] /
   sum_i a_i, from each strategy's final hard decision, for all four methods
   (``hard_rejected_mass_fraction``, with ``retained_mass_fraction`` = 1 -
@@ -90,8 +94,8 @@ rejection rate -- the quantities that must agree before any claim about why
 the source is rejected.
 
 ConfidenceOT and Balanced OT get no score, no AUC and no threshold:
-``main_scores_per_pair.csv`` and ``main_score_quality.csv`` hold UOT and
-Partial OT only.
+``main_scores_per_pair.csv`` and ``main_score_quality.csv`` hold UOT,
+Partial OT and IC-POT only.
 
     python benchmark/56_comparator_metrics.py BENCH_ROOT OUT_DIR
 """
@@ -115,10 +119,15 @@ CASES = ("all_shared", "population_lost", "population_emerged", "populations_dis
 PAIR = re.compile(r"^N(\d+)_rep(\d+)_(L\d_[a-z_]+?)_(" + "|".join(CASES) + r")$")
 FIXED_PARTIAL = "Partial OT m=0.85"
 ORACLE_PARTIAL = "Oracle-budget Partial OT"
-# The two scored methods of the main comparison, by the name their outputs are
-# saved under and the name they are shown under. The fixed m = 0.85 run stays
-# in sets 1-3 for reference and is not part of it.
-MAIN_SCORED = {"Vanilla UOT": "Vanilla UOT", ORACLE_PARTIAL: "Partial OT (truth-derived m)"}
+ICPOT = "IC-POT"
+# The literature's constant unmatched cost, both sides; a run at any other
+# value is refused rather than shown under this name.
+ICPOT_COST = 0.5
+# The three scored methods of the main comparison, by the name their outputs
+# are saved under and the name they are shown under. The fixed m = 0.85 run
+# stays in sets 1-3 for reference and is not part of it.
+MAIN_SCORED = {"Vanilla UOT": "Vanilla UOT", ORACLE_PARTIAL: "Partial OT (truth-derived m)",
+               ICPOT: f"IC-POT (c_s = c_t = {ICPOT_COST})"}
 STRATEGIES = [
     "ConfidenceOT M4-E: native gate",
     "ConfidenceOT M4-R: native gate",
@@ -126,6 +135,8 @@ STRATEGIES = [
     "Vanilla UOT: global-optimal threshold",
     "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
     "Partial OT (truth-derived m): global-optimal threshold",
+    f"IC-POT (c_s = c_t = {ICPOT_COST}): fixed cutoff (u > 0.5)",
+    f"IC-POT (c_s = c_t = {ICPOT_COST}): global-optimal threshold",
     "Balanced OT: no rejection",
 ]
 # Directional F1 reads the side holding the cells to reject; all_shared has none.
@@ -147,6 +158,8 @@ def parse_args() -> argparse.Namespace:
                         help="Under bench_root: <arm>/<pair_id>/ from solvers.slurm")
     parser.add_argument("--oracle-dir", default="solvers_oracle_budget",
                         help="Under bench_root: the --oracle-budget runs, if any")
+    parser.add_argument("--icpot-dir", default="solvers_icpot",
+                        help="Under bench_root: the --icpot-cost runs, if any")
     parser.add_argument("--heatmap-metrics", type=Path, default=None,
                         help="The arm heatmap's benchmark_metrics.csv, to set its source "
                              "false rejection rate beside the emerged-source audit; "
@@ -156,7 +169,9 @@ def parse_args() -> argparse.Namespace:
 
 AUDITED = ["ConfidenceOT M4-E: native gate", "ConfidenceOT M4-R: native gate",
            "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
-           "Partial OT (truth-derived m): global-optimal threshold"]
+           "Partial OT (truth-derived m): global-optimal threshold",
+           f"IC-POT (c_s = c_t = {ICPOT_COST}): fixed cutoff (u > 0.5)",
+           f"IC-POT (c_s = c_t = {ICPOT_COST}): global-optimal threshold"]
 
 
 def audit_emerged_source(decisions: pd.DataFrame, heatmap: Path | None) -> pd.DataFrame:
@@ -253,10 +268,10 @@ IDENTITY = ("arm", "pair_id", "n_cells_nominal", "replicate", "technical_level",
 
 
 def main_comparison(pooled: dict, set1: list) -> tuple:
-    """Per-pair scores of UOT and Partial OT, and every strategy's decisions.
+    """Per-pair scores of UOT, Partial OT and IC-POT, and every strategy's decisions.
 
-    Returns the per pair-side score table (UOT and truth-derived-m Partial OT
-    only), the hard decisions of the six strategies, and the global
+    Returns the per pair-side score table (UOT, truth-derived-m Partial OT and
+    IC-POT only), the hard decisions of every strategy, and the global
     thresholds.
     """
     scores, decisions, thresholds = [], [], []
@@ -315,7 +330,7 @@ def main_comparison(pooled: dict, set1: list) -> tuple:
 
 
 def score_quality(scores: pd.DataFrame, thresholds: pd.DataFrame) -> pd.DataFrame:
-    """Output C: UOT and Partial OT only, on the sides holding both classes."""
+    """Output C: UOT, Partial OT and IC-POT only, on the sides holding both classes."""
     both = scores[scores["both_classes"]]
     table = both.groupby(["arm", "method"])[
         ["roc_auc", "pr_auc", "local_optimal_f1", "global_optimal_f1", "fixed_cutoff_f1"]].mean()
@@ -488,6 +503,42 @@ def main() -> None:
                                      "precision": oracle.get("oracle_f1_precision", np.nan),
                                      "recall": oracle.get("oracle_f1_recall", np.nan),
                                      "f1": oracle.get("oracle_f1_f1", np.nan)})
+                # IC-POT at the literature's constant cost, where it was run.
+                icpot_directory = args.bench_root / args.icpot_dir / arm / pair_id
+                if (icpot_directory / "solver_comparison.csv").exists():
+                    provenance = json.loads((icpot_directory / "provenance.json")
+                                            .read_text(encoding="utf-8"))["icpot"]
+                    run_at = (provenance["source_unmatched_cost"], provenance["target_unmatched_cost"])
+                    if run_at != (ICPOT_COST, ICPOT_COST):
+                        raise SystemExit(f"{icpot_directory}: IC-POT was run at (c_s, c_t) = "
+                                         f"{run_at}, not {ICPOT_COST} on both sides")
+                    u = np.load(score_file(icpot_directory, ICPOT, side))
+                    if u.size != should[side].size:
+                        raise SystemExit(f"{icpot_directory}: IC-POT {side} has {u.size} scores "
+                                         f"against {should[side].size} truth rows")
+                    result = counts(u > FIXED_CUTOFF, should[side])
+                    stored = pd.read_csv(icpot_directory / "solver_comparison.csv")
+                    stored = stored[(stored["method"] == ICPOT) & (stored["side"] == side)].iloc[0]
+                    if (result["tp"], result["fp"]) != (int(stored["fixed_tp"]), int(stored["fixed_fp"])):
+                        raise SystemExit(f"{icpot_directory}: IC-POT {side} does not reproduce the "
+                                         f"stored fixed-cutoff counts")
+                    set1.append({**base, "solver": ICPOT, "side": side,
+                                 "decision": f"u > {FIXED_CUTOFF}, c_s = c_t = {ICPOT_COST}",
+                                 **result})
+                    pooled.setdefault((arm, ICPOT), []).append(
+                        ({**base, "solver": ICPOT, "side": side,
+                          "untransported_plan_mass": 1.0 - float(provenance["transported_mass"])},
+                         u, should[side]))
+                    if UNMATCHED_SIDE.get(case) == side:
+                        area = areas(u, should[side])
+                        oracle = oracle_cutoffs(u, should[side])
+                        set2.append({**base, "solver": ICPOT, "side": side,
+                                     "analysis": "oracle / upper bound",
+                                     "roc_auc": area["roc_auc"], "pr_auc": area["pr_auc"],
+                                     "max_f1_threshold": oracle.get("oracle_f1_cutoff", np.nan),
+                                     "precision": oracle.get("oracle_f1_precision", np.nan),
+                                     "recall": oracle.get("oracle_f1_recall", np.nan),
+                                     "f1": oracle.get("oracle_f1_f1", np.nan)})
                 balanced = np.load(score_file(directory, "Traditional OT", side))
                 set1.append({**base, "solver": "Balanced OT", "side": side,
                              "decision": "none: every unit of mass is transported",
@@ -546,7 +597,7 @@ def main() -> None:
         frame = pd.DataFrame(rows)
         frame.to_csv(args.output_dir / f"{name}.csv", index=False)
         print(f"{name}: {len(frame)} rows -> {args.output_dir / (name + '.csv')}")
-    # The main comparison: four methods, Partial OT with the truth-derived m only.
+    # The main comparison: five methods, Partial OT with the truth-derived m only.
     for name, frame in (("main_scores_per_pair", scores),
                         ("main_decisions_per_pair", decisions),
                         ("main_global_thresholds", thresholds)):
@@ -555,7 +606,7 @@ def main() -> None:
     if len(scores):
         quality = score_quality(scores, thresholds)
         quality.round(4).to_csv(args.output_dir / "main_score_quality.csv")
-        print("\nscore quality, UOT and Partial OT (truth-derived m) only; AUCs and F1s on "
+        print("\nscore quality, UOT, Partial OT (truth-derived m) and IC-POT only; AUCs and F1s on "
               "the sides holding both classes; the local and global thresholds are chosen "
               "with the truth (upper bounds):")
         print(quality.round(3).to_string())
