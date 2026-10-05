@@ -7,8 +7,9 @@ Three checks, read straight from the table 56_comparator_metrics.py wrote:
    source -- with the number of pairs behind each mean, their macro mean, and
    the plain mean over pairs that 55_plot_method_comparison.py plots. The two
    agree when every case has the same number of pairs.
-2. Whether the two ConfidenceOT gates are distinct rows: how many pair-sides
-   differ between M4-E and M4-R. Zero would mean one was copied from the other.
+2. Whether the two ConfidenceOT gates are distinct rows: at each within-side
+   acceptance minimum, how many pair-sides differ between M4-E and M4-R. Zero
+   would mean one was copied from the other.
 3. Partial OT (truth-derived m) on populations_disjoint, where m = 0 must mean
    every source cell is rejected: for a few pairs per arm, m, the source
    scores, the rejected count and the counts behind F1, read from the saved
@@ -68,17 +69,20 @@ def main() -> None:
     print("\n1. directional F1 by case:")
     print(table.round(3).to_string())
 
-    # 2. Are the two ConfidenceOT gates distinct?
-    gates = [s for s in d["strategy"].unique() if s.startswith("ConfidenceOT")]
+    # 2. Are the two ConfidenceOT gates distinct, at each acceptance minimum?
+    gates = sorted(s for s in d["strategy"].unique() if s.startswith("ConfidenceOT"))
     print(f"\n2. ConfidenceOT strategies present: {gates}")
-    if len(gates) == 2:
-        key = ["arm", "pair_id", "side"]
-        e = d[d["strategy"] == gates[0]].set_index(key)[["tp", "fp", "fn", "tn"]]
-        r = d[d["strategy"] == gates[1]].set_index(key)[["tp", "fp", "fn", "tn"]]
+    key = ["arm", "pair_id", "side"]
+    for e_name in (s for s in gates if s.startswith("ConfidenceOT M4-E")):
+        r_name = e_name.replace("M4-E", "M4-R", 1)
+        if r_name not in gates:
+            continue
+        e = d[d["strategy"] == e_name].set_index(key)[["tp", "fp", "fn", "tn"]]
+        r = d[d["strategy"] == r_name].set_index(key)[["tp", "fp", "fn", "tn"]]
         joined = e.join(r, lsuffix="_e", rsuffix="_r", how="inner")
         differ = ((joined["tp_e"] != joined["tp_r"]) | (joined["fp_e"] != joined["fp_r"]))
-        print(f"   pair-sides compared: {len(joined)}; pair-sides where {gates[0]} and "
-              f"{gates[1]} reject differently: {int(differ.sum())}")
+        print(f"   pair-sides compared: {len(joined)}; pair-sides where {e_name} and "
+              f"{r_name} reject differently: {int(differ.sum())}")
         print(differ.groupby(level="arm").sum().rename("differing pair-sides").to_string())
 
     # 3. Partial OT with m = 0 on populations_disjoint.

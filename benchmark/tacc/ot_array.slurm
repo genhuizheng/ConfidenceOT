@@ -48,6 +48,18 @@ chunk_size=${CONFIDENCEOT_BENCH_CHUNK:-24}
 device=${CONFIDENCEOT_BENCH_DEVICE:-cpu}
 workers=${CONFIDENCEOT_BENCH_WORKERS:-8}
 force=${CONFIDENCEOT_BENCH_FORCE:-0}
+# Empty keeps 02_run_pair.py's own within-side acceptance minimum, 0.90, and
+# the runs/ tree. A value calibrates to it instead and writes
+# runs_acceptance_<value>/, so runs at two minimums never share a directory
+# and the resume check never takes one for the other.
+acceptance=${CONFIDENCEOT_BENCH_WITHIN_SIDE_ACCEPTANCE:-}
+acceptance_args=()
+runs_dir=runs
+if [[ -n "$acceptance" ]]; then
+    acceptance_args=(--within-side-acceptance-minimum "$acceptance")
+    runs_dir=runs_acceptance_$acceptance
+fi
+echo "within-side acceptance ${acceptance:-0.90, the runner default} -> $root/$runs_dir"
 
 total=$(( $(wc -l < "$worklist") - 1 ))
 start=$(( chunk * chunk_size ))
@@ -63,7 +75,7 @@ for (( unit = start; unit < stop; unit++ )); do
     line=$(( unit + 2 ))
     IFS=',' read -r manifest pair_index pair_id preprocessing <<< \
         "$(sed -n "${line}p" "$worklist" | cut -d',' -f1-4)"
-    output=$root/runs/$preprocessing
+    output=$root/$runs_dir/$preprocessing
     # The solver writes scope_all/budget_<value>, and the budget is
     # not known here. Checking scope_all/SUCCESS found nothing, so
     # every resubmission redid work that was already complete.
@@ -87,6 +99,7 @@ for (( unit = start; unit < stop; unit++ )); do
         --analysis-scope all \
         --preprocessing "$preprocessing" \
         --calibration-null within_side_split \
+        "${acceptance_args[@]}" \
         --epsilon "${CONFIDENCEOT_BENCH_EPSILON:-0.1}" \
         --lambda-a 1.0 --lambda-b 1.0 \
         --tolerance 1e-4 \

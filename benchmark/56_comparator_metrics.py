@@ -52,13 +52,18 @@ as "Partial OT (truth-derived m)"; the fixed m = 0.85 run stays in sets 1-3
 for reference and is not part of it. IC-POT is the run read from
 ``--icpot-dir``, at the literature's constant unmatched cost c_s = c_t = 0.5
 (Tripathi et al., arXiv:2605.20030, the value of their open-partial domain
-adaptation runs); no truth goes into it. Nine strategies, as hard decisions
-per pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's two
-native gates, M4-E and M4-R, both read from the one run (the run fits both,
-with the same cost and the same c; M4-R's file order is trusted only because
-M4-E read the same way reproduces 50_'s name-aligned counts), Vanilla UOT,
-Partial OT and IC-POT each at the fixed cutoff u > 0.5 and at the
-global-optimal threshold, and Balanced OT rejecting nothing.
+adaptation runs); no truth goes into it. Thirteen strategies, as hard
+decisions per pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's
+two native gates, M4-E and M4-R, at three within-side acceptance minimums
+(0.90, 0.95, 0.99), Vanilla UOT, Partial OT and IC-POT each at the fixed
+cutoff u > 0.5 and at the global-optimal threshold, and Balanced OT
+rejecting nothing. A run fits both gates with the same cost and the same c,
+calibrated with M4-E so that it accepts at least that share of a
+within-side null; 0.90 is the run 50_ compared against and the others are
+read from ``runs_acceptance_<value>/``, each refused unless its own records
+state that minimum. Every gate is read by position, which is trusted only
+because the 0.90 M4-E gate read that way reproduces 50_'s name-aligned counts
+and every other gate's cells stand in that same order.
 
 * **Local-optimal F1**: per pair, the max-F1 threshold chosen with that
   pair's truth, then the pair F1s averaged. Pair-specific, an upper bound.
@@ -123,14 +128,27 @@ ICPOT = "IC-POT"
 # The literature's constant unmatched cost, both sides; a run at any other
 # value is refused rather than shown under this name.
 ICPOT_COST = 0.5
+# ConfidenceOT's within-side acceptance minimum: the raw acceptance its
+# rejection cost must reach on the within-side null. runs/ holds the runner's
+# default and runs_acceptance_<value>/ the others, on the same pairs and cost;
+# M4-R takes the cost M4-E was calibrated to.
+DEFAULT_ACCEPTANCE = 0.90
+ACCEPTANCES = (0.90, 0.95, 0.99)
+
+
+def confidenceot_strategy(gate: str, acceptance: float) -> str:
+    return f"ConfidenceOT {gate} (acceptance >= {acceptance:.2f}): native gate"
+
+
+
 # The three scored methods of the main comparison, by the name their outputs
 # are saved under and the name they are shown under. The fixed m = 0.85 run
 # stays in sets 1-3 for reference and is not part of it.
 MAIN_SCORED = {"Vanilla UOT": "Vanilla UOT", ORACLE_PARTIAL: "Partial OT (truth-derived m)",
                ICPOT: f"IC-POT (c_s = c_t = {ICPOT_COST})"}
 STRATEGIES = [
-    "ConfidenceOT M4-E: native gate",
-    "ConfidenceOT M4-R: native gate",
+    *(confidenceot_strategy("M4-E", acceptance) for acceptance in ACCEPTANCES),
+    *(confidenceot_strategy("M4-R", acceptance) for acceptance in ACCEPTANCES),
     "Vanilla UOT: fixed cutoff (u > 0.5)",
     "Vanilla UOT: global-optimal threshold",
     "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
@@ -167,7 +185,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-AUDITED = ["ConfidenceOT M4-E: native gate", "ConfidenceOT M4-R: native gate",
+# The first is the gate the arm heatmap scored, and the only one checked against it.
+AUDITED = [*(confidenceot_strategy("M4-E", acceptance) for acceptance in ACCEPTANCES),
+           *(confidenceot_strategy("M4-R", acceptance) for acceptance in ACCEPTANCES),
            "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
            "Partial OT (truth-derived m): global-optimal threshold",
            f"IC-POT (c_s = c_t = {ICPOT_COST}): fixed cutoff (u > 0.5)",
@@ -194,6 +214,30 @@ def audit_emerged_source(decisions: pd.DataFrame, heatmap: Path | None) -> pd.Da
         audit = audit.merge(reference, on=["arm", "pair_id"], how="left")
         audit.loc[audit["strategy"] != AUDITED[0], "heatmap_source_false_rejection_rate"] = np.nan
     return audit.sort_values(["strategy", "arm", "pair_id"]).reset_index(drop=True)
+
+
+def read_gates(run: Path) -> pd.DataFrame:
+    """Both of a ConfidenceOT run's gates, cell by cell, in the file's order."""
+    gates = pd.read_csv(run / "cell_confidence.csv",
+                        usecols=["side", "method", "retained", "observation_id"])
+    gates["retained"] = gates["retained"].astype(str).str.lower().isin(["true", "1"])
+    gates["observation_id"] = gates["observation_id"].astype(str)
+    return gates
+
+
+def acceptance_of(run: Path) -> float:
+    """The within-side acceptance minimum a run was calibrated to, as it recorded it."""
+    stated = json.loads((run / "run.json").read_text(encoding="utf-8")).get(
+        "within_side_acceptance_minimum")
+    if stated is not None:
+        return float(stated)
+    # Runs from before the option say it only in the calibration's own words.
+    requirement = json.loads((run / "calibration.json").read_text(encoding="utf-8")).get(
+        "acceptance_requirement", "")
+    match = re.fullmatch(r"within-side raw acceptance >= ([0-9.]+)", requirement)
+    if match is None:
+        raise SystemExit(f"{run}: no within-side acceptance in {requirement!r}")
+    return float(match.group(1))
 
 
 def score_file(directory: Path, solver: str, side: str) -> Path:
@@ -318,9 +362,9 @@ def main_comparison(pooled: dict, set1: list) -> tuple:
         if row["solver"] in ("ConfidenceOT", "ConfidenceOT M4-R"):
             gate = "M4-R" if row["solver"].endswith("M4-R") else "M4-E"
             decisions.append({**{key: row[key] for key in IDENTITY},
-                              "strategy": f"ConfidenceOT {gate}: native gate",
+                              "strategy": confidenceot_strategy(gate, row["acceptance"]),
                               **{key: row[key] for key in row if key not in IDENTITY
-                                 and key not in ("solver", "decision")}})
+                                 and key not in ("solver", "decision", "acceptance")}})
         elif row["solver"] == "Balanced OT":
             decisions.append({**{key: row[key] for key in IDENTITY},
                               "strategy": "Balanced OT: no rejection",
@@ -376,7 +420,8 @@ def mass_rejection(pooled: dict, set1: list) -> pd.DataFrame:
         if row["solver"] in ("ConfidenceOT", "ConfidenceOT M4-R"):
             tp, fp, fn, tn = row["tp"], row["fp"], row["fn"], row["tn"]
             rows.append({key: row[key] for key in ("arm", "pair_id", "biological_case",
-                                                   "technical_level", "side", "solver")}
+                                                   "technical_level", "side", "solver",
+                                                   "acceptance")}
                         | {"all": (tp + fp) / (tp + fp + fn + tn),
                            "unmatched": tp / (tp + fn) if tp + fn else np.nan,
                            "matched": fp / (fp + tn) if fp + tn else np.nan})
@@ -414,13 +459,28 @@ def main() -> None:
             base = {"arm": arm, "pair_id": pair_id, "n_cells_nominal": int(n_cells),
                     "replicate": int(replicate), "technical_level": level,
                     "biological_case": case}
-            # Both of ConfidenceOT's gates come from the run 50_ compared against.
-            gates = None
+            # Both of ConfidenceOT's gates come from the run 50_ compared against,
+            # and from the same pair at the other acceptance minimums where they
+            # were run. The acceptance is read from each run, not its directory.
+            gates, others = None, {}
             fixed_provenance = json.loads((directory / "provenance.json").read_text(encoding="utf-8"))
             if fixed_provenance.get("confidenceot_run"):
-                gates = pd.read_csv(Path(fixed_provenance["confidenceot_run"]) / "cell_confidence.csv",
-                                    usecols=["side", "method", "retained"])
-                gates["retained"] = gates["retained"].astype(str).str.lower().isin(["true", "1"])
+                run = Path(fixed_provenance["confidenceot_run"])
+                if not np.isclose(acceptance_of(run), DEFAULT_ACCEPTANCE):
+                    raise SystemExit(f"{run}: calibrated to acceptance {acceptance_of(run)}, "
+                                     f"not {DEFAULT_ACCEPTANCE}")
+                gates = read_gates(run)
+                for acceptance in ACCEPTANCES:
+                    if np.isclose(acceptance, DEFAULT_ACCEPTANCE):
+                        continue
+                    found = sorted((args.bench_root / f"runs_acceptance_{acceptance:.2f}" / arm
+                                    / pair_id / "scope_all").glob("budget_*/cell_confidence.csv"))
+                    if found:
+                        other = found[-1].parent
+                        if not np.isclose(acceptance_of(other), acceptance):
+                            raise SystemExit(f"{other}: calibrated to acceptance "
+                                             f"{acceptance_of(other)}, not {acceptance}")
+                        others[acceptance] = read_gates(other)
 
             for side in ("source", "target"):
                 # ConfidenceOT: its own gate, as 50_ scored it from the stored run.
@@ -432,7 +492,7 @@ def main() -> None:
                     truth_order = np.r_[np.ones(tp, bool), np.zeros(fp, bool),
                                         np.ones(fn, bool), np.zeros(tn, bool)]
                     set1.append({**base, "solver": "ConfidenceOT", "side": side,
-                                 "decision": "native M4-E gate",
+                                 "acceptance": DEFAULT_ACCEPTANCE, "decision": "native M4-E gate",
                                  **counts(predicted, truth_order)})
                     if gates is not None:
                         rejected = {}
@@ -449,9 +509,32 @@ def main() -> None:
                         if (check["tp"], check["fp"]) != (tp, fp):
                             raise SystemExit(f"{directory}: M4-E {side} read by position does "
                                              f"not reproduce 50_'s counts")
+                        # Every other gate is read by position too, so its cells must stand
+                        # in the order of the one just checked.
+                        reference = gates[(gates["side"] == side)
+                                          & (gates["method"] == "M4-E")]["observation_id"].tolist()
+                        block = gates[(gates["side"] == side) & (gates["method"] == "M4-R")]
+                        if block["observation_id"].tolist() != reference:
+                            raise SystemExit(f"{directory}: M4-R {side} is not in M4-E's order")
                         set1.append({**base, "solver": "ConfidenceOT M4-R", "side": side,
+                                     "acceptance": DEFAULT_ACCEPTANCE,
                                      "decision": "native M4-R gate, same run",
                                      **counts(rejected["M4-R"], should[side])})
+                        for acceptance, other in others.items():
+                            for gate_name, solver in (("M4-E", "ConfidenceOT"),
+                                                      ("M4-R", "ConfidenceOT M4-R")):
+                                block = other[(other["side"] == side) & (other["method"] == gate_name)]
+                                if block["observation_id"].tolist() != reference:
+                                    raise SystemExit(
+                                        f"{pair_id}: {gate_name} {side} at acceptance "
+                                        f"{acceptance:.2f} is not in the order of the "
+                                        f"{DEFAULT_ACCEPTANCE:.2f} run")
+                                set1.append({**base, "solver": solver, "side": side,
+                                             "acceptance": acceptance,
+                                             "decision": f"native {gate_name} gate, "
+                                                         f"acceptance >= {acceptance:.2f}",
+                                             **counts(~block["retained"].to_numpy(dtype=bool),
+                                                      should[side])})
                 for solver in ("Vanilla UOT", FIXED_PARTIAL):
                     u = np.load(score_file(directory, solver, side))
                     if u.size != should[side].size:

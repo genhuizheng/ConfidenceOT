@@ -300,6 +300,12 @@ def main() -> None:
              "from a real correspondence",
     )
     parser.add_argument(
+        "--within-side-acceptance-minimum", type=float, default=0.90,
+        help="The raw acceptance the calibrated cost must reach on the "
+             "within-side null, on both sides; the smallest cost that reaches "
+             "it is taken. The rotation null does not use it",
+    )
+    parser.add_argument(
         "--allow-precomputed", action="store_true",
         help="Permit a label whose transform is 'precomputed', which means "
              "the counts are used as the representation. Off by default "
@@ -404,6 +410,8 @@ def main() -> None:
         not np.isfinite(args.fixed_rejection_cost) or args.fixed_rejection_cost <= 0
     ):
         raise ValueError("fixed-rejection-cost must be positive and finite")
+    if not 0 < args.within_side_acceptance_minimum <= 1:
+        raise ValueError("within-side-acceptance-minimum must be in (0,1]")
     if (args.input_gate_root is None) != (args.input_gate_state is None):
         raise ValueError("input-gate-root and input-gate-state must be provided together")
     manifest = pd.read_csv(args.manifest_csv)
@@ -573,6 +581,7 @@ def main() -> None:
             source_nulls[:split] + target_nulls[:split], source_nulls[split:] + target_nulls[split:],
             backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
             null_semantics=args.calibration_null,
+            within_side_acceptance_minimum=args.within_side_acceptance_minimum,
             source_rejection_budget=source_budget, target_rejection_budget=target_budget,
             tolerance=args.tolerance, grid_size=args.calibration_grid_size, device=args.device,
             workers=args.workers, fallback_to_cpu=False,
@@ -774,6 +783,9 @@ def main() -> None:
         "rejection_cost": rejection_cost,
         "rejection_cost_mode": rejection_cost_mode,
         "calibration_null": calibration_null,
+        "within_side_acceptance_minimum": (
+            args.within_side_acceptance_minimum
+            if calibration_null == "within_side_split" else None),
         "cost": args.cost,
         # The scale the cost was divided by, and what the divided cost then
         # looks like. Without the scale a metric that moves cannot be told

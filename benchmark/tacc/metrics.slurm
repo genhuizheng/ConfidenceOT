@@ -28,6 +28,17 @@ conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}
+# Which run tree to score: runs/ by default, or another one ot_array.slurm
+# wrote, such as runs_acceptance_0.99/. Another tree gets its own metrics
+# directory and its own pooled table, so scoring it never clears or merges
+# into the default one.
+runs_dir=${CONFIDENCEOT_BENCH_RUNS_DIR:-runs}
+metrics_dir=$root/metrics
+pooled_table=$root/benchmark_metrics.csv
+if [[ "$runs_dir" != "runs" ]]; then
+    metrics_dir=$root/metrics_$runs_dir
+    pooled_table=$root/benchmark_metrics_$runs_dir.csv
+fi
 # Cleared, not merged into. The file name carries the condition and one
 # table now holds every configuration of it, where the previous layout was
 # one table per (condition, configuration) -- and the old names still match
@@ -37,8 +48,8 @@ root=${CONFIDENCEOT_BENCH_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_tech
 #
 # The directory is derived output and is rebuilt in full by this job, so
 # emptying it is the correct operation rather than a convenience.
-rm -rf "$root/metrics"
-mkdir -p "$root/metrics"
+rm -rf "$metrics_dir"
+mkdir -p "$metrics_dir"
 
 shopt -s nullglob
 # Every configuration of a condition in one pass. Twelve separate invocations
@@ -48,12 +59,12 @@ shopt -s nullglob
 # already finished. The run roots do not depend on the condition, so they are
 # listed once.
 roots=()
-for run_root in "$root"/runs/*; do
+for run_root in "$root/$runs_dir"/*; do
     [[ -d "$run_root" ]] || continue
     roots+=(--run-root "$run_root")
 done
 if (( ${#roots[@]} == 0 )); then
-    echo "no run roots under $root/runs" >&2
+    echo "no run roots under $root/$runs_dir" >&2
     exit 2
 fi
 
@@ -76,8 +87,8 @@ score_one() {
             "${roots[@]}" \
             --manifest "$manifest" \
             --scope all \
-            --out "$root/metrics/${tag}.csv" > "$root/metrics/${tag}.log" 2>&1; then
-        echo "$tag" >> "$root/metrics/FAILED"
+            --out "$metrics_dir/${tag}.csv" > "$metrics_dir/${tag}.log" 2>&1; then
+        echo "$tag" >> "$metrics_dir/FAILED"
     fi
 }
 
@@ -92,28 +103,28 @@ for manifest in "$root"/conditions/*/*/*/manifest.csv; do
 done
 wait || true
 
-if [[ -s "$root/metrics/FAILED" ]]; then
-    echo "$(wc -l < "$root/metrics/FAILED") condition(s) failed to score:" >&2
-    cat "$root/metrics/FAILED" >&2
-    echo "each has its own log in $root/metrics/<condition>.log" >&2
+if [[ -s "$metrics_dir/FAILED" ]]; then
+    echo "$(wc -l < "$metrics_dir/FAILED") condition(s) failed to score:" >&2
+    cat "$metrics_dir/FAILED" >&2
+    echo "each has its own log in $metrics_dir/<condition>.log" >&2
 fi
 
-python - "$root" <<'PY'
+python - "$metrics_dir" "$pooled_table" <<'PY'
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-root = Path(sys.argv[1])
+metrics_dir, pooled_table = Path(sys.argv[1]), Path(sys.argv[2])
 # One file per condition now, holding every configuration.
-parts = sorted((root / "metrics").glob("*.csv"))
+parts = sorted(metrics_dir.glob("*.csv"))
 frames = [pd.read_csv(path) for path in parts if path.stat().st_size > 0]
 if not frames:
     raise SystemExit("no scored tables to pool")
 pooled = pd.concat(frames, ignore_index=True)
-pooled.to_csv(root / "benchmark_metrics.csv", index=False)
+pooled.to_csv(pooled_table, index=False)
 print(f"pooled {len(pooled)} rows from {len(frames)} tables into "
-      f"{root / 'benchmark_metrics.csv'}")
+      f"{pooled_table}")
 outside = pooled.loc[~pooled["rank_cut_valid"].astype(bool), "pair_id"].unique()
 if len(outside):
     print(f"{len(outside)} conditions are outside the valid rank-encoding "

@@ -3,10 +3,11 @@
 The input is ``main_decisions_per_pair.csv`` from ``56_comparator_metrics.py``:
 one row per pair, side and strategy, holding the hard decisions' counts. The
 pairs are the arm heatmap's own -- the native-depth simulation, four cases,
-three technical levels, three sizes, five replicates. Nine strategies:
+three technical levels, three sizes, five replicates. Thirteen strategies:
 
-    ConfidenceOT M4-E: native gate
-    ConfidenceOT M4-R: native gate      (the same run's reversible gate)
+    ConfidenceOT M4-E (acceptance >= 0.90, 0.95, 0.99): native gate
+    ConfidenceOT M4-R (acceptance >= 0.90, 0.95, 0.99): native gate
+                                        (the same runs' reversible gate)
     Vanilla UOT: fixed cutoff (u > 0.5)
     Vanilla UOT: global-optimal threshold
     Partial OT (truth-derived m): fixed cutoff (u > 0.5)
@@ -21,7 +22,9 @@ mean pair F1 on the sides holding both classes, then frozen and applied to
 every pair, case and side: an upper bound, not a usable rule. Partial OT is
 given its m from the truth of each pair, so its rejected mass was supplied,
 not found. IC-POT runs at the literature's constant unmatched cost (Tripathi
-et al., arXiv:2605.20030), and nothing in it comes from the truth.
+et al., arXiv:2605.20030), and nothing in it comes from the truth. ConfidenceOT's
+acceptance is the share of a within-side null its calibrated rejection cost
+must accept; M4-R takes the cost M4-E was calibrated to.
 
 Two figures.
 
@@ -168,7 +171,7 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
     n_rows = len(rows)
     cell_w, cell_h = 0.38, 0.26
     # The strategy gets a column of its own, left of the arm names.
-    left, right, top, bottom = 4.35, 1.55, 2.45, 0.55
+    left, right, top, bottom = 4.6, 1.55, 2.65, 0.55
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -233,8 +236,11 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
             "0 = those cells all have a match and should be kept; 1 = they have none.",
             "IC-POT runs at the literature's constant unmatched cost, c_s = c_t = 0.5 "
             "(Tripathi et al., arXiv:2605.20030); nothing in it comes from the truth.",
-            "ConfidenceOT M4-R is the same run's reversible gate; its outer loop cycled and "
-            "stopped at the iteration cap in most pairs other than populations_disjoint.")):
+            "ConfidenceOT acceptance: the share of a within-side null its calibrated rejection "
+            "cost must accept; M4-R uses the cost M4-E was calibrated to.",
+            "ConfidenceOT M4-R is the same run's reversible gate; at acceptance 0.90 its outer "
+            "loop cycled and stopped at the iteration cap in most pairs other than "
+            "populations_disjoint.")):
         fig.text(0.3 / fig_w, 1 - (0.42 + 0.2 * line) / fig_h, text,
                  fontsize=7.4, color=MUTED, va="top")
     cax = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w, bottom / fig_h,
@@ -319,7 +325,8 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
     fig.text(0.065, 0.88,
              "The global-optimal threshold and Partial OT's m are taken from the truth: "
              "upper bounds, not usable rules. ConfidenceOT and the fixed cutoff use no truth. "
-             "M4-R's outer loop cycled in most pairs other than populations_disjoint.",
+             "At acceptance 0.90, M4-R's outer loop cycled in most pairs other than "
+             "populations_disjoint.",
              fontsize=7.0, color=MUTED, va="top")
     for suffix in ("png", "pdf"):
         fig.savefig(out / f"method_comparison_f1.{suffix}", dpi=220)

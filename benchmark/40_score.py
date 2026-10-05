@@ -179,6 +179,8 @@ def diagnostics(run: Path) -> dict:
     return {key: found.get(key, float("nan")) for key in
             ("rejection_cost", "cost_scale", "cost_median", "cost_max")} | {
         "calibration_null": found.get("calibration_null"),
+        # calibration.json's own statement of what the cost had to accept.
+        "acceptance_requirement": found.get("acceptance_requirement"),
         "calibration_valid_for_m4r": found.get("calibration_valid_for_m4r"),
         "preprocessing_label": found.get("preprocessing_label")}
 
