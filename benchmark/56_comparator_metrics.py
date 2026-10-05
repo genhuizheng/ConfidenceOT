@@ -45,12 +45,39 @@ so u times that mass is exactly the cell's untransported mass and the
 coupling is not needed. In populations_disjoint the readout is the total
 transported mass, which should be 0; all_shared has no unmatched population.
 
+**The main comparison** (``main_*.csv``) is four methods at three arms.
+Partial OT in it is the truth-derived-m run read from ``--oracle-dir``, shown
+as "Partial OT (truth-derived m)"; the fixed m = 0.85 run stays in sets 1-3
+for reference and is not part of it. Six strategies, as hard decisions per
+pair and side (``main_decisions_per_pair.csv``): ConfidenceOT's native gate,
+Vanilla UOT and Partial OT each at the fixed cutoff u > 0.5 and at the
+global-optimal threshold, and Balanced OT rejecting nothing.
+
+* **Local-optimal F1**: per pair, the max-F1 threshold chosen with that
+  pair's truth, then the pair F1s averaged. Pair-specific, an upper bound.
+* **Global-optimal threshold**: one per method and arm, the cutoff that
+  maximises the mean over pairs of each pair's own F1, using only the sides
+  holding both classes (the source in population_lost, the target in
+  population_emerged), so every pair counts once and cells are never pooled.
+  It is then frozen and applied unchanged to every size, replicate, level,
+  case and side. Chosen with the truth: an upper bound.
+* **ROC-AUC, PR-AUC**: UOT and Partial OT only, on those same sides.
+* **Rejected-mass rate** 1 - sum(pi), the source mass being 1, read from
+  each pair's provenance.json. For Partial OT it equals 1 - m, which the
+  truth supplied, so it says nothing about whether the right cells were left
+  behind -- that is what its F1s and set 3 measure.
+
+ConfidenceOT and Balanced OT get no score, no AUC and no threshold:
+``main_scores_per_pair.csv`` and ``main_score_quality.csv`` hold UOT and
+Partial OT only.
+
     python benchmark/56_comparator_metrics.py BENCH_ROOT OUT_DIR
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -66,6 +93,21 @@ CASES = ("all_shared", "population_lost", "population_emerged", "populations_dis
 PAIR = re.compile(r"^N(\d+)_rep(\d+)_(L\d_[a-z_]+?)_(" + "|".join(CASES) + r")$")
 FIXED_PARTIAL = "Partial OT m=0.85"
 ORACLE_PARTIAL = "Oracle-budget Partial OT"
+# The two scored methods of the main comparison, by the name their outputs are
+# saved under and the name they are shown under. The fixed m = 0.85 run stays
+# in sets 1-3 for reference and is not part of it.
+MAIN_SCORED = {"Vanilla UOT": "Vanilla UOT", ORACLE_PARTIAL: "Partial OT (truth-derived m)"}
+STRATEGIES = [
+    "ConfidenceOT: native gate",
+    "Vanilla UOT: fixed cutoff (u > 0.5)",
+    "Vanilla UOT: global-optimal threshold",
+    "Partial OT (truth-derived m): fixed cutoff (u > 0.5)",
+    "Partial OT (truth-derived m): global-optimal threshold",
+    "Balanced OT: no rejection",
+]
+# Directional F1 reads the side holding the cells to reject; all_shared has none.
+DIRECTIONAL = {"population_lost": "source", "population_emerged": "target",
+               "populations_disjoint": "source"}
 # The side that holds the unmatched population, where it is one side.
 UNMATCHED_SIDE = {"population_lost": "source", "population_emerged": "target"}
 
@@ -116,68 +158,115 @@ def composition(u: np.ndarray, truth: np.ndarray) -> dict:
             if truth.any() else np.nan}
 
 
-def global_max_f1(scores: list, truths: list) -> dict:
-    """The one cutoff, u > tau, with the largest F1 over a whole set of pair-sides.
+def global_macro_f1(entries: list) -> dict:
+    """One cutoff for a method and arm: the u > tau with the largest mean pair F1.
 
-    Every pair-side weighs the same, whatever its number of cells, so the
-    N = 10,000 pairs do not set the cutoff for the N = 1,000 ones. Every
-    distinct score is a candidate, plus rejecting everything; ties go to the
-    larger cutoff, which rejects less, as in comparator_rejection.py. It is
-    chosen with the truth: an oracle, an upper bound, not a usable rule.
+    Only the sides holding both classes take part -- the source in
+    population_lost, the target in population_emerged. For every candidate,
+    F1 is computed within each of those pairs and the pairs are averaged, so
+    each pair counts once whatever its size and cells are never pooled across
+    pairs. Candidates are every distinct u on those sides plus rejecting
+    everything; ties go to the larger cutoff, which rejects less. It is chosen
+    with the truth -- an upper bound -- and is then frozen and applied
+    unchanged to every pair, case and side.
     """
-    u = np.concatenate(scores)
-    t = np.concatenate(truths).astype(bool)
-    w = np.concatenate([np.full(s.size, 1.0 / s.size) for s in scores])
-    order = np.argsort(-u, kind="stable")
-    u, t, w = u[order], t[order], w[order]
-    ends = np.append(np.flatnonzero(np.diff(u)), u.size - 1)
-    tp = np.cumsum(w * t)[ends]
-    called = np.cumsum(w)[ends]
-    fp = called - tp
-    fn = float((w * t).sum()) - tp
-    f1 = 2 * tp / (2 * tp + fp + fn)
-    best = int(np.argmax(f1))  # the first maximum rejects the fewest cells
-    tau = float(u[ends[best] + 1]) if ends[best] + 1 < u.size else float("-inf")
-    return {"threshold": tau, "pooled_f1": float(f1[best]),
-            "pooled_precision": float(tp[best] / called[best]),
-            "pooled_recall": float(tp[best] / (tp[best] + fn[best]))}
+    eligible = [(u, t) for row, u, t in entries
+                if UNMATCHED_SIDE.get(row["biological_case"]) == row["side"]]
+    if not eligible:
+        return {"threshold": np.nan, "macro_f1": np.nan, "pairs": 0}
+    # High to low, so the first maximum is the largest cutoff.
+    candidates = np.append(np.unique(np.concatenate([u for u, _ in eligible]))[::-1], -np.inf)
+    total = np.zeros(candidates.size)
+    for u, t in eligible:
+        positive, negative = np.sort(u[t]), np.sort(u[~t])
+        tp = positive.size - np.searchsorted(positive, candidates, side="right")
+        fp = negative.size - np.searchsorted(negative, candidates, side="right")
+        fn = positive.size - tp
+        total += 2 * tp / (2 * tp + fp + fn)
+    mean = total / len(eligible)
+    best = int(np.argmax(mean))
+    return {"threshold": float(candidates[best]), "macro_f1": float(mean[best]),
+            "pairs": len(eligible)}
 
 
-def two_strategies(set1: list, optimal: list) -> str:
-    """Rejected fraction per case and side, and directional F1, by strategy."""
-    rows = pd.DataFrame(set1 + optimal)
-    rows["strategy"] = np.where(rows["decision"].str.contains("oracle"),
-                                "optimal threshold (oracle)",
-                                np.where(rows["solver"].isin(["ConfidenceOT", "Balanced OT"]),
-                                         "own rule", "fixed u > 0.5"))
-    table = (rows.groupby(["arm", "solver", "strategy", "biological_case", "side"])
-             ["rejected_fraction"].mean().unstack(["biological_case", "side"]).round(2))
-    # Directional F1: the side holding the cells to reject, as in 55_.
-    directional = rows[[(case, side) in (("population_lost", "source"),
-                                         ("population_emerged", "target"),
-                                         ("populations_disjoint", "source"))
-                        for case, side in zip(rows["biological_case"], rows["side"])]]
-    table[("directional", "F1")] = (directional.groupby(["arm", "solver", "strategy"])["f1"]
-                                    .mean().round(2))
-    return table.to_string()
+IDENTITY = ("arm", "pair_id", "n_cells_nominal", "replicate", "technical_level",
+            "biological_case", "side")
 
 
-# The heatmap's readouts, as (column, case, side, which cells): "all" is the
-# whole side, "unmatched" the population that should be rejected, "matched"
-# the cells that have a partner. The ideal value is 1 for unmatched cells and
-# Case 3, 0 otherwise.
-MASS_READOUTS = [
-    ("Case 1 source", "all_shared", "source", "all", 0),
-    ("Case 1 target", "all_shared", "target", "all", 0),
-    ("lost: source unmatched", "population_lost", "source", "unmatched", 1),
-    ("lost: source matched", "population_lost", "source", "matched", 0),
-    ("lost: target", "population_lost", "target", "all", 0),
-    ("emerged: source", "population_emerged", "source", "all", 0),
-    ("emerged: target unmatched", "population_emerged", "target", "unmatched", 1),
-    ("emerged: target matched", "population_emerged", "target", "matched", 0),
-    ("Case 3 source", "populations_disjoint", "source", "all", 1),
-    ("Case 3 target", "populations_disjoint", "target", "all", 1),
-]
+def main_comparison(pooled: dict, set1: list) -> tuple:
+    """Per-pair scores of UOT and Partial OT, and every strategy's decisions.
+
+    Returns the per pair-side score table (UOT and truth-derived-m Partial OT
+    only), the hard decisions of the six strategies, and the global
+    thresholds.
+    """
+    scores, decisions, thresholds = [], [], []
+    for (arm, solver), entries in pooled.items():
+        method = MAIN_SCORED[solver]
+        chosen = global_macro_f1(entries)
+        thresholds.append({"arm": arm, "method": method, **chosen,
+                           "analysis": "global truth-tuned threshold, upper bound"})
+        for row, u, t in entries:
+            ids = {key: row[key] for key in IDENTITY}
+            fixed = counts(u > FIXED_CUTOFF, t)
+            tuned = counts(u > chosen["threshold"], t)
+            record = {**ids, "method": method,
+                      "true_unmatched_fraction": float(t.mean()),
+                      "rejected_mass_rate": row["rejected_mass_rate"],
+                      "partial_m": row.get("partial_m", np.nan),
+                      "both_classes": UNMATCHED_SIDE.get(row["biological_case"]) == row["side"]}
+            if record["both_classes"]:
+                area, local = areas(u, t), oracle_cutoffs(u, t)
+                record.update({"roc_auc": area["roc_auc"], "pr_auc": area["pr_auc"],
+                               "local_optimal_threshold": local.get("oracle_f1_cutoff", np.nan),
+                               "local_optimal_f1": local.get("oracle_f1_f1", np.nan)})
+            else:
+                record.update({"roc_auc": np.nan, "pr_auc": np.nan,
+                               "local_optimal_threshold": np.nan, "local_optimal_f1": np.nan})
+            for prefix, result in (("global_optimal", tuned), ("fixed_cutoff", fixed)):
+                for name in ("precision", "recall", "f1", "false_rejection_rate"):
+                    record[f"{prefix}_{name}"] = result[name]
+            record["global_optimal_threshold"] = chosen["threshold"]
+            scores.append(record)
+            decisions.append({**ids, "strategy": f"{method}: fixed cutoff (u > 0.5)", **fixed})
+            decisions.append({**ids, "strategy": f"{method}: global-optimal threshold", **tuned})
+    for row in set1:
+        if row["solver"] == "ConfidenceOT":
+            decisions.append({**{key: row[key] for key in IDENTITY},
+                              "strategy": "ConfidenceOT: native gate",
+                              **{key: row[key] for key in row if key not in IDENTITY
+                                 and key not in ("solver", "decision")}})
+        elif row["solver"] == "Balanced OT":
+            decisions.append({**{key: row[key] for key in IDENTITY},
+                              "strategy": "Balanced OT: no rejection",
+                              **{key: row[key] for key in row if key not in IDENTITY
+                                 and key not in ("solver", "decision", "largest_saved_u")}})
+    return pd.DataFrame(scores), pd.DataFrame(decisions), pd.DataFrame(thresholds)
+
+
+def score_quality(scores: pd.DataFrame, thresholds: pd.DataFrame) -> pd.DataFrame:
+    """Output C: UOT and Partial OT only, on the sides holding both classes."""
+    both = scores[scores["both_classes"]]
+    table = both.groupby(["arm", "method"])[
+        ["roc_auc", "pr_auc", "local_optimal_f1", "global_optimal_f1", "fixed_cutoff_f1"]].mean()
+    table = table.join(thresholds.set_index(["arm", "method"])[["threshold"]]
+                       .rename(columns={"threshold": "global_optimal_threshold"}))
+    # Rejected-mass rate is one number per pair: read it off the source rows.
+    mass = (scores[scores["side"] == "source"]
+            .groupby(["arm", "method", "biological_case"])["rejected_mass_rate"].mean()
+            .unstack("biological_case").add_prefix("rejected_mass_rate: "))
+    return table.join(mass)
+
+
+def decision_summary(decisions: pd.DataFrame) -> str:
+    """Rejected fraction per case and side, and directional F1, per strategy."""
+    table = (decisions.groupby(["strategy", "arm", "biological_case", "side"])
+             ["rejected_fraction"].mean().unstack(["biological_case", "side"]))
+    keep = [(case, side) in DIRECTIONAL.items()
+            for case, side in zip(decisions["biological_case"], decisions["side"])]
+    table[("directional", "F1")] = decisions[keep].groupby(["strategy", "arm"])["f1"].mean()
+    order = [s for s in STRATEGIES if s in table.index.get_level_values(0)]
+    return table.reindex(order, level=0).round(2).to_string()
 
 
 def mass_rejection(pooled: dict, set1: list) -> pd.DataFrame:
@@ -210,18 +299,6 @@ def mass_rejection(pooled: dict, set1: list) -> pd.DataFrame:
                            "unmatched": 0.0 if row["n_should_reject"] else np.nan,
                            "matched": 0.0 if row["n_should_reject"] < row["n_cells"] else np.nan})
     return pd.DataFrame(rows)
-
-
-def mass_summary(frame: pd.DataFrame) -> str:
-    columns = {}
-    for name, case, side, which, _ in MASS_READOUTS:
-        part = frame[(frame["biological_case"] == case) & (frame["side"] == side)]
-        columns[name] = part.groupby(["arm", "solver"])[which].mean()
-    table = pd.DataFrame(columns).round(2)
-    ideal = pd.DataFrame([[truth for *_, truth in MASS_READOUTS]],
-                         index=pd.MultiIndex.from_tuples([("ideal", "")], names=["arm", "solver"]),
-                         columns=table.columns)
-    return pd.concat([ideal, table]).to_string()
 
 
 def main() -> None:
@@ -274,8 +351,14 @@ def main() -> None:
                                          f"stored fixed-cutoff counts")
                     set1.append({**base, "solver": solver, "side": side,
                                  "decision": f"u > {FIXED_CUTOFF}", **result})
-                    pooled.setdefault((arm, solver), []).append(
-                        ({**base, "solver": solver, "side": side}, u, should[side]))
+                    if solver == "Vanilla UOT":
+                        # 1 - sum(pi): the source mass is normalised to 1.
+                        provenance = json.loads((directory / "provenance.json")
+                                                .read_text(encoding="utf-8"))
+                        rejected_mass = 1.0 - float(provenance["vanilla_uot"]["transported_mass"])
+                        pooled.setdefault((arm, solver), []).append(
+                            ({**base, "solver": solver, "side": side,
+                              "rejected_mass_rate": rejected_mass}, u, should[side]))
                     if UNMATCHED_SIDE.get(case) == side:
                         area = areas(u, should[side])
                         oracle = oracle_cutoffs(u, should[side])
@@ -293,8 +376,12 @@ def main() -> None:
                     set1.append({**base, "solver": ORACLE_PARTIAL, "side": side,
                                  "decision": f"u > {FIXED_CUTOFF}, m from the truth",
                                  **counts(u > FIXED_CUTOFF, should[side])})
+                    provenance = json.loads((oracle_directory / "provenance.json")
+                                            .read_text(encoding="utf-8"))["oracle_budget"]
                     pooled.setdefault((arm, ORACLE_PARTIAL), []).append(
-                        ({**base, "solver": ORACLE_PARTIAL, "side": side}, u, should[side]))
+                        ({**base, "solver": ORACLE_PARTIAL, "side": side,
+                          "rejected_mass_rate": 1.0 - float(provenance["transported_mass"]),
+                          "partial_m": float(provenance["m"])}, u, should[side]))
                     if UNMATCHED_SIDE.get(case) == side:
                         area = areas(u, should[side])
                         oracle = oracle_cutoffs(u, should[side])
@@ -332,36 +419,32 @@ def main() -> None:
                                    "recall_like": part["recall_like"]})
                 set3.append(record)
 
-    optimal, thresholds = [], []
-    for (arm, solver), entries in pooled.items():
-        chosen = global_max_f1([u for _, u, _ in entries], [t for _, _, t in entries])
-        thresholds.append({"arm": arm, "solver": solver, **chosen,
-                           "pair_sides": len(entries), "analysis": "oracle / upper bound"})
-        for row, u, truth in entries:
-            optimal.append({**row, "decision": f"u > {chosen['threshold']:.4g}, one "
-                            f"max-F1 threshold for the arm (oracle)",
-                            "threshold": chosen["threshold"], **counts(u > chosen["threshold"], truth)})
-
+    scores, decisions, thresholds = main_comparison(pooled, set1)
     mass = mass_rejection(pooled, set1)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     mass.to_csv(args.output_dir / "set1_mass_rejection.csv", index=False)
     for name, rows in (("set1_fixed_operating_point", set1),
                        ("set2_oracle_threshold", set2),
-                       ("set3_partial_ot_budget", set3),
-                       ("set2_one_threshold", optimal),
-                       ("set2_one_threshold_values", thresholds)):
+                       ("set3_partial_ot_budget", set3)):
         frame = pd.DataFrame(rows)
         frame.to_csv(args.output_dir / f"{name}.csv", index=False)
         print(f"{name}: {len(frame)} rows -> {args.output_dir / (name + '.csv')}")
-    if optimal:
-        print("\nthe one max-F1 threshold per arm and solver (oracle / upper bound):")
-        print(pd.DataFrame(thresholds).round(4).to_string(index=False))
-        print("\ntwo strategies, rejected fraction per case and side, mean over pairs:")
-        print(two_strategies(set1, optimal))
-    if len(mass):
-        print("\nmass rejection, no cutoff: the share of each set's own mass not "
-              "transported, mean over pairs:")
-        print(mass_summary(mass))
+    # The main comparison: four methods, Partial OT with the truth-derived m only.
+    for name, frame in (("main_scores_per_pair", scores),
+                        ("main_decisions_per_pair", decisions),
+                        ("main_global_thresholds", thresholds)):
+        frame.to_csv(args.output_dir / f"{name}.csv", index=False)
+        print(f"{name}: {len(frame)} rows -> {args.output_dir / (name + '.csv')}")
+    if len(scores):
+        quality = score_quality(scores, thresholds)
+        quality.round(4).to_csv(args.output_dir / "main_score_quality.csv")
+        print("\nscore quality, UOT and Partial OT (truth-derived m) only; AUCs and F1s on "
+              "the sides holding both classes; the local and global thresholds are chosen "
+              "with the truth (upper bounds):")
+        print(quality.round(3).to_string())
+        print("\nhard decisions per strategy: rejected fraction per case and side, and "
+              "directional F1, mean over pairs:")
+        print(decision_summary(decisions))
     if set3:
         frame = pd.DataFrame(set3)
         print("\nset 3, mean over pairs:")
