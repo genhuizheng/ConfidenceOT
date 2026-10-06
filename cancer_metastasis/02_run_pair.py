@@ -107,30 +107,39 @@ def subset_from_prior_gate(data, confidence: pd.DataFrame, *, side: str,
     return data[keep].copy()
 
 
-def read_cell_filter(path: Path, column: str, deposit: str) -> tuple[set, set]:
-    """The cells a filter table keeps, and every cell it names, for one deposit.
+def read_cell_filter(path: Path, column: str, deposit: str) -> tuple[set, set, set]:
+    """The cells a filter table keeps, every cell it names, and the names it
+    cannot decide, for one deposit.
 
     The table is the collection's cycle/ot_cell_filter.tsv.gz: one row per cell,
-    keyed by deposit and cell_id, which is the h5ad's obs_name. A cell_id named
-    twice within the deposit cannot be told apart and is refused.
+    keyed by deposit and cell_id, which is the h5ad's obs_name. Barcodes repeat
+    across libraries, so a cell_id can name two cells of one deposit. Its rows
+    then decide it only if they agree; one whose rows disagree is returned as
+    undecidable and refused by filter_cells if a side holds it.
     """
     table = pd.read_csv(path, sep="\t", usecols=["deposit", "cell_id", column], dtype=str)
     table = table[table["deposit"] == deposit]
     if table.empty:
         raise ValueError(f"{path} has no rows for {deposit}")
-    if table["cell_id"].duplicated().any():
-        raise ValueError(f"{path}: cell_id repeats within {deposit}")
     keep = table[column].str.lower().isin(["true", "1"])
-    return set(table.loc[keep, "cell_id"]), set(table["cell_id"])
+    agree = keep.groupby(table["cell_id"]).nunique() == 1
+    return (set(table.loc[keep, "cell_id"]), set(table["cell_id"]),
+            set(agree.index[~agree.to_numpy()]))
 
 
-def filter_cells(data, keep_ids: set, known_ids: set, *, side: str):
-    """Remove the cells a filter table marks; refuse any cell it does not name."""
+def filter_cells(data, keep_ids: set, known_ids: set, undecided_ids: set, *, side: str):
+    """Remove the cells a filter table marks; refuse any cell it does not name
+    or names twice with different decisions."""
     ids = data.obs_names.astype(str)
     unknown = ~ids.isin(known_ids)
     if unknown.any():
         raise KeyError(f"{int(unknown.sum())} {side} cells are not in the cell filter, "
                        f"first {list(ids[unknown][:3])}")
+    undecided = ids.isin(undecided_ids)
+    if undecided.any():
+        raise KeyError(f"{int(undecided.sum())} {side} cells share a cell_id with another "
+                       f"cell of the deposit that the filter decides differently, first "
+                       f"{list(ids[undecided][:3])}")
     keep = np.asarray(ids.isin(keep_ids), dtype=bool)
     return data[keep].copy(), int((~keep).sum())
 
@@ -148,6 +157,45 @@ def exclude_genes(data, symbols: set):
              else np.asarray(names))
     hit = np.isin(named, list(symbols)) | np.isin(np.asarray(names), list(symbols))
     return data[:, ~hit].copy(), int(hit.sum())
+
+
+def cnv_coordinates(root: Path, dataset_id: str, patient_id: str, source_ids, target_ids,
+                    *, n_pcs: int, seed: int):
+    """Each cell's own inferred CNV profile, as joint PCA coordinates of the pair.
+
+    The profiles are R inferCNV's per-patient run.final.infercnv_obj @expr.data,
+    its observation cells written by 44_export_cnv_cells.R as float32 cells x
+    genes (cnv.f32) beside the cell names the h5ads carry (cells.tsv) and the
+    gene order (genes.tsv). One patient's run centres primary and metastasis on
+    one reference, so the two sides are on one scale. Reduced with the PCA the
+    RNA representation uses. A cell without a profile stops the run.
+    """
+    from sklearn.decomposition import PCA
+
+    unit = Path(root) / dataset_id / patient_id
+    cells = pd.read_csv(unit / "cells.tsv", sep="\t", dtype=str)
+    genes = pd.read_csv(unit / "genes.tsv", sep="\t", dtype=str)
+    if cells["barcode"].duplicated().any():
+        raise ValueError(f"{unit}: a cell name repeats in cells.tsv")
+    values = np.memmap(unit / "cnv.f32", dtype=np.float32, mode="r",
+                       shape=(len(cells), len(genes)))
+    index = pd.Index(cells["barcode"])
+    positions = []
+    for side, ids in (("source", source_ids), ("target", target_ids)):
+        position = index.get_indexer(pd.Index(ids))
+        if (position < 0).any():
+            raise KeyError(f"{int((position < 0).sum())} {side} cells have no inferred CNV "
+                           f"profile in {unit}, first {list(np.asarray(ids)[position < 0][:3])}")
+        positions.append(position)
+    # 1 is copy-neutral in inferCNV's output; PCA centres on the pair's mean anyway.
+    joint = np.asarray(values[np.concatenate(positions)], dtype=np.float64) - 1.0
+    components = min(n_pcs, joint.shape[0] - 1, joint.shape[1])
+    pca = PCA(n_components=components, random_state=seed)
+    coordinates = pca.fit_transform(joint).astype(np.float32)
+    n_source = len(positions[0])
+    record = {"unit": str(unit), "genes": int(len(genes)), "pcs": int(components),
+              "explained_variance": float(pca.explained_variance_ratio_.sum())}
+    return coordinates[:n_source], coordinates[n_source:], record
 
 
 def confidence_frame(method: str, side: str, data, sample: str, result) -> pd.DataFrame:
@@ -378,6 +426,16 @@ def main() -> None:
              "representation is built, such as the collection's "
              "cycle/ot_gene_filter.txt. None of them matching stops the run",
     )
+    parser.add_argument(
+        "--representation-source", choices=("rna", "cnv", "rna_cnv"), default="rna",
+        help="What the cost is built from. 'cnv' is each cell's own inferred CNV "
+             "profile (R inferCNV, see --cnv-root); 'rna_cnv' puts the RNA and the "
+             "CNV coordinates side by side, each first scaled to a median pair cost "
+             "of 1, so the squared distance is the two costs added with equal weight. "
+             "The default, 'rna', is the only representation before this option",
+    )
+    parser.add_argument("--cnv-root", type=Path, default=None,
+                        help="Exported CNV profiles, <root>/<dataset_id>/<patient_id>/")
     parser.add_argument("--input-gate-budget-tag", default="budget_source_0.85_target_0.95")
     parser.add_argument("--input-gate-method", default="M4-E")
     parser.add_argument("--input-gate-state", choices=("retained", "rejected"))
@@ -472,6 +530,8 @@ def main() -> None:
         raise ValueError("within-side-acceptance-minimum must be in (0,1]")
     if (args.cell_filter is None) != (args.cell_filter_column is None):
         raise ValueError("cell-filter and cell-filter-column must be given together")
+    if (args.representation_source != "rna") != (args.cnv_root is not None):
+        raise ValueError("cnv-root is needed by, and only by, a cnv or rna_cnv representation")
     if (args.input_gate_root is None) != (args.input_gate_state is None):
         raise ValueError("input-gate-root and input-gate-state must be provided together")
     manifest = pd.read_csv(args.manifest_csv)
@@ -566,10 +626,12 @@ def main() -> None:
         )
     cell_filter_record = None
     if args.cell_filter is not None:
-        keep_ids, known_ids = read_cell_filter(
+        keep_ids, known_ids, undecided_ids = read_cell_filter(
             args.cell_filter, args.cell_filter_column, str(row["dataset_id"]))
-        source, source_filtered_n = filter_cells(source, keep_ids, known_ids, side="source")
-        target, target_filtered_n = filter_cells(target, keep_ids, known_ids, side="target")
+        source, source_filtered_n = filter_cells(source, keep_ids, known_ids, undecided_ids,
+                                                 side="source")
+        target, target_filtered_n = filter_cells(target, keep_ids, known_ids, undecided_ids,
+                                                 side="target")
         cell_filter_record = {"path": str(args.cell_filter), "column": args.cell_filter_column,
                               "source_removed_n": source_filtered_n,
                               "target_removed_n": target_filtered_n}
@@ -632,6 +694,27 @@ def main() -> None:
                 f"representation built {built!r}. A field of the named "
                 f"configuration is not reaching prepare_joint_representation."
             )
+    # The CNV coordinates take the place of the RNA ones, or sit beside them.
+    # Everything below -- the scale, the cost, the within-side null -- reads
+    # coordinates, so it runs unchanged on either.
+    cnv_record = None
+    if args.representation_source != "rna":
+        source_cnv, target_cnv, cnv_record = cnv_coordinates(
+            args.cnv_root, str(row["dataset_id"]), str(row["patient_id"]),
+            source.obs_names.astype(str), target.obs_names.astype(str),
+            n_pcs=args.n_pcs, seed=args.seed + args.index)
+        if args.representation_source == "cnv":
+            source_pca, target_pca = source_cnv, target_cnv
+        else:
+            block_rng = np.random.default_rng(args.seed + args.index * 104729 + 1)
+            rna_scale = median_pair_scale(source_pca, target_pca, rng=block_rng)
+            cnv_scale = median_pair_scale(source_cnv, target_cnv, rng=block_rng)
+            source_pca = np.hstack([source_pca / np.sqrt(rna_scale),
+                                    source_cnv / np.sqrt(cnv_scale)]).astype(np.float32)
+            target_pca = np.hstack([target_pca / np.sqrt(rna_scale),
+                                    target_cnv / np.sqrt(cnv_scale)]).astype(np.float32)
+            cnv_record.update(rna_block_scale=float(rna_scale), cnv_block_scale=float(cnv_scale))
+        print(f"representation {args.representation_source}: {cnv_record}")
     rng = np.random.default_rng(args.seed + args.index * 104729)
     scale = median_pair_scale(source_pca, target_pca, rng=rng)
     cost = squared_euclidean(source_pca, target_pca) / scale
@@ -874,6 +957,8 @@ def main() -> None:
         # Which cells and genes were taken out before the representation, if any.
         "cell_filter": cell_filter_record,
         "excluded_genes": gene_filter_record,
+        "representation_source": args.representation_source,
+        "cnv": cnv_record,
         "cost": args.cost,
         # The scale the cost was divided by, and what the divided cost then
         # looks like. Without the scale a metric that moves cannot be told
