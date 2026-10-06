@@ -290,12 +290,16 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
         x = np.arange(len(STRATEGIES)) + (k - 1) * (width + gap)
         handles.append(ax.bar(x, part["mean"].fillna(0), width=width, color=colour,
                               label=arm, edgecolor="#ffffff", linewidth=1.0, zorder=2))
-        ax.errorbar(x, part["mean"], yerr=part["std"], fmt="none", ecolor=INK,
+        # F1 lies in [0, 1], so the 1 SD whisker stops at the bounds; past 1
+        # it ran into the number above it.
+        mean, spread = part["mean"].to_numpy(), part["std"].fillna(0).to_numpy()
+        lower, upper = np.minimum(spread, mean), np.minimum(spread, 1.0 - mean)
+        ax.errorbar(x, mean, yerr=[lower, upper], fmt="none", ecolor=INK,
                     elinewidth=0.8, capsize=2, zorder=3)
         # Above the whisker, so the number never sits on the line.
-        for xi, value, spread in zip(x, part["mean"], part["std"].fillna(0)):
+        for xi, value, top in zip(x, mean, upper):
             if np.isfinite(value):
-                ax.text(xi, min(value + spread, 1.0) + 0.025, f"{value:.2f}",
+                ax.text(xi, value + top + 0.025, f"{value:.2f}",
                         ha="center", va="bottom", fontsize=6.4, color=INK)
     ax.set_xticks(np.arange(len(STRATEGIES)))
     labels = []
@@ -320,7 +324,7 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
     fig.text(0.065, 0.915,
              "F1 of rejection on the side holding the cells to reject: the source in "
              "population_lost and populations_disjoint, the target in population_emerged. "
-             f"Mean over up to {pairs} pairs; whisker 1 SD.",
+             f"Mean over up to {pairs} pairs; whisker 1 SD, cut at 0 and 1.",
              fontsize=7.0, color=MUTED, va="top")
     fig.text(0.065, 0.88,
              "The global-optimal threshold and Partial OT's m are taken from the truth: "
