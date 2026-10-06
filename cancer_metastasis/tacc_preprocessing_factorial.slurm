@@ -121,6 +121,10 @@ qc_maximum_mito=${CONFIDENCEOT_MAXIMUM_MITOCHONDRIAL_PERCENT:-100.0}
 device=${CONFIDENCEOT_DEVICE:-cpu}
 solver_workers=${CONFIDENCEOT_WORKERS:-8}
 force=${CONFIDENCEOT_FACTORIAL_FORCE:-0}
+# Further 02_run_pair.py options for every pair of this array, split on spaces:
+# a cell filter, an excluded-gene list, an acceptance minimum. Empty runs the
+# factorial exactly as before; the output root is what keeps two settings apart.
+extra_args=(${CONFIDENCEOT_FACTORIAL_EXTRA_ARGS:-})
 
 for name in repo result manifest out; do
     value=${!name}
@@ -263,6 +267,7 @@ echo "output      $output_root"
 echo "scope       $scope, null $calibration_null, device $device"
 echo "minimum     $minimum_scope_cells cells per side"
 echo "cell qc     recorded, thresholds $qc_minimum_counts/$qc_minimum_genes/$qc_maximum_mito (filters nothing)"
+echo "extra args  ${extra_args[*]:-none}"
 
 skip=(--skip-completed)
 [[ "$force" == "1" ]] && skip=()
@@ -329,7 +334,8 @@ run_pair() {
         --calibration-grid-size 5 \
         --tolerance 1e-4 \
         --workers "$solver_workers" \
-        --device "$device" > "$log" 2>&1; then
+        --device "$device" \
+        "${extra_args[@]}" > "$log" 2>&1; then
         echo "===== COMPLETE $label index=$index $(date --iso-8601=seconds) ====="
     else
         local status=$?

@@ -107,6 +107,49 @@ def subset_from_prior_gate(data, confidence: pd.DataFrame, *, side: str,
     return data[keep].copy()
 
 
+def read_cell_filter(path: Path, column: str, deposit: str) -> tuple[set, set]:
+    """The cells a filter table keeps, and every cell it names, for one deposit.
+
+    The table is the collection's cycle/ot_cell_filter.tsv.gz: one row per cell,
+    keyed by deposit and cell_id, which is the h5ad's obs_name. A cell_id named
+    twice within the deposit cannot be told apart and is refused.
+    """
+    table = pd.read_csv(path, sep="\t", usecols=["deposit", "cell_id", column], dtype=str)
+    table = table[table["deposit"] == deposit]
+    if table.empty:
+        raise ValueError(f"{path} has no rows for {deposit}")
+    if table["cell_id"].duplicated().any():
+        raise ValueError(f"{path}: cell_id repeats within {deposit}")
+    keep = table[column].str.lower().isin(["true", "1"])
+    return set(table.loc[keep, "cell_id"]), set(table["cell_id"])
+
+
+def filter_cells(data, keep_ids: set, known_ids: set, *, side: str):
+    """Remove the cells a filter table marks; refuse any cell it does not name."""
+    ids = data.obs_names.astype(str)
+    unknown = ~ids.isin(known_ids)
+    if unknown.any():
+        raise KeyError(f"{int(unknown.sum())} {side} cells are not in the cell filter, "
+                       f"first {list(ids[unknown][:3])}")
+    keep = np.asarray(ids.isin(keep_ids), dtype=bool)
+    return data[keep].copy(), int((~keep).sum())
+
+
+def read_gene_list(path: Path) -> set:
+    """Gene symbols, one per line; lines starting with # are comments."""
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    return {line.strip() for line in lines if line.strip() and not line.startswith("#")}
+
+
+def exclude_genes(data, symbols: set):
+    """Drop the genes whose symbol, or whose key, is in the list."""
+    names = data.var_names.astype(str)
+    named = (data.var["gene_symbol"].astype(str).to_numpy() if "gene_symbol" in data.var
+             else np.asarray(names))
+    hit = np.isin(named, list(symbols)) | np.isin(np.asarray(names), list(symbols))
+    return data[:, ~hit].copy(), int(hit.sum())
+
+
 def confidence_frame(method: str, side: str, data, sample: str, result) -> pd.DataFrame:
     value = result.source_confidence if side == "source" else result.target_confidence
     gate = result.source_gate if side == "source" else result.target_gate
@@ -320,6 +363,21 @@ def main() -> None:
         "--input-gate-root", type=Path,
         help="Restrict both sides to a completed prior OT gate before fitting",
     )
+    parser.add_argument(
+        "--cell-filter", type=Path, default=None,
+        help="A per-cell table keyed by deposit and cell_id, such as the "
+             "collection's cycle/ot_cell_filter.tsv.gz. With --cell-filter-column, "
+             "cells whose column is false are removed from both sides once the "
+             "compartment is selected. A cell the table does not name stops the run",
+    )
+    parser.add_argument("--cell-filter-column", default=None, metavar="COLUMN",
+                        help="The keep column of --cell-filter, such as keep_arm_b")
+    parser.add_argument(
+        "--exclude-genes", type=Path, default=None,
+        help="Gene symbols, one per line, removed from both sides before the "
+             "representation is built, such as the collection's "
+             "cycle/ot_gene_filter.txt. None of them matching stops the run",
+    )
     parser.add_argument("--input-gate-budget-tag", default="budget_source_0.85_target_0.95")
     parser.add_argument("--input-gate-method", default="M4-E")
     parser.add_argument("--input-gate-state", choices=("retained", "rejected"))
@@ -412,6 +470,8 @@ def main() -> None:
         raise ValueError("fixed-rejection-cost must be positive and finite")
     if not 0 < args.within_side_acceptance_minimum <= 1:
         raise ValueError("within-side-acceptance-minimum must be in (0,1]")
+    if (args.cell_filter is None) != (args.cell_filter_column is None):
+        raise ValueError("cell-filter and cell-filter-column must be given together")
     if (args.input_gate_root is None) != (args.input_gate_state is None):
         raise ValueError("input-gate-root and input-gate-state must be provided together")
     manifest = pd.read_csv(args.manifest_csv)
@@ -504,6 +564,17 @@ def main() -> None:
             target, prior_confidence, side="target", method=args.input_gate_method,
             state=args.input_gate_state,
         )
+    cell_filter_record = None
+    if args.cell_filter is not None:
+        keep_ids, known_ids = read_cell_filter(
+            args.cell_filter, args.cell_filter_column, str(row["dataset_id"]))
+        source, source_filtered_n = filter_cells(source, keep_ids, known_ids, side="source")
+        target, target_filtered_n = filter_cells(target, keep_ids, known_ids, side="target")
+        cell_filter_record = {"path": str(args.cell_filter), "column": args.cell_filter_column,
+                              "source_removed_n": source_filtered_n,
+                              "target_removed_n": target_filtered_n}
+        print(f"cell filter {args.cell_filter_column}: removed {source_filtered_n} source "
+              f"and {target_filtered_n} target cells")
     source_input_n, target_input_n = source.n_obs, target.n_obs
     if source_input_n < args.minimum_scope_cells or target_input_n < args.minimum_scope_cells:
         raise ValueError(
@@ -518,6 +589,20 @@ def main() -> None:
     if args.max_observed_cells_per_side > 0 and target.n_obs > args.max_observed_cells_per_side:
         keep = np.sort(sample_rng.choice(target.n_obs, args.max_observed_cells_per_side, replace=False))
         target = target[keep].copy()
+    gene_filter_record = None
+    if args.exclude_genes is not None:
+        excluded = read_gene_list(args.exclude_genes)
+        source, source_genes_removed = exclude_genes(source, excluded)
+        target, target_genes_removed = exclude_genes(target, excluded)
+        if source_genes_removed == 0 or target_genes_removed == 0:
+            raise ValueError(f"no gene of {args.exclude_genes} matched on one side "
+                             f"(source {source_genes_removed}, target {target_genes_removed}); "
+                             f"the symbols are not this data's keys")
+        gene_filter_record = {"path": str(args.exclude_genes), "listed": len(excluded),
+                              "source_removed": source_genes_removed,
+                              "target_removed": target_genes_removed}
+        print(f"excluded genes: {source_genes_removed} source and {target_genes_removed} "
+              f"target of {len(excluded)} listed")
     # cost='cosine' L2-normalises the coordinates inside, before the scale is
     # estimated below, so the median is measured on the geometry the gate will
     # see. In the depth screen that is the one change that separated the rate
@@ -786,6 +871,9 @@ def main() -> None:
         "within_side_acceptance_minimum": (
             args.within_side_acceptance_minimum
             if calibration_null == "within_side_split" else None),
+        # Which cells and genes were taken out before the representation, if any.
+        "cell_filter": cell_filter_record,
+        "excluded_genes": gene_filter_record,
         "cost": args.cost,
         # The scale the cost was divided by, and what the divided cost then
         # looks like. Without the scale a metric that moves cannot be told
