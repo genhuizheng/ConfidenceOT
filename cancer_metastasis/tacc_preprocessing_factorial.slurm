@@ -216,6 +216,9 @@ if [[ "$wants_ds" == "1" ]]; then
         echo "  the _ds arms would be scored against a constant depth" >&2
         exit 2
     fi
+    # Made here, not only below: under a new output root the first _ds task
+    # reaches this line before any task has created the block directory.
+    mkdir -p "$out/$block"
     echo "$depth_table" > "$out/$block/PREDOWNSAMPLE_DEPTH"
 else
     echo "input       original counts"
