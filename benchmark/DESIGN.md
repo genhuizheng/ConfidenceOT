@@ -1,7 +1,9 @@
 # Technical benchmark: the conditions
 
 What is generated and what each condition means. The scoring is in
-`BENCHMARK_METRICS.md`; the figures are in `figures/schematic/`.
+`BENCHMARK_METRICS.md`; the figures are in `figures/schematic/`. The IC-POT
+comparator's implementation, configuration and completed runs are recorded in
+`EXPERIMENT_2026-10-06_IC-POT_COMPARATOR.md`.
 
 ## The three technical levels
 

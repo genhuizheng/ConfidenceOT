@@ -95,6 +95,9 @@ scripts/tacc/*
 # What is generated and what each condition means, beside the code that
 # makes it.
 !/benchmark/DESIGN.md
+# The IC-POT comparator: what was implemented, how it was configured and what
+# the completed runs returned, kept beside the code that ran them.
+!/benchmark/EXPERIMENT_2026-10-06_IC-POT_COMPARATOR.md
 
 # What lives in the schematic folder and the command that rebuilds each one.
 # The images themselves stay untracked; the scripts are what is tracked.
