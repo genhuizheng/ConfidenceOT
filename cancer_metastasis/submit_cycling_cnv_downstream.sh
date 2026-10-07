@@ -36,10 +36,14 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 acceptance=0.99
 dry_run=0
+# --force recomputes an arm that already has a DONE file: the job removes that
+# arm's earlier output first, as tacc_factorial_downstream.slurm always has.
+force=0
 cap=${CONFIDENCEOT_JOB_CAP:-40}
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
+        --force) force=1; shift ;;
         --acceptance) acceptance=$2; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -95,7 +99,7 @@ if [[ ! -f "$repo/cancer_metastasis/46_report_downstream_eligibility.py" ]] ||
     problems=1
 fi
 # Settings the array reads from the environment and this does not set.
-for name in CONFIDENCEOT_ENV CONFIDENCEOT_MINIMUM_CELLS_PER_STATUS CONFIDENCEOT_DOWNSTREAM_CORES \
+for name in CONFIDENCEOT_ENV CONFIDENCEOT_DOWNSTREAM_CORES \
             CONFIDENCEOT_DOWNSTREAM_THREADS_PER_WORKER CONFIDENCEOT_DOWNSTREAM_WORKERS; do
     if [[ -n "${!name}" ]]; then
         echo "set in this shell, would reach every task: $name=${!name}  (unset $name)" >&2
@@ -149,7 +153,7 @@ for analysis in $analyses; do
     for root in ${roots[$block]}; do
         rep=${root%/*}; arm=${root#*/}
         id=$(submit "$accession $rep arm $arm" --array=0-0 -J "dg_${short}_${rep}_$arm" \
-            --export="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$ot/$rep/arm_$arm,CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession,CONFIDENCEOT_DOWNSTREAM_NAME=$accession,CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=${source[$block]},CONFIDENCEOT_METASTASIS_SIZE_CSV=${size[$block]},CONFIDENCEOT_DOWNSTREAM_ROOT=$down/$rep/arm_$arm,CONFIDENCEOT_HUMAN_GMT=$gmt,CONFIDENCEOT_FACTORIAL_LABELS=$(labels_of "$root"),CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=4,CONFIDENCEOT_DOWNSTREAM_FORCE=0,$compartment" \
+            --export="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$ot/$rep/arm_$arm,CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession,CONFIDENCEOT_DOWNSTREAM_NAME=$accession,CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=${source[$block]},CONFIDENCEOT_METASTASIS_SIZE_CSV=${size[$block]},CONFIDENCEOT_DOWNSTREAM_ROOT=$down/$rep/arm_$arm,CONFIDENCEOT_HUMAN_GMT=$gmt,CONFIDENCEOT_FACTORIAL_LABELS=$(labels_of "$root"),CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=4,CONFIDENCEOT_DOWNSTREAM_FORCE=$force,$compartment" \
             "$job")
         ids+=("${short}_${rep}_$arm=$id")
     done

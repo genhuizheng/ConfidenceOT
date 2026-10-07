@@ -178,7 +178,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group_output_root", type=Path)
     parser.add_argument("output_dir", type=Path)
-    parser.add_argument("--minimum-cells-per-patient-status", type=int, default=20)
+    parser.add_argument(
+        "--minimum-cells-per-patient-status", type=int, default=1,
+        help="A patient enters a contrast when both of its states hold at least "
+             "this many cells. The default, 1, asks only that neither is empty.")
     parser.add_argument(
         "--exclude-patient", action="append", default=None,
         dest="exclude_patients", metavar="PATIENT_ID",

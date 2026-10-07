@@ -70,7 +70,6 @@ labels=(${CONFIDENCEOT_FACTORIAL_LABELS:-})
 out_root=${CONFIDENCEOT_DOWNSTREAM_ROOT:-$result/downstream_factorial}
 gmt_root=${CONFIDENCEOT_HUMAN_MSIGDB_ROOT:-$result/gene_sets/msigdb_2025.1_Hs}
 gmt=${CONFIDENCEOT_HUMAN_GMT:-$gmt_root/h.all.v2025.1.Hs.symbols.gmt}
-minimum_cells=${CONFIDENCEOT_MINIMUM_CELLS_PER_STATUS:-10}
 force=${CONFIDENCEOT_DOWNSTREAM_FORCE:-0}
 
 if [[ -z "$block" ]]; then
@@ -298,7 +297,6 @@ deg_one() {
     if ! OMP_NUM_THREADS=$share OPENBLAS_NUM_THREADS=$share MKL_NUM_THREADS=$share NUMEXPR_NUM_THREADS=$share \
         python cancer_metastasis/13_run_paired_pydeseq2.py \
             "$out/four_state" "$out/deg" \
-            --minimum-cells-per-patient-status "$minimum_cells" \
             --minimum-total-count 10 \
             --maximum-fdr 0.05 \
             --absolute-log2-fold-change-thresholds 0.5 1.0 \

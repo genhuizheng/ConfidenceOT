@@ -72,7 +72,6 @@ result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confi
 env_path=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
 preprocessing=${PREPROCESSING:-rank256_ds_cos}
 stamp=${GATE_STAMP:-20260921}
-minimum_cells=${MINIMUM_CELLS_PER_STATUS:-10}
 
 # Per dataset: accession, the malignant labels the OT used, the ORIGINAL
 # manifest, and the equalised root that carries the malignant cell counts.
@@ -282,7 +281,6 @@ echo "J2 pseudobulk  $pseudobulk_job -> $four_state"
 # prevents a partial result that looks complete.
 export CONFIDENCEOT_DEG_ROOT="$four_state"
 export CONFIDENCEOT_PYDESEQ2_ROOT="$deg"
-export CONFIDENCEOT_MINIMUM_CELLS_PER_STATUS="$minimum_cells"
 
 deg_job=$(submit --dependency=afterok:"${pseudobulk_job%%_*}" \
   cancer_metastasis/tacc_paired_pydeseq2.slurm)
@@ -313,7 +311,7 @@ loo_job=$(submit --dependency=afterok:"$deg_job" \
   -p gg -N 1 -n 1 -c 16 -t 08:00:00 -A MCB26031 -J "cot_loo_$dataset" \
   -o "$result/logs/loo_${dataset}_%j.out" \
   -e "$result/logs/loo_${dataset}_%j.err" \
-  --wrap="$(wrap "python cancer_metastasis/34_leave_one_patient_out.py $four_state $loo --minimum-cells-per-patient-status $minimum_cells --skip-completed")")
+  --wrap="$(wrap "python cancer_metastasis/34_leave_one_patient_out.py $four_state $loo --skip-completed")")
 echo "J6 leave-1-out $loo_job -> $loo"
 
 echo

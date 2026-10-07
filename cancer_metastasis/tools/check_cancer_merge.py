@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metastasis-size-csv", type=Path, default=None,
                         help="Defaults to downsample_per_sample.csv beside the "
                              "block's PREDOWNSAMPLE_DEPTH record")
-    parser.add_argument("--minimum-cells", type=int, default=10)
+    parser.add_argument("--minimum-cells", type=int, default=1)
     return parser.parse_args()
 
 

@@ -29,18 +29,11 @@ export PYTHONUNBUFFERED=1
 
 mkdir -p "$output" "$result/logs"
 
-# Amended 2026-09-24 from the prespecification's 20 to 10. Retention runs from
-# 0.37 to 0.95 across pairs, so a high-retention patient has very few rejected
-# cells -- 200 primary cells at 95% retention leaves 10 -- and a 20-cell floor
-# drops exactly the patients the patient-dominance check needs to count. The
-# floor is the only threshold that matters here: 21_ emits a contrast whenever
-# both states are non-empty, so 13_ is where patients are actually excluded.
-# See the 2026-09-24 amendment in DEG_PRESPECIFICATION_2026-09-15.md.
-minimum_cells=${CONFIDENCEOT_MINIMUM_CELLS_PER_STATUS:-10}
+# No cell floor since 2026-10-07: a patient enters when neither state is empty,
+# 13_'s default. It was 20 in the prespecification and 10 from 2026-09-24.
 
 python cancer_metastasis/13_run_paired_pydeseq2.py \
   "$groups" "$output" \
-  --minimum-cells-per-patient-status "$minimum_cells" \
   --minimum-total-count 10 \
   --maximum-fdr 0.05 \
   --absolute-log2-fold-change-thresholds 0.5 1.0 \

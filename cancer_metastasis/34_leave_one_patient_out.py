@@ -29,7 +29,7 @@ bookkeeping of collecting P output directories is the part that goes wrong.
 Usage:
 
     python cancer_metastasis/34_leave_one_patient_out.py \\
-        FOUR_STATE_ROOT OUTPUT_ROOT [--minimum-cells-per-patient-status 10]
+        FOUR_STATE_ROOT OUTPUT_ROOT [--minimum-cells-per-patient-status 1]
 """
 
 from __future__ import annotations
@@ -53,7 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("four_state_root", type=Path,
                         help="Output root of 21_prepare_four_state_malignant_pseudobulk.py")
     parser.add_argument("output_root", type=Path)
-    parser.add_argument("--minimum-cells-per-patient-status", type=int, default=10)
+    # 13_'s default: a patient enters when neither state is empty.
+    parser.add_argument("--minimum-cells-per-patient-status", type=int, default=1)
     parser.add_argument("--minimum-total-count", type=int, default=10)
     parser.add_argument("--n-cpus", type=int, default=16)
     parser.add_argument("--maximum-fdr", type=float, default=0.05)
