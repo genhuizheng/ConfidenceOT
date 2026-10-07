@@ -8,8 +8,10 @@
 #
 # The three analyses of the 2026-10-02 figure -- ovarian GSE180661 and
 # colorectal GSE225857 from the uniform block, prostate GSE271675 -- over every
-# OT root submit_cycling_cnv_factorial.sh wrote: one array task per (analysis,
-# root), each running that root's labels end to end. Written to
+# OT root submit_cycling_cnv_factorial.sh wrote. Each root is one run of
+# tacc_factorial_downstream.slurm with that root's labels; the runs of one
+# analysis go one after another in a single job (tacc_downstream_units.slurm),
+# so the whole design is three jobs. Written to
 # <down>/<rna|rna_cnv|cnv>/arm_<X>/<block>/<accession>/<label>/.
 #
 # Nothing here selects pairs. Every task reads the original-count manifest the
@@ -68,7 +70,7 @@ block_dir() { echo "$ot/${2%/*}/arm_${2#*/}/$1"; }   # $1 block, $2 rep/arm
 analyses="GSE180661:uniform:ov GSE225857:uniform:crc GSE271675:prostate:pr"
 
 problems=0
-for path in "${source[@]}" "$gmt" "$job"; do
+for path in "${source[@]}" "$gmt" "$job" "$repo/cancer_metastasis/tacc_downstream_units.slurm"; do
     [[ -f "$path" ]] || { echo "missing: $path" >&2; problems=1; }
 done
 declare -A size=()
@@ -110,17 +112,18 @@ if (( problems )); then
     exit 2
 fi
 
-tasks=0
-for analysis in $analyses; do
-    block=$(cut -d: -f2 <<< "$analysis")
-    tasks=$(( tasks + $(wc -w <<< "${roots[$block]}") ))
-done
+# One job per analysis: the roots of an analysis run one after another in one
+# allocation through tacc_downstream_units.slurm, so the design costs three
+# jobs against the submission cap rather than one per root.
+tasks=$(wc -w <<< "$analyses")
 queued=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l) || queued=0
 if (( ! dry_run && queued + tasks > cap )); then
     echo "$queued tasks already queued and this adds $tasks, over the cap of $cap" >&2
     exit 3
 fi
-(( dry_run )) || mkdir -p "$down"
+units_dir=$down
+(( dry_run )) && units_dir=$(mktemp -d)
+mkdir -p "$units_dir"
 
 submit() {
     # $1 = description, rest = sbatch arguments. Called inside $(...), where
@@ -146,17 +149,31 @@ ids=()
 for analysis in $analyses; do
     IFS=: read -r accession block short <<< "$analysis"
     if [[ "$block" == prostate ]]; then
-        compartment="CONFIDENCEOT_MALIGNANT_COLUMN=,CONFIDENCEOT_MALIGNANT_ANNOTATIONS=$prostate_annotations"
+        compartment=("CONFIDENCEOT_MALIGNANT_COLUMN=" "CONFIDENCEOT_MALIGNANT_ANNOTATIONS=$prostate_annotations")
     else
-        compartment="CONFIDENCEOT_MALIGNANT_COLUMN=malignant,CONFIDENCEOT_MALIGNANT_ANNOTATIONS="
+        compartment=("CONFIDENCEOT_MALIGNANT_COLUMN=malignant" "CONFIDENCEOT_MALIGNANT_ANNOTATIONS=")
     fi
+    # One line per root, its settings tab-separated: what tacc_factorial_
+    # downstream.slurm would have been given as an array task of its own.
+    units=$units_dir/units_$accession.tsv
+    : > "$units"
     for root in ${roots[$block]}; do
         rep=${root%/*}; arm=${root#*/}
-        id=$(submit "$accession $rep arm $arm" --array=0-0 -J "dg_${short}_${rep}_$arm" \
-            --export="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$ot/$rep/arm_$arm,CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession,CONFIDENCEOT_DOWNSTREAM_NAME=$accession,CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=${source[$block]},CONFIDENCEOT_METASTASIS_SIZE_CSV=${size[$block]},CONFIDENCEOT_DOWNSTREAM_ROOT=$down/$rep/arm_$arm,CONFIDENCEOT_HUMAN_GMT=$gmt,CONFIDENCEOT_FACTORIAL_LABELS=$(labels_of "$root"),CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=4,CONFIDENCEOT_DOWNSTREAM_FORCE=$force,$compartment" \
-            "$job")
-        ids+=("${short}_${rep}_$arm=$id")
+        settings=("CONFIDENCEOT_REPO=$repo" "CANCER_COT_ROOT=$result"
+                  "CONFIDENCEOT_FACTORIAL_ROOT=$ot/$rep/arm_$arm" "CONFIDENCEOT_FACTORIAL_BLOCK=$block"
+                  "CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession" "CONFIDENCEOT_DOWNSTREAM_NAME=$accession"
+                  "CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=${source[$block]}"
+                  "CONFIDENCEOT_METASTASIS_SIZE_CSV=${size[$block]}"
+                  "CONFIDENCEOT_DOWNSTREAM_ROOT=$down/$rep/arm_$arm" "CONFIDENCEOT_HUMAN_GMT=$gmt"
+                  "CONFIDENCEOT_FACTORIAL_LABELS=$(labels_of "$root")"
+                  "CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=4" "CONFIDENCEOT_DOWNSTREAM_FORCE=$force"
+                  "${compartment[@]}")
+        (IFS=$'\t'; echo "${settings[*]}") >> "$units"
     done
+    id=$(submit "$accession: $(wc -l < "$units") roots in one job, $units" -J "dg_$short" \
+        --export="ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_UNITS=$units" \
+        "$repo/cancer_metastasis/tacc_downstream_units.slurm")
+    ids+=("$short=$id")
 done
 
 summary=$(cat <<EOF
@@ -168,14 +185,15 @@ manifests    ${source[uniform]}
 sizes        ${size[uniform]}
              ${size[prostate]}
 gene sets    $gmt
-tasks        ${ids[*]}
+units        $units_dir/units_<accession>.tsv
+jobs         ${ids[*]}
 report       python cancer_metastasis/46_report_downstream_eligibility.py $down $ot
 EOF
 )
 echo
 echo "$summary"
 if (( dry_run )); then
-    echo "nothing was submitted (--dry-run)"
+    echo "nothing was submitted (--dry-run); the unit files are in a scratch directory"
 else
     echo "$summary" > "$down/SUBMITTED_$(date +%Y%m%d_%H%M%S).txt"
 fi
