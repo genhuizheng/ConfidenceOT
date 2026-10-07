@@ -28,13 +28,6 @@ The two restrictions compose. Before the transport, pass ``--dataset-id``
 alone. After it, pass the gate root as well, or only the gate root: a gate
 root belongs to one dataset, so selecting on it selects the dataset too.
 
-Several gate roots that are to be compared -- arms of one factorial -- want one
-cohort between them. ``--gate-root`` repeated keeps the pairs every root
-supplies, and ``--require-m4e-calibration`` also drops a pair whose M4-E
-calibration ``21_`` would refuse under any root. Without both, a pair missing
-from one arm, or refused in it, can change which lesion ``21_`` names for that
-patient, and the arms would differ in tissue as well as in gate.
-
 Usage:
 
     # before the transport: one dataset out of the pan-cancer manifest
@@ -44,11 +37,6 @@ Usage:
     # after it: the pairs the gate root can actually supply
     python cancer_metastasis/35_trim_manifest_to_gate.py \\
         ORIGINAL_MANIFEST_CSV OUT.csv --gate-root GATE_ROOT
-
-    # several arms: the pairs every one supplies with a usable calibration
-    python cancer_metastasis/35_trim_manifest_to_gate.py \\
-        ORIGINAL_MANIFEST_CSV OUT.csv --gate-root ARM_A --gate-root ARM_B \\
-        --require-m4e-calibration
 """
 
 from __future__ import annotations
@@ -65,15 +53,9 @@ def parse_args() -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("manifest_csv", type=Path)
     parser.add_argument("output_csv", type=Path)
-    parser.add_argument("--gate-root", type=Path, action="append", default=None,
+    parser.add_argument("--gate-root", type=Path, default=None,
                         help="Keep only pairs this completed gate root can "
-                             "supply a gate for; repeat to keep the pairs "
-                             "every root supplies")
-    parser.add_argument("--require-m4e-calibration", action="store_true",
-                        help="Also drop a pair whose M4-E calibration 21_ "
-                             "would refuse under any of the gate roots, so "
-                             "that every root gives the pseudobulk the same "
-                             "pairs")
+                             "supply a gate for")
     parser.add_argument("--dataset-id", action="append", default=None,
                         dest="dataset_ids", metavar="GSE",
                         help="Keep only these dataset_id values; repeatable. "
@@ -82,8 +64,6 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.gate_root is None and not args.dataset_ids:
         parser.error("pass --gate-root, --dataset-id, or both")
-    if args.require_m4e_calibration and not args.gate_root:
-        parser.error("--require-m4e-calibration reads the gates, so it needs --gate-root")
     return args
 
 
@@ -93,18 +73,6 @@ def gated_pairs(gate_root: Path, scope: str) -> set[str]:
     for path in gate_root.glob(f"*/{scope}/*/cell_confidence.csv"):
         found.add(path.parents[2].name)
     return found
-
-
-def pseudobulk_calibration_rule():
-    """21_'s own test of a pair's M4-E calibration, imported rather than
-    copied, so a pair kept here is one the pseudobulk will not refuse."""
-    import importlib.util
-
-    path = Path(__file__).with_name("21_prepare_four_state_malignant_pseudobulk.py")
-    spec = importlib.util.spec_from_file_location("pseudobulk_rules", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.calibration_refusal
 
 
 def main() -> None:
@@ -129,35 +97,17 @@ def main() -> None:
                 f"dataset_id {unknown} not in {args.manifest_csv}; it holds "
                 f"{known}")
         keep &= manifest["dataset_id"].astype(str).isin(args.dataset_ids)
-    for position, root in enumerate(args.gate_root or []):
-        if not root.is_dir():
-            raise FileNotFoundError(f"Gate root does not exist: {root}")
-        found = gated_pairs(root, args.scope)
-        if not found:
+    if args.gate_root is not None:
+        if not args.gate_root.is_dir():
+            raise FileNotFoundError(f"Gate root does not exist: {args.gate_root}")
+        present = gated_pairs(args.gate_root, args.scope)
+        if not present:
             raise RuntimeError(
                 f"No */{args.scope}/*/cell_confidence.csv under "
-                f"{root}. Either the scope is wrong or this is not a "
+                f"{args.gate_root}. Either the scope is wrong or this is not a "
                 f"completed gate root."
             )
-        present = found if position == 0 else present & found
-    if args.gate_root:
         keep &= manifest["pair_id"].astype(str).isin(present)
-    # A pair the pseudobulk refuses under one root and accepts under another
-    # gives the roots different patients, or a patient different pairs, and the
-    # comparison between them would then be partly a comparison of cohorts.
-    refused: dict[str, list[str]] = {}
-    if args.require_m4e_calibration:
-        refusal_of = pseudobulk_calibration_rule()
-        for pair in sorted(set(manifest.loc[keep, "pair_id"].astype(str))):
-            for root in args.gate_root:
-                runs = sorted((root / pair).glob(f"{args.scope}/*/run.json"))
-                if len(runs) != 1:
-                    raise RuntimeError(
-                        f"Expected one run.json for {pair} under {root}; found {len(runs)}")
-                reason = refusal_of(json.loads(runs[0].read_text(encoding="utf-8")))
-                if reason is not None:
-                    refused.setdefault(pair, []).append(f"{root}: {reason}")
-        keep &= ~manifest["pair_id"].astype(str).isin(refused)
     dropped = manifest.loc[~keep, "pair_id"].astype(str).tolist()
     trimmed = manifest[keep].copy()
     if trimmed.empty:
@@ -201,14 +151,11 @@ def main() -> None:
     fraction = len(trimmed) / len(manifest)
     report = {
         "manifest_csv": str(args.manifest_csv),
-        "gate_root": (str(args.gate_root[0]) if len(args.gate_root) == 1
-                      else [str(root) for root in args.gate_root])
-        if args.gate_root else None,
+        "gate_root": str(args.gate_root) if args.gate_root else None,
         "dataset_ids": args.dataset_ids,
         "output_csv": str(args.output_csv),
         "manifest_rows": int(len(manifest)),
         "gated_pairs_found": int(len(present)) if args.gate_root else None,
-        "m4e_calibration_refused": refused if args.require_m4e_calibration else None,
         "rows_kept": int(len(trimmed)),
         "rows_dropped": int(len(dropped)),
         "retained_fraction": round(fraction, 4),
