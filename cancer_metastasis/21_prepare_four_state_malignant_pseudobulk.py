@@ -25,12 +25,13 @@ only the middle one has changed:
    metastatic cell paired with several primaries contributes one vector.
    ``--metastasis-selection all`` restores the previous behaviour.
 
-2. *Calibration.*  The pair's M4-E calibration must have found a feasible cost
-   and produced a clean fit with a valid inference certificate.  This replaces
-   the cap-robustness requirement described below.  ``calibration_m4r_clean``
-   is deliberately **not** required: this workflow reads M4-E only, and the
-   older conflated flag failed on 249 of 252 pan-cancer pairs for an M4-R
-   reason that says nothing about the M4-E gate.
+2. *Calibration is not judged here.*  Every pair the OT run completed enters
+   as it stands.  The run already applied its calibration when it fitted the
+   gate, and its flags stay in its own run.json; deciding again here whether
+   that calibration was good enough would be a second selection of pairs on
+   top of the OT's, which this step has no business making.  (Until
+   2026-10-07 a pair was excluded unless its M4-E calibration flags were all
+   true.)
 
 3. *Origin selection.*  When a patient has several primary samples for one
    metastasis, the origin ranking can select one as the likely source.  That
@@ -86,14 +87,6 @@ from common import expression_matrix, gene_keys, load_exact_side
 
 
 MALIGNANT = "Ovarian.cancer.cell"
-
-# The fields a usable M4-E calibration must all carry. M4-R cleanliness is
-# excluded on purpose: nothing here reads the reversible gate.
-M4E_CALIBRATION_FIELDS = (
-    "calibration_feasible_cost_found",
-    "calibration_m4e_clean",
-    "calibration_m4e_inference_valid",
-)
 
 # Only one contrast is emitted by default. Rejection is one-sided here, so the
 # metastatic side is never gate-filtered, and a metastasis-versus-primary
@@ -163,10 +156,6 @@ def parse_args() -> argparse.Namespace:
                         help="Repeat once per malignant label; defaults to "
                              f"{MALIGNANT!r}")
     parser.add_argument("--include-exact-winner-unstable", action="store_true")
-    parser.add_argument(
-        "--allow-invalid-calibration", action="store_true",
-        help="Keep pairs whose M4-E calibration did not converge",
-    )
     args = parser.parse_args()
     # Resolved here rather than as an argparse default: `action="append"` on a
     # non-empty default appends to it instead of replacing it, so one
@@ -409,19 +398,6 @@ def read_hvg(root: Path, pair: str) -> set[str]:
     return {str(value) for value in read_run(root, pair).get("hvg", [])}
 
 
-def calibration_refusal(run: dict) -> str | None:
-    """Name the reason this pair's M4-E gate is not calibrated, or None.
-
-    A pair fitted with ``--fixed-rejection-cost`` has no calibration to
-    validate; its flags are all false for that reason rather than because
-    anything failed, so it is accepted and the mode is reported instead.
-    """
-    if str(run.get("calibration_null", "none")) == "none":
-        return None
-    failed = [name for name in M4E_CALIBRATION_FIELDS if not bool(run.get(name))]
-    return ",".join(failed) if failed else None
-
-
 def single_gate_status(gate: pd.DataFrame) -> pd.DataFrame:
     """Label cells from one gate root, with no second root to agree with."""
     table = gate.copy()
@@ -575,7 +551,6 @@ def main() -> None:
     target_pair_counts: dict[str, int] = defaultdict(int)
     ot_features: set[str] = set()
     pair_rows = []
-    excluded_pairs: list[dict[str, str]] = []
     calibration_nulls: set[str] = set()
     target_caps: set = set()
     for _, group in patient_groups.iterrows():
@@ -593,16 +568,9 @@ def main() -> None:
             raise RuntimeError(f"Manifest did not uniquely resolve {pair}")
         row = match.iloc[0]
 
-        # Checked before any counter moves: consensus_classification compares
-        # the pairs a cell was seen in against the pairs it was expected in, so
-        # an excluded pair must never be expected.
         run = read_run(args.gate_root, pair)
         calibration_nulls.add(str(run.get("calibration_null", "unknown")))
         target_caps.add(run.get("target_rejection_budget_cap"))
-        refusal = calibration_refusal(run)
-        if refusal is not None and not args.allow_invalid_calibration:
-            excluded_pairs.append({"pair_id": pair, "reason": refusal})
-            continue
 
         source_paths.setdefault(source, json.loads(str(row["source_h5ads_json"])))
         target_paths.setdefault(target, json.loads(str(row["target_h5ads_json"])))
@@ -639,21 +607,6 @@ def main() -> None:
             f"{patient}: pairs disagree on the calibration null: "
             f"{sorted(calibration_nulls)}"
         )
-    if not pair_rows:
-        report = {
-            "patient_id": patient,
-            "selected_pair_n": 0,
-            "candidate_pair_n": int(len(patient_groups)),
-            "excluded_pair_n": len(excluded_pairs),
-            "excluded_pairs": excluded_pairs,
-            "reason": "no pair carried a usable M4-E calibration",
-        }
-        (output / "diagnostics.json").write_text(
-            json.dumps(report, indent=2), encoding="utf-8"
-        )
-        print(json.dumps(report, indent=2), flush=True)
-        print(f"SKIP patient={patient} no usable pair", flush=True)
-        return
 
     source_long = pd.concat(source_records, ignore_index=True)
     target_long = pd.concat(target_records, ignore_index=True)
@@ -831,12 +784,7 @@ def main() -> None:
             if args.sensitivity_root is not None
             else "not required; the budget is reported rather than enforced"
         ),
-        "calibration_requirement": (
-            "allowed to fail" if args.allow_invalid_calibration
-            else " and ".join(M4E_CALIBRATION_FIELDS)
-        ),
-        "excluded_pair_n": len(excluded_pairs),
-        "excluded_pairs": excluded_pairs,
+        "calibration_requirement": "none; every pair the OT run completed enters",
         "exact_winner_robust_only": not args.include_exact_winner_unstable,
         "state_cell_n": cell_n,
         "malignant_selector": (

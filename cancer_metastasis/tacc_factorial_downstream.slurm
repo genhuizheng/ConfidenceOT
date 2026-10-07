@@ -152,11 +152,6 @@ else
     echo "the malignant compartment is unset: CONFIDENCEOT_MALIGNANT_COLUMN or CONFIDENCEOT_MALIGNANT_ANNOTATIONS" >&2
     exit 2
 fi
-# Further 21_ options for every patient of every arm, split on spaces. Empty
-# runs the pseudobulk exactly as before.
-pseudobulk_args=(${CONFIDENCEOT_DOWNSTREAM_PSEUDOBULK_ARGS:-})
-extra+=("${pseudobulk_args[@]}")
-echo "pseudobulk ${pseudobulk_args[*]:-default options}"
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis${PYTHONPATH:+:$PYTHONPATH}"

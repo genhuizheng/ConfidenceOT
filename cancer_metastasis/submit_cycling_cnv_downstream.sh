@@ -13,11 +13,9 @@
 # <down>/<rna|rna_cnv|cnv>/arm_<X>/<block>/<accession>/<label>/.
 #
 # Nothing here selects pairs. Every task reads the original-count manifest the
-# 2026-10-02 run read and the job trims it to the pairs its own arm gated. 21_
-# runs with its own --allow-invalid-calibration, so it consumes every completed
-# gate as it stands and does not judge the calibration again. A pair an arm is
-# missing is reported afterwards by 46_report_downstream_eligibility.py, not
-# replaced.
+# 2026-10-02 run read and the job trims it to the pairs its own arm gated; 21_
+# consumes every completed gate as it stands. A pair an arm is missing is
+# reported afterwards by 46_report_downstream_eligibility.py, not replaced.
 #
 # The lesion-size table is the one each block recorded, as 2026-10-02 took it:
 # PREDOWNSAMPLE_DEPTH beside the block, whose directory holds
@@ -92,7 +90,7 @@ for block in uniform prostate; do
     [[ -f "${size[$block]}" ]] || { echo "missing: ${size[$block]}" >&2; problems=1; }
 done
 if [[ ! -f "$repo/cancer_metastasis/46_report_downstream_eligibility.py" ]] ||
-   ! grep -q 'CONFIDENCEOT_DOWNSTREAM_PSEUDOBULK_ARGS' "$job" 2> /dev/null; then
+   grep -q 'calibration_refusal' "$repo/cancer_metastasis/21_prepare_four_state_malignant_pseudobulk.py" 2> /dev/null; then
     echo "$repo is older than this script: git pull there first" >&2
     problems=1
 fi
@@ -151,7 +149,7 @@ for analysis in $analyses; do
     for root in ${roots[$block]}; do
         rep=${root%/*}; arm=${root#*/}
         id=$(submit "$accession $rep arm $arm" --array=0-0 -J "dg_${short}_${rep}_$arm" \
-            --export="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$ot/$rep/arm_$arm,CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession,CONFIDENCEOT_DOWNSTREAM_NAME=$accession,CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=${source[$block]},CONFIDENCEOT_METASTASIS_SIZE_CSV=${size[$block]},CONFIDENCEOT_DOWNSTREAM_ROOT=$down/$rep/arm_$arm,CONFIDENCEOT_HUMAN_GMT=$gmt,CONFIDENCEOT_FACTORIAL_LABELS=$(labels_of "$root"),CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=4,CONFIDENCEOT_DOWNSTREAM_FORCE=0,CONFIDENCEOT_DOWNSTREAM_PSEUDOBULK_ARGS=--allow-invalid-calibration,$compartment" \
+            --export="ALL,CONFIDENCEOT_REPO=$repo,CANCER_COT_ROOT=$result,CONFIDENCEOT_FACTORIAL_ROOT=$ot/$rep/arm_$arm,CONFIDENCEOT_FACTORIAL_BLOCK=$block,CONFIDENCEOT_DOWNSTREAM_ACCESSION=$accession,CONFIDENCEOT_DOWNSTREAM_NAME=$accession,CONFIDENCEOT_DOWNSTREAM_SOURCE_MANIFEST=${source[$block]},CONFIDENCEOT_METASTASIS_SIZE_CSV=${size[$block]},CONFIDENCEOT_DOWNSTREAM_ROOT=$down/$rep/arm_$arm,CONFIDENCEOT_HUMAN_GMT=$gmt,CONFIDENCEOT_FACTORIAL_LABELS=$(labels_of "$root"),CONFIDENCEOT_DOWNSTREAM_ARMS_PER_TASK=4,CONFIDENCEOT_DOWNSTREAM_FORCE=0,$compartment" \
             "$job")
         ids+=("${short}_${rep}_$arm=$id")
     done

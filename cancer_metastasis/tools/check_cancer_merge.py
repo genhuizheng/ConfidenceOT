@@ -19,8 +19,8 @@ before anything is submitted:
 3. **Each patient has both states under each arm's gate.** The paired DEG
    keeps a patient only with at least ``--minimum-cells`` retained and as many
    rejected primary cells. Counted with ``21_``'s own functions -- the same
-   largest-lesion choice, the same M4-E gate, the same calibration refusal --
-   so the count is the one the pseudobulk will see, not a second estimate.
+   largest-lesion choice, the same M4-E gate -- so the count is the one the
+   pseudobulk will see, not a second estimate.
 
 Everything is read on the pairs the gates actually cover. The manifest the
 expression stages read lists more pairs than the factorial ran -- the
@@ -133,10 +133,6 @@ def main() -> None:
             retained = rejected = 0
             for row in groups[groups["patient_id"].astype(str).eq(patient)].itertuples():
                 pair = pseudobulk.pair_id(patient, str(row.source_sample), str(row.target_sample))
-                refusal = pseudobulk.calibration_refusal(pseudobulk.read_run(gate_root, pair))
-                if refusal is not None:
-                    notes.append(f"{patient}: excluded, {refusal}")
-                    continue
                 flags = pseudobulk.read_gate(gate_root, pair, "source", "baseline")["baseline_rejected"].astype(bool)
                 rejected += int(flags.sum())
                 retained += int((~flags).sum())

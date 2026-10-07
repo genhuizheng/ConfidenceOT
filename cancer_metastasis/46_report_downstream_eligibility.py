@@ -9,8 +9,7 @@ DOWN_ROOT/<rep>/arm_<X>/<block>/<accession>/<label>/ it lists
 * the pairs of that accession the OT was asked to run (the block's
   MANIFEST_PATH under OT_ROOT) that the arm did not gate -- not evaluable, or
   failed -- which the job's trim left out;
-* the pairs 21_ excluded for their M4-E calibration, with 21_'s reason;
-* the patients 21_ skipped, with its reason;
+* the patients 21_ skipped, with its reason (a contrast with an empty side);
 * the lesion 21_ named for each patient, so a patient whose lesion differs
   between arms is visible;
 * how many patients entered the paired DEG.
@@ -71,22 +70,16 @@ def main() -> None:
         for pair in sorted(asked - gated):
             events.append({"accession": accession, "arm": name, "kind": "pair not gated in this arm",
                            "id": pair, "reason": "no cell_confidence.csv under the arm's gate root"})
-        excluded = skipped = 0
+        skipped = 0
         for diagnostics in sorted((arm_dir / "four_state" / "patients").glob("*/diagnostics.json")):
             report = json.loads(diagnostics.read_text(encoding="utf-8"))
             patient = str(report.get("patient_id"))
-            for item in report.get("excluded_pairs", []):
-                excluded += 1
-                events.append({"accession": accession, "arm": name,
-                               "kind": "pair excluded by 21_ (calibration)",
-                               "id": item.get("pair_id"), "reason": item.get("reason")})
             if "reason" in report:
                 skipped += 1
                 events.append({"accession": accession, "arm": name, "kind": "patient skipped by 21_",
                                "id": patient, "reason": report["reason"]})
             lesions.append({"accession": accession, "patient_id": patient, "arm": name,
                             "designated_metastasis": report.get("designated_metastasis")})
-        row["pairs_excluded_by_21"] = excluded
         row["patients_skipped_by_21"] = skipped
         deg = arm_dir / "deg" / "pydeseq2_report.json"
         patients = None
