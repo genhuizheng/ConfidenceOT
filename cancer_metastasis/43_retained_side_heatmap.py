@@ -48,6 +48,15 @@ The matrices behind the figure are the ones
         --analysis "Ovarian GSE180661::<41_ output dir>::<downstream analysis dir>" \\
         --analysis ...
 
+``--layout cycling`` draws the arms of the cycling x representation design
+instead: RNA, RNA+CNV and CNV as the groups, arms A-D under each, the two RNA
+labels side by side, and a strip marking cells removed, genes removed and the
+label. DOWNSTREAM_DIR is then a template the arm fills in,
+``<down>/{rep}/arm_{cycle}/<block>/<accession>/{label}``, and an arm a panel
+lacks -- prostate has no CNV arms -- is a grey column. The panel subtitle gives
+the patients in the DEG beside the pseudobulk's count when the downstream run
+wrote its pydeseq2_report.json.
+
 --separate draws one figure per analysis instead of one with a panel each;
 give it --vmax so they share a scale. --slide draws the same figure to sit on
 a 16:9 slide at its own size, so its type is as large on the slide as it is
@@ -57,8 +66,11 @@ here: no header, which the slide's own text replaces, and shorter rows.
 from __future__ import annotations
 
 import argparse
+import json
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import matplotlib
 matplotlib.use("Agg")
@@ -74,6 +86,68 @@ ARMS = [a for n in NORMALISATIONS for a in (
     n, f"{n}_cos", f"{n}_ds", f"{n}_ds_cos", f"{n}_noscale", f"{n}_noscale_cos",
     f"{n}_noscale_ds", f"{n}_noscale_ds_cos")]
 TAGS = ("noscale", "ds", "cos")
+
+
+@dataclass
+class Layout:
+    """The columns of a figure: which arms, how they group, what the strip marks.
+
+    ``tag_rows`` are the rows of the design strip, each a name and a test of an
+    arm: True draws a filled mark, False a faint one, None nothing. Under
+    ``every_arm`` an arm missing from a panel stops the run; otherwise its
+    column is grey in that panel.
+    """
+    arms: list[str]
+    groups: list[tuple[str, int]]
+    tag_rows: list[tuple[str, Callable[[str], bool | None]]]
+    every_arm: bool
+    arm_dir: Callable[[str, str], Path]
+    note: str = ""
+    per: str = "preprocessing arm"
+
+
+def factorial_layout() -> Layout:
+    return Layout(
+        arms=ARMS, groups=[(norm, 8) for norm in NORMALISATIONS],
+        tag_rows=[(tag, lambda arm, tag=tag: f"_{tag}" in arm) for tag in TAGS],
+        every_arm=True, arm_dir=lambda spec, arm: Path(spec) / arm)
+
+
+# The cycling x representation arms of submit_cycling_cnv_factorial.sh. An arm
+# is <rep>/<A-D>/<label>; CNV ran arms A and B only, under the label raw, which
+# names no RNA preprocessing there because the cost uses no RNA.
+CYCLING_REPS = (("rna", "RNA"), ("rna_cnv", "RNA+CNV"), ("cnv", "CNV"))
+CYCLING_LABELS = ("ranknm256_noscale_ds_cos", "raw")
+
+
+def cycling_layout() -> Layout:
+    arms, groups = [], []
+    for rep, title in CYCLING_REPS:
+        cycles, labels = ("AB", ("raw",)) if rep == "cnv" else ("ABCD", CYCLING_LABELS)
+        block = [f"{rep}/{cycle}/{label}" for label in labels for cycle in cycles]
+        arms += block
+        groups.append((title, len(block)))
+
+    def cycle(arm: str) -> str:
+        return arm.split("/")[1]
+
+    def template(spec: str, arm: str) -> Path:
+        rep, letter, label = arm.split("/")
+        return Path(spec.format(rep=rep, cycle=letter, label=label))
+
+    return Layout(
+        arms=arms, groups=groups,
+        tag_rows=[("cells removed", lambda arm: cycle(arm) in "BD"),
+                  ("genes removed", lambda arm: cycle(arm) in "CD"),
+                  (CYCLING_LABELS[0], lambda arm: None if arm.startswith("cnv/")
+                   else arm.endswith(f"/{CYCLING_LABELS[0]}"))],
+        every_arm=False, arm_dir=template, per="arm of the cycling x representation design",
+        note=("Arms: A nothing removed; B malignant cells outside G1 removed on both sides; "
+              "C the 97 cell-cycle genes removed; D both. A column without a mark in the "
+              f"last strip row is raw; CNV columns use no RNA preprocessing."))
+
+
+LAYOUTS = {"factorial": factorial_layout, "cycling": cycling_layout}
 SIDES = {"retained": -1, "rejected": 1}  # the sign that makes the side drawn positive
 # One hue per side. The red has the blue's OKLab lightness and chroma at every
 # step, so the same value looks as strong on either side.
@@ -146,10 +220,10 @@ READOUTS = {
 }
 
 
-def readout_spec(readout: str, side: str) -> dict:
+def readout_spec(readout: str, side: str, per: str = "preprocessing arm") -> dict:
     spec = dict(READOUTS[readout], side=side, sign=SIDES[side])
     spec["colour"] = ("-" if SIDES[side] < 0 else "") + spec["effect"]
-    spec["title"] = f"{spec['noun']} higher in {side} primary cells, per preprocessing arm"
+    spec["title"] = f"{spec['noun']} higher in {side} primary cells, per {per}"
     return spec
 
 
@@ -164,6 +238,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("out_dir", type=Path)
+    parser.add_argument("--layout", choices=sorted(LAYOUTS), default="factorial",
+                        help="The columns: the 32 arms of the preprocessing factorial, or "
+                             "the cycling x representation arms. With cycling, "
+                             "DOWNSTREAM_DIR is a template with {rep}, {cycle} and {label}, "
+                             "and an arm a panel lacks is a grey column")
     parser.add_argument("--readout", choices=sorted(READOUTS), default="gsea")
     parser.add_argument("--side", choices=sorted(SIDES), default="retained",
                         help="Which side of the gate to draw: what is higher in retained "
@@ -191,31 +270,44 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load(spec: str, prefix: str, side: str) -> dict:
+def load(spec: str, prefix: str, side: str, layout: Layout) -> dict:
     parts = spec.split("::")
     if len(parts) != 3:
         raise SystemExit(f"--analysis wants TITLE::STRATEGY_DIR::DOWNSTREAM_DIR, got {spec!r}")
-    title, strategy, downstream = parts[0], Path(parts[1]), Path(parts[2])
+    title, strategy, downstream = parts[0], Path(parts[1]), parts[2]
     effect = pd.read_csv(strategy / f"{prefix}_value_matrix.csv", index_col=0)
     called = pd.read_csv(strategy / f"{prefix}_called_matrix.csv", index_col=0).astype(bool)
-    missing = [arm for arm in ARMS if arm not in effect.index]
-    if missing:
+    missing = [arm for arm in layout.arms if arm not in effect.index]
+    if missing and layout.every_arm:
         raise SystemExit(f"{strategy} lacks arms {missing}")
-    effect, called = effect.loc[ARMS], called.loc[ARMS]
-    fraction, patients = {}, set()
-    for arm in ARMS:
-        meta = pd.read_csv(downstream / arm / "deg/contrasts" / CONTRAST
+    effect = effect.reindex(layout.arms)
+    called = called.reindex(layout.arms, fill_value=False).astype(bool)
+    fraction, patients, in_deg = {}, set(), []
+    for arm in layout.arms:
+        if arm in missing:
+            fraction[arm] = float("nan")
+            continue
+        directory = layout.arm_dir(downstream, arm)
+        meta = pd.read_csv(directory / "deg/contrasts" / CONTRAST
                            / "pseudobulk_sample_metadata.csv")
         cells = meta.pivot_table(index="patient_id", columns="comparison_status",
                                  values="cell_n", aggfunc="sum")
         # reference is retained and case is rejected in this contrast.
         status = "reference" if side == "retained" else "case"
         fraction[arm] = float((cells[status] / cells.sum(axis=1)).median())
-        done = (downstream / arm / "DONE").read_text(encoding="utf-8")
+        done = (directory / "DONE").read_text(encoding="utf-8")
         patients.update(line.split("=", 1)[1] for line in done.splitlines()
                         if line.startswith("patients="))
+        # The patients the fit actually had, which can be fewer than the
+        # pseudobulk's: one without a cell in both states has no pair to enter.
+        report = directory / "deg" / "pydeseq2_report.json"
+        if report.is_file():
+            for contrast in json.loads(report.read_text(encoding="utf-8")).get("contrasts", []):
+                if contrast.get("contrast") == CONTRAST:
+                    in_deg.append(int(contrast["patient_n"]))
     return {"title": title, "effect": effect, "called": called,
-            "fraction": pd.Series(fraction), "patients": "/".join(sorted(patients))}
+            "fraction": pd.Series(fraction), "patients": "/".join(sorted(patients)),
+            "in_deg": in_deg, "available": len(layout.arms) - len(missing)}
 
 
 def choose_features(panel: dict, args: argparse.Namespace) -> None:
@@ -229,7 +321,9 @@ def choose_features(panel: dict, args: argparse.Namespace) -> None:
     counts = dots.sum(axis=0)
     order = pd.DataFrame({"n": counts, "median": effect.median(axis=0)})
     if args.readout == "gsea":
-        order = order[order["n"] >= args.min_arms_fraction * len(ARMS)]
+        # Of the arms this panel has: a panel missing some is not held to the
+        # columns it could not fill.
+        order = order[order["n"] >= args.min_arms_fraction * panel["available"]]
     else:
         order = order[order["n"] > 0]
     order = order.sort_values(["n", "median"], ascending=[False, False])
@@ -249,7 +343,8 @@ def choose_features(panel: dict, args: argparse.Namespace) -> None:
     panel["eligible"] = int((counts > 0).sum())
 
 
-def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict) -> list[str]:
+def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict,
+                 layout: Layout) -> list[str]:
     side = spec["side"]
     if args.readout == "gsea":
         dot_text = "Dot: FDR < 0.05."
@@ -264,7 +359,10 @@ def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict) -> li
     lines = [f"Primary rejected vs primary retained ({method}). Colour: {spec['colour']} where it "
              f"is higher in {side}, white otherwise. {dot_text}",
              f"{rows_text} Number right of a row: arms with a dot. Under a panel: each arm's "
-             f"{side} fraction. Columns: the 32 arms, marked by the strip at the bottom."]
+             f"{side} fraction. Columns: the {len(layout.arms)} arms, marked by the strip at "
+             f"the bottom."]
+    if layout.note:
+        lines.append(layout.note)
     ties = [f"{p['title']}: {p['tie_note']}" for p in panels if p.get("tie_note")]
     if ties:
         lines.append("Cut at the last count shown -- " + "; ".join(ties) + ".")
@@ -273,8 +371,9 @@ def header_lines(panels: list[dict], args: argparse.Namespace, spec: dict) -> li
 
 def main() -> None:
     args = parse_args()
-    spec = readout_spec(args.readout, args.side)
-    panels = [load(item, spec["prefix"], args.side) for item in args.analysis]
+    layout = LAYOUTS[args.layout]()
+    spec = readout_spec(args.readout, args.side, layout.per)
+    panels = [load(item, spec["prefix"], args.side, layout) for item in args.analysis]
     for panel in panels:
         choose_features(panel, args)
     stem = f"{args.side}_side_{args.readout}"
@@ -282,13 +381,20 @@ def main() -> None:
     if args.separate:
         for panel in panels:
             slug = "".join(c if c.isalnum() else "_" for c in panel["title"].lower()).strip("_")
-            draw([panel], args, spec, f"{stem}_{slug}{suffix}")
+            draw([panel], args, spec, f"{stem}_{slug}{suffix}", layout)
     else:
-        draw(panels, args, spec, f"{stem}{suffix}")
+        draw(panels, args, spec, f"{stem}{suffix}", layout)
 
 
-def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) -> None:
-    n_arms = len(ARMS)
+def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str,
+         layout: Layout) -> None:
+    arms = layout.arms
+    # Where each group of columns starts, and how wide it is.
+    spans, start = [], 0
+    for title, width in layout.groups:
+        spans.append((title, start, width))
+        start += width
+    n_arms = len(arms)
     shown = [p for p in panels if p["features"]]
     largest = max((float(p["side_effect"][p["features"]].clip(lower=0).max().max()) for p in shown),
                   default=1.0)
@@ -299,19 +405,20 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
     slide = args.slide
     cell_w, cell_h = (0.165, 0.12) if slide else (0.24, 0.22)
     names = [display_name(f) for p in panels for f in p["features"]] or ["none"]
+    names += [name for name, _ in layout.tag_rows]
     left = max(1.6, 0.35 + 0.062 * max(len(name) for name in names))
     count_w, right = 0.45, (0.8 if slide else 1.05)
     grid_w = n_arms * cell_w
     fig_w = left + grid_w + count_w + right
     text_x = 0.3
     chars = max(40, int((fig_w - text_x - 0.3) / 0.062))
-    wrapped = [] if slide else [part for line in header_lines(panels, args, spec)
+    wrapped = [] if slide else [part for line in header_lines(panels, args, spec, layout)
                                 for part in textwrap.wrap(line, chars)]
     header_h = 0.08 if slide else 0.40 + 0.135 * len(wrapped) + 0.1
     title_h, fraction_h, panel_gap = (0.36, 0.19, 0.07) if slide else (0.58, 0.24, 0.22)
     heights = [max(len(p["features"]), 1) * cell_h for p in panels]
     strip_row, strip_bottom = (0.13, 0.12) if slide else (0.17, 0.2)
-    strip_h = 0.22 + len(TAGS) * strip_row + strip_bottom
+    strip_h = 0.22 + len(layout.tag_rows) * strip_row + strip_bottom
     fig_h = header_h + sum(title_h + h + fraction_h + panel_gap for h in heights) + strip_h
     fig = plt.figure(figsize=(fig_w, fig_h))
     side = spec["side"]
@@ -334,6 +441,9 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
     for panel, height in zip(panels, heights):
         features = panel["features"]
         subtitle = f"{panel['patients']} patients"
+        if panel["in_deg"]:
+            low, high = min(panel["in_deg"]), max(panel["in_deg"])
+            subtitle += f", {low}" + ("" if low == high else f"-{high}") + " in the DEG"
         if args.readout == "deg":
             subtitle += f", {panel['eligible']} genes with a dot in any arm"
         if slide:
@@ -364,11 +474,11 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
         ax.tick_params(axis="y", length=0, pad=4)
         for spine in ax.spines.values():
             spine.set_visible(False)
-        for boundary in range(8, n_arms, 8):
-            ax.axvline(boundary, color="#ffffff", linewidth=3.5)
-        # Each block of eight columns is one normalisation, named above it.
-        for g, norm in enumerate(NORMALISATIONS):
-            ax.text(g * 8 + 4, -0.25, norm, ha="center", va="bottom", fontsize=6.8,
+        for _, begin, _width in spans[1:]:
+            ax.axvline(begin, color="#ffffff", linewidth=3.5)
+        # Each block of columns is one group, named above it.
+        for title, begin, width in spans:
+            ax.text(begin + width / 2, -0.25, title, ha="center", va="bottom", fontsize=6.8,
                     color=MUTED, clip_on=False)
         # Agreement between arms, right of each row.
         for i, feature in enumerate(features):
@@ -383,28 +493,32 @@ def draw(panels: list[dict], args: argparse.Namespace, spec: dict, stem: str) ->
         rax.set_xlim(0, n_arms)
         rax.set_ylim(0, 1)
         rax.axis("off")
-        for j, arm in enumerate(ARMS):
-            rax.text(j + 0.5, 0.5, f"{panel['fraction'][arm]:.2f}".lstrip("0"), ha="center",
-                     va="center", fontsize=5.6, color=MUTED)
+        for j, arm in enumerate(arms):
+            value = panel["fraction"][arm]
+            if np.isfinite(value):
+                rax.text(j + 0.5, 0.5, f"{value:.2f}".lstrip("0"), ha="center",
+                         va="center", fontsize=5.6, color=MUTED)
         rax.text(-0.3, 0.5, f"{side} fraction", ha="right", va="center", fontsize=6.4,
                  color=MUTED)
         y += fraction_h + panel_gap
 
-    # The design strip: which options each column carries, under its normalisation.
+    # The design strip: which options each column carries, under its group.
     y += 0.02
     sax = axes_at(left, y, grid_w, strip_h - strip_bottom)
     sax.set_xlim(0, n_arms)
-    rows = 1 + len(TAGS)
+    rows = 1 + len(layout.tag_rows)
     sax.set_ylim(rows, 0)
     sax.axis("off")
-    for g, norm in enumerate(NORMALISATIONS):
-        sax.text(g * 8 + 4, 0.45, norm, ha="center", va="center", fontsize=7.4,
+    for title, begin, width in spans:
+        sax.text(begin + width / 2, 0.45, title, ha="center", va="center", fontsize=7.4,
                  fontweight="semibold", color=INK)
-        sax.plot([g * 8 + 0.3, g * 8 + 7.7], [0.9, 0.9], color=FAINT, linewidth=0.8)
-    for t, tag in enumerate(TAGS):
+        sax.plot([begin + 0.3, begin + width - 0.3], [0.9, 0.9], color=FAINT, linewidth=0.8)
+    for t, (tag, carries) in enumerate(layout.tag_rows):
         sax.text(-0.3, t + 1.5, tag, ha="right", va="center", fontsize=6.8, color=INK)
-        for j, arm in enumerate(ARMS):
-            on = f"_{tag}" in arm
+        for j, arm in enumerate(arms):
+            on = carries(arm)
+            if on is None:
+                continue
             sax.plot(j + 0.5, t + 1.5, marker="o", linestyle="none",
                      markersize=4.0 if on else 2.4, color=INK if on else FAINT)
 
