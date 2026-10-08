@@ -115,8 +115,10 @@ def main() -> None:
                 print(f"    {item.kind}: {item.id}  ({item.reason})")
     else:
         print("\nnothing left out in any arm")
-    varying = table[table.nunique(axis=1, dropna=False) > 1] if len(table) else table
-    print(f"\npatients whose named lesion differs between arms: {len(varying)}")
+    # Only lesions that were named count: a patient absent from an arm -- skipped
+    # by 21_, or an arm its block never ran -- is listed above, not here.
+    varying = table[table.nunique(axis=1, dropna=True) > 1] if len(table) else table
+    print(f"\npatients named a different lesion in different arms: {len(varying)}")
     if len(varying):
         print(varying.to_string())
     print(f"\nwritten: {out}")
