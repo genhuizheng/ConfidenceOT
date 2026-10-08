@@ -14,6 +14,7 @@ from confidenceot.cuda import CUDAUnavailableError, cuda_available, fit_cuda
 from confidenceot.result import BinConfidence, ConfidenceOTResult
 
 if TYPE_CHECKING:  # the preprocessing module needs scikit-learn
+    from confidenceot.blockwise import BlockwiseResult, CoordinateCost
     from confidenceot.preprocessing import CostMatrix, Preprocessing
 
 
@@ -103,7 +104,34 @@ class ConfidenceOT:
         cost = np.asarray(cost_matrix, dtype=np.float64)
         requested = self.device
         resolved = "cuda" if requested == "auto" and cuda_available() else ("cpu" if requested == "auto" else requested)
-        kwargs = dict(
+        kwargs = self._solver_kwargs(
+            source_weights=source_weights, target_weights=target_weights,
+            initial_source_gate=initial_source_gate, initial_target_gate=initial_target_gate,
+        )
+        if resolved == "cuda":
+            try:
+                result = fit_cuda(cost, dtype=self.cuda_dtype, **kwargs)
+                return self._warn_if_needed(result)
+            except CUDAUnavailableError:
+                if not self.fallback_to_cpu:
+                    raise
+                warnings.warn(
+                    "CUDA was requested but is unavailable; ConfidenceOT is falling back to CPU.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        return self._warn_if_needed(self._fit_cpu(cost, **kwargs))
+
+    def _solver_kwargs(
+        self,
+        *,
+        source_weights: ArrayLike | None = None,
+        target_weights: ArrayLike | None = None,
+        initial_source_gate: ArrayLike | None = None,
+        initial_target_gate: ArrayLike | None = None,
+    ) -> dict[str, object]:
+        """The solver arguments every backend receives, built in one place."""
+        return dict(
             backbone=self.backbone, variant=self.variant,
             rejection_cost=self.rejection_cost, epsilon=self.epsilon,
             lambda_a=self.lambda_a, lambda_b=self.lambda_b,
@@ -120,19 +148,42 @@ class ConfidenceOT:
             max_iterations=self.max_iterations,
             max_outer_iterations=self.max_outer_iterations,
         )
-        if resolved == "cuda":
-            try:
-                result = fit_cuda(cost, dtype=self.cuda_dtype, **kwargs)
-                return self._warn_if_needed(result)
-            except CUDAUnavailableError:
-                if not self.fallback_to_cpu:
-                    raise
-                warnings.warn(
-                    "CUDA was requested but is unavailable; ConfidenceOT is falling back to CPU.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-        return self._warn_if_needed(self._fit_cpu(cost, **kwargs))
+
+    def fit_blockwise(
+        self,
+        cost: "CoordinateCost",
+        *,
+        block_rows: int | None = None,
+        source_weights: ArrayLike | None = None,
+        target_weights: ArrayLike | None = None,
+        initial_source_gate: ArrayLike | None = None,
+        initial_target_gate: ArrayLike | None = None,
+    ) -> "BlockwiseResult":
+        """Fit from coordinates without holding the N x M cost on the device.
+
+        The same solver as :meth:`fit` on ``cost.dense()`` -- the torch one,
+        block by block (see :mod:`confidenceot.blockwise`) -- for problems too
+        large for the dense device tensors.  Every parameter of this object
+        applies unchanged.  ``device='cpu'`` runs the same torch code on the
+        CPU rather than the NumPy reference, so it is a test path, not a
+        second implementation.  The result has no dense coupling; it carries
+        the dual potentials, from which
+        :func:`confidenceot.blockwise.transport_reductions` summarises it.
+        """
+        from confidenceot.blockwise import CoordinateCost, fit_blockwise
+
+        if not isinstance(cost, CoordinateCost):
+            raise TypeError("cost must be a confidenceot.blockwise.CoordinateCost")
+        requested = self.device
+        resolved = "cuda" if requested == "auto" and cuda_available() else ("cpu" if requested == "auto" else requested)
+        kwargs = self._solver_kwargs(
+            source_weights=source_weights, target_weights=target_weights,
+            initial_source_gate=initial_source_gate, initial_target_gate=initial_target_gate,
+        )
+        result = fit_blockwise(
+            cost, dtype=self.cuda_dtype, block_rows=block_rows, _torch_device=resolved, **kwargs
+        )
+        return self._warn_if_needed(result)
 
     def fit_counts(
         self,
