@@ -141,7 +141,7 @@ def cycling_layout() -> Layout:
                   ("genes removed", lambda arm: cycle(arm) in "CD"),
                   (CYCLING_LABELS[0], lambda arm: None if arm.startswith("cnv/")
                    else arm.endswith(f"/{CYCLING_LABELS[0]}"))],
-        every_arm=False, arm_dir=template, per="arm of the cycling x representation design",
+        every_arm=False, arm_dir=template, per="arm",
         note=("Arms: A nothing removed; B malignant cells outside G1 removed on both sides; "
               "C the 97 cell-cycle genes removed; D both. A column without a mark in the "
               f"last strip row is raw; CNV columns use no RNA preprocessing."))
