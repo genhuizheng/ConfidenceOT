@@ -24,6 +24,13 @@ every bin is used, with no per-side cap:
 4. Summaries of the M4-E coupling on its retained x retained support and of
    the balanced coupling everywhere, taken before the potentials are dropped.
 
+``--device`` picks the device and with it that device's production path.  The
+run uses one device for every pair.
+* cuda, the default and the production run: the torch CUDA solver in float32.
+* cpu, for validation and reference comparisons: calibration through the
+  NumPy reference, as the cancer runs on gg do, and the torch solvers in
+  float64, the reference's precision.
+
 Nothing is judged here.  Calibration flags, M4-R convergence and cycles are
 written down, and that is all that is done with them.  A pair either completes
 and is published whole, or fails with its traceback recorded.
@@ -46,7 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mosta_common import (  # noqa: E402
     CALIBRATION_GRID_SIZE, CALIBRATION_MAX_BINS, EPSILON, LAMBDA,
     NULL_CALIBRATION_REPLICATES, NULL_VALIDATION_REPLICATES, PREPROCESSING_LABEL,
-    REJECTION_BUDGET, SEED, TOLERANCE, WITHIN_SIDE_ACCEPTANCE, Layout, claim,
+    REJECTION_BUDGET, SEED, SOLVER_DTYPE, TOLERANCE, WITHIN_SIDE_ACCEPTANCE, Layout, claim,
     file_inventory, ordered_categories, publish, read_pairs, staging_directory,
     write_json,
 )
@@ -98,7 +105,10 @@ def calibrate(source: np.ndarray, target: np.ndarray, index: int, device: str):
 def models(rejection_cost: float, device: str) -> dict:
     from confidenceot import ConfidenceOT
 
-    common = dict(rejection_cost=rejection_cost, epsilon=EPSILON, tolerance=TOLERANCE, device=device)
+    # cuda_dtype is the precision of the torch solvers, dense and blockwise, on
+    # either device: float32 on the GPU, float64 on the CPU (SOLVER_DTYPE).
+    common = dict(rejection_cost=rejection_cost, epsilon=EPSILON, tolerance=TOLERANCE, device=device,
+                  cuda_dtype=SOLVER_DTYPE[device])
     return {
         "M4-E": ConfidenceOT(backbone="uot", variant="exact", lambda_a=LAMBDA, lambda_b=LAMBDA,
                              source_rejection_budget=REJECTION_BUDGET,

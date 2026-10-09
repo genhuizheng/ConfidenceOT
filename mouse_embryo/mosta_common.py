@@ -48,6 +48,10 @@ WITHIN_SIDE_ACCEPTANCE = 0.99
 # 02_run_pair.py's default shared budget.  Not enforced, so the rejection
 # interval resolves to (0, 1); recorded because the bounds are derived from it.
 REJECTION_BUDGET = 0.95
+# The precision each device's production path solves in: the CUDA solver's
+# default float32, and float64 on the CPU, where production (the cancer runs
+# on gg, --device cpu) uses the NumPy reference, which is float64 throughout.
+SOLVER_DTYPE = {"cuda": "float32", "cpu": "float64"}
 
 
 def check_preprocessing(configuration: Any) -> None:

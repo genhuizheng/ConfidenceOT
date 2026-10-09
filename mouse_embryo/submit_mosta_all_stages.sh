@@ -1,22 +1,32 @@
 #!/bin/bash
-# Submit the all-stage MOSTA run (mouse_embryo/20-25) in two phases.
+# Submit the all-stage MOSTA run (mouse_embryo/20-25).
 #
-#   bash mouse_embryo/submit_mosta_all_stages.sh prepare --dry-run
-#   bash mouse_embryo/submit_mosta_all_stages.sh prepare
-#       The manifest and the common-depth equalisation (gg), then the
-#       representations of every pair (gg, MOSTA_REPRESENTATION_JOBS jobs),
-#       then the dense-against-blockwise check on the early pairs (gh) and,
-#       only if it passes, the largest pair as a scale probe in the same job.
-#       Equalisation that already finished is not redone.
+#   bash mouse_embryo/submit_mosta_all_stages.sh prepare [--dry-run]
+#       The manifest and the common-depth equalisation, then the
+#       representations of every pair, then the equivalence check.  A step
+#       whose output is already complete is not redone.
 #
-#   bash mouse_embryo/submit_mosta_all_stages.sh run
-#       Refuses unless equivalence/EQUIVALENCE_PASS exists.  Then the OT
-#       workers (gh, MOSTA_OT_JOBS jobs walking one pair list, largest pairs
-#       first) and, after them, the collection (gg).
+#   bash mouse_embryo/submit_mosta_all_stages.sh equivalence [--dry-run]
+#       The dense-against-blockwise check on the early pairs, on its own.
+#       Earlier equivalence output is cleared first.
 #
-#   bash mouse_embryo/submit_mosta_all_stages.sh collect
+#   bash mouse_embryo/submit_mosta_all_stages.sh run [--dry-run]
+#       Refuses unless equivalence/EQUIVALENCE_PASS exists for the device the
+#       run uses.  Then the OT workers (MOSTA_OT_JOBS jobs walking one pair
+#       list, largest pairs first) and, after them, the collection.
+#
+#   bash mouse_embryo/submit_mosta_all_stages.sh collect [--dry-run]
 #       The audit, tables, pseudobulks and download list again, for instance
 #       after a resubmission of run.
+#
+# MOSTA_DEVICE picks the device for the equivalence check and the run; one run
+# uses one device for every pair.
+#   cuda (default, the production run): gh nodes, the GPU production path
+#                  (torch CUDA, float32).
+#   cpu:           gg nodes, for validation and reference comparisons only:
+#                  the CPU production path (NumPy reference calibration, torch
+#                  solvers in float64), MOSTA_THREADS 144.
+# Everything else runs on gg.
 #
 # Resubmitting a phase continues where the last one stopped: finished pairs
 # are skipped, and the claims of unfinished pairs are cleared first.  That is
@@ -39,17 +49,25 @@ done
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${MOSTA_ROOT:-/scratch/10119/ghzheng/OT_project/mouse_embryo_results/mosta_all_stages}
 data=${MOSTA_DATA:-/scratch/10119/ghzheng/OT_project/data}
+device=${MOSTA_DEVICE:-cuda}
 representation_jobs=${MOSTA_REPRESENTATION_JOBS:-4}
-ot_jobs=${MOSTA_OT_JOBS:-16}
+equivalence_shards=${MOSTA_EQUIVALENCE_SHARDS:-8}
 cap=${CONFIDENCEOT_JOB_CAP:-40}
 job=$repo/mouse_embryo/tacc_mosta_stage.slurm
 account=MCB26031
-names=mosta_prep,mosta_rep,mosta_equiv,mosta_ot,mosta_collect
+names=mosta_prep,mosta_rep,mosta_equiv,mosta_equivm,mosta_ot,mosta_collect
+expected_pairs=464
 
 case "$phase" in
-    prepare|run|collect) ;;
-    *) echo "usage: $0 prepare|run|collect [--dry-run]" >&2; exit 2 ;;
+    prepare|equivalence|run|collect) ;;
+    *) echo "usage: $0 prepare|equivalence|run|collect [--dry-run]" >&2; exit 2 ;;
 esac
+case "$device" in
+    cpu) compute=(-p gg -c 144); threads=144; ot_jobs=${MOSTA_OT_JOBS:-30} ;;
+    cuda) compute=(-p gh -c 72); threads=16; ot_jobs=${MOSTA_OT_JOBS:-16} ;;
+    *) echo "MOSTA_DEVICE must be cpu or cuda; got '$device'" >&2; exit 2 ;;
+esac
+cpu_node=(-p gg -c 144)
 
 problems=0
 for path in "$job" "$repo/mouse_embryo/23_run_mosta_pair.py" "$repo/src/confidenceot/blockwise.py"; do
@@ -58,12 +76,16 @@ for path in "$job" "$repo/mouse_embryo/23_run_mosta_pair.py" "$repo/src/confiden
         problems=1
     fi
 done
+if ! grep -q "equivalence_merge" "$job" 2> /dev/null; then
+    echo "$job is older than this script: git pull in $repo first" >&2
+    problems=1
+fi
 if [[ "$phase" == prepare && ! -d "$data" ]]; then
     echo "missing data directory: $data" >&2
     problems=1
 fi
 # Settings the job reads from the environment that this script sets itself.
-for name in MOSTA_STAGE MOSTA_WORKERS MOSTA_THREADS MOSTA_STOP_HOURS; do
+for name in MOSTA_STAGE MOSTA_WORKERS MOSTA_THREADS MOSTA_STOP_HOURS MOSTA_SHARD MOSTA_N_SHARDS; do
     if [[ -n "${!name}" ]]; then
         echo "set in this shell, would reach every job: $name=${!name}  (unset $name)" >&2
         problems=1
@@ -75,7 +97,7 @@ fi
 
 active=$(squeue -u "$USER" -h -n "$names" -o %i 2> /dev/null | wc -l) || active=0
 if (( active > 0 && ! dry_run )); then
-    echo "$active MOSTA jobs are still queued or running (squeue -u $USER -n $names); wait for them" >&2
+    echo "$active MOSTA jobs are still queued or running (squeue -u $USER -n $names); wait for them or scancel them" >&2
     exit 3
 fi
 
@@ -119,75 +141,129 @@ clear_claims() {
 
 stage_args() {
     # $1 = stage. The environment every job of that stage gets.
-    echo "--export=ALL,MOSTA_STAGE=$1,MOSTA_ROOT=$root,MOSTA_DATA=$data,CONFIDENCEOT_REPO=$repo"
+    echo "--export=ALL,MOSTA_STAGE=$1,MOSTA_ROOT=$root,MOSTA_DATA=$data,CONFIDENCEOT_REPO=$repo,MOSTA_DEVICE=$device"
+}
+
+check_cap() {
+    # $1 = jobs this phase adds.
+    local queued
+    queued=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l) || queued=0
+    if (( ! dry_run && queued + $1 > cap )); then
+        echo "$queued jobs already queued and this adds $1, over the cap of $cap" >&2
+        exit 3
+    fi
+}
+
+submit_equivalence() {
+    # $@ = optional dependency argument. Clears the previous check's output,
+    # then submits the check for $device.
+    local dependency=("$@") ids=() shard after
+    if (( dry_run )); then
+        echo "would clear $root/equivalence/{report.csv,summary.json,EQUIVALENCE_PASS,EQUIVALENCE_FAIL,shards}" >&2
+    else
+        rm -rf -- "$root/equivalence/shards"
+        rm -f -- "$root/equivalence/report.csv" "$root/equivalence/summary.json" \
+            "$root/equivalence/EQUIVALENCE_PASS" "$root/equivalence/EQUIVALENCE_FAIL"
+    fi
+    if [[ "$device" == cuda ]]; then
+        submit "equivalence check (gh, then the largest pair as a scale probe)" \
+            "${compute[@]}" -t 24:00:00 -A "$account" -J mosta_equiv "${dependency[@]}" \
+            -o "$root/logs/equivalence_%j.out" -e "$root/logs/equivalence_%j.err" \
+            "$(stage_args equivalence)",MOSTA_THREADS=$threads "$job" > /dev/null
+        return 0
+    fi
+    for (( shard = 0; shard < equivalence_shards; shard++ )); do
+        ids+=("$(submit "equivalence shard $shard of $equivalence_shards (gg)" \
+            "${compute[@]}" -t 24:00:00 -A "$account" -J mosta_equiv "${dependency[@]}" \
+            -o "$root/logs/equivalence_%j.out" -e "$root/logs/equivalence_%j.err" \
+            "$(stage_args equivalence)",MOSTA_THREADS=$threads,MOSTA_SHARD=$shard,MOSTA_N_SHARDS=$equivalence_shards "$job")")
+    done
+    after=$(IFS=:; echo "${ids[*]}")
+    submit "equivalence merge" \
+        "${cpu_node[@]}" -t 01:00:00 -A "$account" -J mosta_equivm --dependency="afterany:$after" \
+        -o "$root/logs/equivalence_merge_%j.out" -e "$root/logs/equivalence_merge_%j.err" \
+        "$(stage_args equivalence_merge)",MOSTA_THREADS=16 "$job" > /dev/null
+}
+
+equivalence_jobs() {
+    if [[ "$device" == cuda ]]; then echo 1; else echo $(( equivalence_shards + 1 )); fi
 }
 
 # SLURM opens the log files before the job starts, so the directory has to
 # exist before the first sbatch.
 (( dry_run )) || mkdir -p "$root/logs"
-queued=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l) || queued=0
 
 if [[ "$phase" == prepare ]]; then
-    needed=$(( representation_jobs + 2 ))
-    if (( ! dry_run && queued + needed > cap )); then
-        echo "$queued jobs already queued and this adds $needed, over the cap of $cap" >&2
-        exit 3
-    fi
-    clear_claims representation "$root/representations" REPRESENTATION_SUCCESS
+    check_cap $(( representation_jobs + 1 + $(equivalence_jobs) ))
     dependency=()
     if [[ -f "$root/equalisation/report.json" ]]; then
         echo "equalisation already done ($root/equalisation/report.json); not redone" >&2
     else
         prep=$(submit "prepare (manifest + common-depth equalisation)" \
-            -p gg -c 72 -t 12:00:00 -A "$account" -J mosta_prep \
+            "${cpu_node[@]}" -t 12:00:00 -A "$account" -J mosta_prep \
             -o "$root/logs/prepare_%j.out" -e "$root/logs/prepare_%j.err" \
             "$(stage_args prepare)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job")
         dependency=(--dependency="afterok:$prep")
     fi
-    representation_ids=()
-    for (( i = 1; i <= representation_jobs; i++ )); do
-        representation_ids+=("$(submit "representation worker $i" \
-            -p gg -c 72 -t 24:00:00 -A "$account" -J mosta_rep "${dependency[@]}" \
-            -o "$root/logs/representation_%j.out" -e "$root/logs/representation_%j.err" \
-            "$(stage_args representation)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job")")
-    done
-    after=$(IFS=:; echo "${representation_ids[*]}")
-    submit "equivalence check (dense against blockwise)" \
-        -p gh -c 72 -t 24:00:00 -A "$account" -J mosta_equiv --dependency="afterany:$after" \
-        -o "$root/logs/equivalence_%j.out" -e "$root/logs/equivalence_%j.err" \
-        "$(stage_args equivalence)",MOSTA_THREADS=16 "$job" > /dev/null
-    echo "When the equivalence job ends, read $root/equivalence/summary.json; run phase 'run' only after it says PASS." >&2
-    echo "The same job then runs the largest pair; its pairs/<id>/pair_metrics.csv and run.json give the time and GPU memory." >&2
+    done_representations=$(ls "$root"/representations/*/REPRESENTATION_SUCCESS 2> /dev/null | wc -l) || done_representations=0
+    if (( ${#dependency[@]} == 0 && done_representations >= expected_pairs )); then
+        echo "all $done_representations representations already done; not redone" >&2
+        submit_equivalence
+    else
+        clear_claims representation "$root/representations" REPRESENTATION_SUCCESS
+        representation_ids=()
+        for (( i = 1; i <= representation_jobs; i++ )); do
+            representation_ids+=("$(submit "representation worker $i" \
+                "${cpu_node[@]}" -t 24:00:00 -A "$account" -J mosta_rep "${dependency[@]}" \
+                -o "$root/logs/representation_%j.out" -e "$root/logs/representation_%j.err" \
+                "$(stage_args representation)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job")")
+        done
+        after=$(IFS=:; echo "${representation_ids[*]}")
+        submit_equivalence --dependency="afterany:$after"
+    fi
+    echo "When the equivalence check ends, read $root/equivalence/summary.json; submit run only after it says PASS." >&2
+fi
+
+if [[ "$phase" == equivalence ]]; then
+    check_cap "$(equivalence_jobs)"
+    submit_equivalence
+    echo "When it ends, read $root/equivalence/summary.json; submit run only after it says PASS." >&2
 fi
 
 if [[ "$phase" == run ]]; then
     if [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" ]]; then
-        echo "no $root/equivalence/EQUIVALENCE_PASS: run phase prepare and read equivalence/summary.json first" >&2
+        echo "no $root/equivalence/EQUIVALENCE_PASS: run the equivalence check and read equivalence/summary.json first" >&2
+        (( dry_run )) || exit 3
+    elif grep -q '"devices"' "$root/equivalence/summary.json" 2> /dev/null; then
+        if ! grep -q "\"$device\"" "$root/equivalence/summary.json"; then
+            echo "the equivalence check that passed did not run on $device; check $device first (MOSTA_DEVICE=$device ... equivalence)" >&2
+            (( dry_run )) || exit 3
+        fi
+    elif [[ "$device" != cuda ]]; then
+        # A summary without "devices" comes from 2b5f3bb, whose check ran on the GPU only.
+        echo "the equivalence check that passed ran on cuda; check $device first" >&2
         (( dry_run )) || exit 3
     fi
-    needed=$(( ot_jobs + 1 ))
-    if (( ! dry_run && queued + needed > cap )); then
-        echo "$queued jobs already queued and this adds $needed, over the cap of $cap" >&2
-        exit 3
-    fi
+    check_cap $(( ot_jobs + 1 ))
     clear_claims ot "$root/pairs" SUCCESS
     ot_ids=()
     for (( i = 1; i <= ot_jobs; i++ )); do
-        ot_ids+=("$(submit "OT worker $i" \
-            -p gh -c 72 -t 48:00:00 -A "$account" -J mosta_ot \
+        ot_ids+=("$(submit "OT worker $i ($device)" \
+            "${compute[@]}" -t 48:00:00 -A "$account" -J mosta_ot \
             -o "$root/logs/ot_%j.out" -e "$root/logs/ot_%j.err" \
-            "$(stage_args ot)",MOSTA_THREADS=16,MOSTA_STOP_HOURS=40 "$job")")
+            "$(stage_args ot)",MOSTA_THREADS=$threads,MOSTA_STOP_HOURS=40 "$job")")
     done
     after=$(IFS=:; echo "${ot_ids[*]}")
     submit "collection (audit, tables, pseudobulks, download list)" \
-        -p gg -c 72 -t 24:00:00 -A "$account" -J mosta_collect --dependency="afterany:$after" \
+        "${cpu_node[@]}" -t 24:00:00 -A "$account" -J mosta_collect --dependency="afterany:$after" \
         -o "$root/logs/collect_%j.out" -e "$root/logs/collect_%j.err" \
         "$(stage_args collect)",MOSTA_THREADS=16 "$job" > /dev/null
 fi
 
 if [[ "$phase" == collect ]]; then
+    check_cap 1
     submit "collection (audit, tables, pseudobulks, download list)" \
-        -p gg -c 72 -t 24:00:00 -A "$account" -J mosta_collect \
+        "${cpu_node[@]}" -t 24:00:00 -A "$account" -J mosta_collect \
         -o "$root/logs/collect_%j.out" -e "$root/logs/collect_%j.err" \
         "$(stage_args collect)",MOSTA_THREADS=16 "$job" > /dev/null
 fi
