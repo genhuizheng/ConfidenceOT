@@ -26,7 +26,8 @@ every bin is used, with no per-side cap:
 
 ``--device`` picks the device and with it that device's production path.  The
 run uses one device for every pair.
-* cuda, the default and the production run: the torch CUDA solver in float32.
+* cuda, the default and the production run: the torch CUDA solver in float64
+  (SOLVER_DTYPE).
 * cpu, for validation and reference comparisons: calibration through the
   NumPy reference, as the cancer runs on gg do, and the torch solvers in
   float64, the reference's precision.
@@ -106,7 +107,7 @@ def models(rejection_cost: float, device: str) -> dict:
     from confidenceot import ConfidenceOT
 
     # cuda_dtype is the precision of the torch solvers, dense and blockwise, on
-    # either device: float32 on the GPU, float64 on the CPU (SOLVER_DTYPE).
+    # either device: float64 on both (SOLVER_DTYPE).
     common = dict(rejection_cost=rejection_cost, epsilon=EPSILON, tolerance=TOLERANCE, device=device,
                   cuda_dtype=SOLVER_DTYPE[device])
     return {

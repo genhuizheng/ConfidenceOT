@@ -221,16 +221,18 @@ def compare_pairs(layout: Layout, tests: pd.DataFrame, *, device: str, small_blo
         for method, model in runner.models(float(calibration.rejection_cost), device).items():
             support = "all" if method == "balanced" else "active"
             if device == "cuda":
-                # The production GPU path, float32, and the same solver in float64.
+                # The production GPU path in SOLVER_DTYPE['cuda'], and the same solver
+                # in float64 on a float64 cost.
                 exact_model = copy.copy(model)
                 exact_model.cuda_dtype = "float64"
                 baselines = {
                     "production": lambda: model.fit(dense_cost32),
                     "exact": lambda: exact_model.fit(dense_cost64),
                 }
+                bits = model.cuda_dtype[-2:]
                 plan = (
-                    ("block32", lambda: model.fit_blockwise(cost32), ("production",), cost32, "B"),
-                    ("block32s", lambda: model.fit_blockwise(cost32, block_rows=small_block), ("production",), cost32, "B"),
+                    (f"block{bits}", lambda: model.fit_blockwise(cost32), ("production",), cost32, "B"),
+                    (f"block{bits}s", lambda: model.fit_blockwise(cost32, block_rows=small_block), ("production",), cost32, "B"),
                     ("block64s", lambda: exact_model.fit_blockwise(cost64, block_rows=small_block), ("exact",), cost64, "A"),
                 )
             else:

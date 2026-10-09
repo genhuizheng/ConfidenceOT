@@ -48,10 +48,13 @@ WITHIN_SIDE_ACCEPTANCE = 0.99
 # 02_run_pair.py's default shared budget.  Not enforced, so the rejection
 # interval resolves to (0, 1); recorded because the bounds are derived from it.
 REJECTION_BUDGET = 0.95
-# The precision each device's production path solves in: the CUDA solver's
-# default float32, and float64 on the CPU, where production (the cancer runs
-# on gg, --device cpu) uses the NumPy reference, which is float64 throughout.
-SOLVER_DTYPE = {"cuda": "float32", "cpu": "float64"}
+# The precision the torch solvers run in, on either device.  float64 on the
+# GPU too (2026-10-09): in float32 the blockwise and dense solvers took the M4-E
+# gate to different fixed points on one of the 52 equivalence pairs (3 bins of
+# E10.5_E1S1__E10.5_E1S3), while in float64 they agreed bin for bin on all 52.
+# float64 is also the precision of the NumPy reference that the cancer runs on
+# gg use.
+SOLVER_DTYPE = {"cuda": "float64", "cpu": "float64"}
 
 
 def check_preprocessing(configuration: Any) -> None:

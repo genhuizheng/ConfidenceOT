@@ -12,7 +12,9 @@
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh run [--dry-run]
 #       Refuses unless equivalence/EQUIVALENCE_PASS exists for the device the
-#       run uses.  Then the OT workers (MOSTA_OT_JOBS jobs walking one pair
+#       run uses.  With MOSTA_GATE=float64-identity (cuda only) it instead
+#       accepts a recorded check in which every criterion-A (float64)
+#       comparison passed on all 52 test pairs, the configuration the run uses.  Then the OT workers (MOSTA_OT_JOBS jobs walking one pair
 #       list, largest pairs first) and, after them, the collection.
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh collect [--dry-run]
@@ -22,7 +24,7 @@
 # MOSTA_DEVICE picks the device for the equivalence check and the run; one run
 # uses one device for every pair.
 #   cuda (default, the production run): gh nodes, the GPU production path
-#                  (torch CUDA, float32).
+#                  (torch CUDA, float64).
 #   cpu:           gg nodes, for validation and reference comparisons only:
 #                  the CPU production path (NumPy reference calibration, torch
 #                  solvers in float64), MOSTA_THREADS 144.
@@ -230,8 +232,24 @@ if [[ "$phase" == equivalence ]]; then
     echo "When it ends, read $root/equivalence/summary.json; submit run only after it says PASS." >&2
 fi
 
+float64_identity_passed() {
+    # True when the recorded check has every criterion-A comparison (blockwise
+    # against dense, both float64, on a float64 cost) passing for every test
+    # pair: the comparison of the configuration the run uses since the CUDA
+    # solver went to float64. The record and its criteria are read, not changed.
+    local report=$root/equivalence/report.csv
+    [[ -f "$report" ]] || return 1
+    awk -F, 'NR==1{for(i=1;i<=NF;i++)c[$i]=i; next}
+        $c["outcome"]=="missing representation"{bad++}
+        $c["criterion"]=="A"{a++; if($c["outcome"]!="pass") bad++; pairs[$c["pair_id"]]=1}
+        END{n=0; for(p in pairs) n++; print "criterion A comparisons " a+0 ", failing or missing " bad+0 ", pairs " n > "/dev/stderr"; exit !(a>0 && bad==0 && n>=52)}' "$report"
+}
+
 if [[ "$phase" == run ]]; then
-    if [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" ]]; then
+    if [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" && "$device" == cuda && "${MOSTA_GATE:-}" == float64-identity ]] && float64_identity_passed; then
+        echo "gate: every float64 comparison in the recorded equivalence check passed (MOSTA_GATE=float64-identity)" >&2
+        (( dry_run )) || printf 'run gated on criterion A of %s, %s\n' "$root/equivalence/report.csv" "$(date --iso-8601=seconds)" > "$root/equivalence/RUN_GATE_FLOAT64_IDENTITY"
+    elif [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" ]]; then
         echo "no $root/equivalence/EQUIVALENCE_PASS: run the equivalence check and read equivalence/summary.json first" >&2
         (( dry_run )) || exit 3
     elif grep -q '"devices"' "$root/equivalence/summary.json" 2> /dev/null; then

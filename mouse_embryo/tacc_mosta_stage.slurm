@@ -20,7 +20,7 @@
 # MOSTA_DEVICE (cuda or cpu, default cuda) selects the device and with it the
 # production path of that device: on the CPU, calibration through the NumPy
 # reference and the torch solvers in float64, as the cancer runs on gg do; on
-# the GPU, the torch CUDA solver in float32.  One run uses one device for every
+# the GPU, the torch CUDA solver in float64.  One run uses one device for every
 # pair.
 #
 # Several representation or ot jobs walk the same pair list; claim files keep
