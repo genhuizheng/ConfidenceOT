@@ -10,19 +10,22 @@ showed each side as an unsigned value. Here one figure holds the GSEA as it was
 computed:
 
 * **Colour** is NES of primary_rejected_vs_primary_retained, with retained as the
-  reference: NES < 0 (blue) is higher in retained cells, NES > 0 (red) higher in
-  rejected cells. Diverging, with a neutral grey midpoint, symmetric limits
-  (default +/-3) shared by every figure of one run so colours compare across
-  analyses; a point beyond them takes the end colour, the bar shows an arrow,
-  and the exact NES is in the CSV.
+  reference: NES < 0 (blue) is higher in retained cells, NES > 0 (orange) higher
+  in rejected cells. Blue-white-orange with limits +/-2, the reference figure's
+  scale, shared by every figure; a point beyond them takes the end colour and
+  its exact NES is in the CSV.
 * **Size** is -log10 FDR. GSEApy reports FDR = 0 below its permutation
   resolution; the runs used 2,000 permutations (tacc_factorial_downstream.slurm),
-  so 0 is drawn at 1/2000 and the legend says so.
+  so 0 is drawn at 1/2000 (-log10 = 3.3).
 * **Outline** marks FDR < 0.05, the call 41_ made.
+
+The figure carries no title or note -- row and column labels, the category
+brackets and the legends only -- so a slide or a figure legend says the rest.
 
 Rows are the arms of the cycling x representation design (43_'s cycling layout:
 RNA, RNA+CNV and CNV; arms A-D; ranknm256_noscale_ds_cos and raw). An arm a
-panel lacks -- prostate has no CNV arms -- is not drawn and the subtitle says so.
+panel lacks -- prostate has no CNV arms -- is not drawn; gsea_dotplot.json lists
+it.
 
 Columns are all 50 hallmark pathways, none dropped, grouped by the eight process
 categories of the hallmark collection (Liberzon et al., Cell Systems 2015,
@@ -48,7 +51,6 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
-from matplotlib.lines import Line2D  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("heatmap43", HERE / "43_retained_side_heatmap.py")
@@ -82,15 +84,20 @@ CATEGORIES = [
 PATHWAYS = [p for _, members in CATEGORIES for p in members]
 assert len(PATHWAYS) == 50 and len(set(PATHWAYS)) == 50
 
-# The project's retained blue and rejected red, at their deepest matched step,
-# through a neutral grey midpoint.
-NEGATIVE = heatmap43.RAMPS["retained"][-2]
-POSITIVE = heatmap43.RAMPS["rejected"][-2]
-MIDPOINT = "#e9e9e9"
-INK, MUTED, RULE = "#1a1a1a", "#5f5f5f", "#bdbdbd"
+# Blue, white, orange, as in the reference figure the user supplied.
+NEGATIVE = "#2b6cb4"
+MIDPOINT = "#ffffff"
+POSITIVE = "#f28c1c"
+# -log10 FDR values the size legend shows; FDR 0 is drawn at 1/PERMUTATIONS.
+SIZE_LEGEND = (1.0, 2.0, 3.0)
 
-ARM_NOTE = ("A: nothing removed.  B: malignant cells outside G1 removed on both sides.  "
-            "C: the 97 cell-cycle genes removed.  D: both.")
+
+def size_of(strength):
+    """Marker area for -log10 FDR, from a visible dot at 0 to the cap 1/PERMUTATIONS."""
+    top = -np.log10(1.0 / PERMUTATIONS)
+    return 12 + 230 * np.clip(np.asarray(strength, dtype=float), 0, top) / top
+
+
 
 
 def arm_label(arm: str) -> str:
@@ -124,104 +131,85 @@ def load(template: str) -> tuple[pd.DataFrame, list[str]]:
 
 
 def draw(frame: pd.DataFrame, title: str, missing: list[str], limit: float, path: Path) -> None:
+    """The figure alone: no title, subtitle or note; legends only."""
     arms = [arm for arm in heatmap43.cycling_layout().arms if arm in set(frame["arm"])]
-    # A gap between representation blocks, as in the earlier figures.
-    y_of, y, previous = {}, 0.0, None
-    for arm in arms:
-        block = arm.split("/")[0]
-        if previous is not None and block != previous:
-            y += 0.6
-        y_of[arm] = y
-        y += 1.0
-        previous = block
-    x_of, x = {}, 0.0
-    category_spans = []
+    y_of = {arm: float(i) for i, arm in enumerate(arms)}
+    x_of, x, spans = {}, 0.0, []
     for name, members in CATEGORIES:
         start = x
         for pathway in members:
             x_of[pathway] = x
             x += 1.0
-        category_spans.append((name, start, x - 1.0))
-        x += 0.6
+        spans.append((name, start, x - 1.0))
+    n_rows, n_cols = len(arms), len(PATHWAYS)
 
-    width = 2.6 + 0.205 * x
-    height = 2.9 + 0.30 * y
-    fig, ax = plt.subplots(figsize=(width, height))
+    cell = 0.30
+    left, right, top, bottom = 1.75, 0.25, 0.80, 2.35
+    width = left + cell * n_cols + right
+    height = top + cell * n_rows + bottom
+    fig = plt.figure(figsize=(width, height))
+    ax = fig.add_axes([left / width, bottom / height, cell * n_cols / width, cell * n_rows / height])
     cmap = LinearSegmentedColormap.from_list("nes", [NEGATIVE, MIDPOINT, POSITIVE])
     norm = Normalize(vmin=-limit, vmax=limit)
-    floor = 1.0 / PERMUTATIONS
-    strength = -np.log10(frame["fdr"].clip(lower=floor))
-    top = -np.log10(floor)
-    sizes = 8 + 150 * (strength / top) ** 1.0
-    called = frame["fdr"] < FDR_CALL
+
+    strength = -np.log10(frame["fdr"].clip(lower=1.0 / PERMUTATIONS))
+    sizes = size_of(strength)
+    called = (frame["fdr"] < FDR_CALL).to_numpy()
     xs = frame["pathway"].map(x_of).to_numpy()
     ys = frame["arm"].map(y_of).to_numpy()
-    ax.scatter(xs[~called], ys[~called], s=sizes[~called], c=frame.loc[~called, "NES"],
-               cmap=cmap, norm=norm, linewidths=0, zorder=2)
-    ax.scatter(xs[called], ys[called], s=sizes[called], c=frame.loc[called, "NES"],
-               cmap=cmap, norm=norm, edgecolors=INK, linewidths=0.9, zorder=3)
-
-    ax.set_xlim(-0.8, x - 0.6 + 0.2)
-    ax.set_ylim(y - 1.0 + 0.7, -0.7)
+    colours = frame["NES"].clip(-limit, limit).to_numpy()
+    ax.scatter(xs[~called], ys[~called], s=sizes[~called], c=colours[~called], cmap=cmap, norm=norm,
+               linewidths=0, zorder=2)
+    ax.scatter(xs[called], ys[called], s=sizes[called], c=colours[called], cmap=cmap, norm=norm,
+               edgecolors="black", linewidths=1.0, zorder=3)
+    ax.set_xlim(-0.6, n_cols - 0.4)
+    ax.set_ylim(n_rows - 0.4, -0.6)
     ax.set_xticks([x_of[p] for p in PATHWAYS])
-    ax.set_xticklabels([heatmap43.display_name("HALLMARK_" + p) for p in PATHWAYS], rotation=60,
-                       ha="right", rotation_mode="anchor", fontsize=7.4, color=INK)
-    ax.set_yticks([y_of[a] for a in arms])
-    ax.set_yticklabels([arm_label(a) for a in arms], fontsize=7.8, color=INK)
-    ax.tick_params(length=0)
+    ax.set_xticklabels([heatmap43.display_name("HALLMARK_" + p) for p in PATHWAYS], rotation=45,
+                       ha="right", rotation_mode="anchor", fontsize=10, color="black")
+    ax.set_yticks(range(n_rows))
+    ax.set_yticklabels([arm_label(a) for a in arms], fontsize=10.5, color="black")
+    ax.tick_params(length=3, width=1, color="black")
     for spine in ax.spines.values():
-        spine.set_color(RULE)
-        spine.set_linewidth(0.8)
-    for name, start, end in category_spans:
-        ax.annotate("", xy=(start - 0.3, -1.05), xytext=(end + 0.3, -1.05), xycoords="data",
-                    arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.8), annotation_clip=False)
-        ax.text((start + end) / 2, -1.25, name, ha="center", va="bottom", fontsize=8,
-                color=INK, linespacing=1.0, clip_on=False)
-    for name, start, end in category_spans[:-1]:
-        ax.axvline(end + 0.8, color=RULE, lw=0.6, zorder=1)
+        spine.set_color("black")
+        spine.set_linewidth(1.4)
 
-    fig.suptitle(title, x=0.01, ha="left", fontsize=11, fontweight="bold", color=INK, y=0.995)
-    subtitle = ("GSEA of primary rejected vs primary retained (reference); hallmark, all 50 pathways.  "
-                "Rows: arms.")
-    if missing:
-        names = dict(heatmap43.CYCLING_REPS)
-        blocks = [names[rep] for rep, _ in heatmap43.CYCLING_REPS
-                  if any(a.startswith(rep + "/") for a in missing)]
-        subtitle += f"  {' and '.join(blocks)} arms were not run for this dataset."
-    fig.text(0.01, 0.955, subtitle, ha="left", va="top", fontsize=8, color=MUTED)
-    fig.text(0.01, 0.012, ARM_NOTE + "  ds_cos: ranknm256_noscale_ds_cos.", ha="left",
-             va="bottom", fontsize=7.4, color=MUTED)
+    # Category brackets above the frame, as in the reference figure.
+    for name, start, end in spans:
+        y_line = -0.95
+        ax.plot([start - 0.35, end + 0.35], [y_line, y_line], color="black", lw=1.1, clip_on=False)
+        for x_end in (start - 0.35, end + 0.35):
+            ax.plot([x_end, x_end], [y_line, y_line + 0.28], color="black", lw=1.1, clip_on=False)
+        # Two lines only where the bracket is too narrow for one.
+        text = name if end - start < 3 else name.replace("\n", " ")
+        ax.text((start + end) / 2, y_line - 0.12, text, ha="center", va="bottom",
+                fontsize=10.5, color="black", linespacing=1.0, clip_on=False)
 
-    # Legends: colour bar, size, outline.
-    cax = fig.add_axes([0.905, 0.62, 0.012, 0.22])
-    clipped = bool((frame["NES"].abs() > limit).any())
-    bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax,
-                       extend="both" if clipped else "neither")
+    # Legends in one column, bottom left, below the row labels: size, outline, colour.
+    legend_ax = fig.add_axes([0.010, 0.012, (left - 0.15) / width, (bottom - 0.10) / height])
+    legend_ax.set_axis_off()
+    legend_ax.set_xlim(0, 1)
+    legend_ax.set_ylim(0, 1)
+    legend_ax.text(0.02, 0.99, "−log10 (FDR)", fontsize=10, va="top", color="black")
+    for row, value in enumerate(SIZE_LEGEND):
+        y = 0.86 - row * 0.115
+        legend_ax.scatter([0.13], [y], s=size_of(np.asarray([value])), facecolor="#a6a6a6",
+                          edgecolor="black", linewidths=1.0, clip_on=False)
+        legend_ax.text(0.30, y, f"{value:g}", fontsize=10, va="center", color="black")
+    for y, outlined, text in ((0.47, False, "NS"), (0.36, True, f"FDR < {FDR_CALL:g}")):
+        legend_ax.scatter([0.13], [y], s=size_of(np.asarray([2.0])), facecolor="#a6a6a6",
+                          edgecolor="black" if outlined else "none", linewidths=1.0 if outlined else 0,
+                          clip_on=False)
+        legend_ax.text(0.30, y, text, fontsize=10, va="center", color="black")
+    legend_ax.text(0.02, 0.22, "NES", fontsize=10, va="center", color="black")
+    cax = fig.add_axes([0.20 / width, 0.22 / height, 1.45 / width, 0.15 / height])
+    bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, orientation="horizontal",
+                       ticks=np.arange(-limit, limit + 0.5, 1.0))
     bar.outline.set_visible(False)
-    bar.ax.tick_params(labelsize=7, length=0, colors=MUTED)
-    cax.set_title("NES\nrejected vs\nretained", fontsize=7.4, color=INK, loc="left", pad=6)
-    cax.text(2.6, 0.02, "higher in\nretained", transform=cax.transAxes, fontsize=6.6,
-             color=MUTED, va="bottom")
-    cax.text(2.6, 0.98, "higher in\nrejected", transform=cax.transAxes, fontsize=6.6,
-             color=MUTED, va="top")
-    handles = []
-    for fdr in (0.1, 0.01, floor):
-        value = -np.log10(fdr)
-        label = f"{fdr:g}" if fdr > floor else f"<= {floor:g}*"
-        handles.append(Line2D([], [], marker="o", linestyle="", markerfacecolor="#9a9a9a",
-                              markeredgecolor="none",
-                              markersize=np.sqrt(8 + 150 * value / top), label=label))
-    handles.append(Line2D([], [], marker="o", linestyle="", markerfacecolor="#9a9a9a",
-                          markeredgecolor=INK, markeredgewidth=0.9, markersize=7,
-                          label=f"FDR < {FDR_CALL:g}"))
-    legend = fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.893, 0.52),
-                        frameon=False, fontsize=7, title="FDR", title_fontsize=7.4,
-                        labelcolor=INK, handletextpad=0.4, borderaxespad=0)
-    legend.get_title().set_color(INK)
-    fig.text(0.893, 0.20, f"* FDR 0 is below the\nresolution of {PERMUTATIONS:,}\npermutations",
-             fontsize=6.4, color=MUTED, va="top")
-    fig.subplots_adjust(left=1.9 / width, right=0.875, top=1 - 1.15 / height, bottom=2.05 / height)
-    fig.savefig(path.with_suffix(".png"), dpi=220)
+    bar.ax.tick_params(labelsize=9.5, length=0, colors="black")
+    bar.ax.xaxis.set_ticks_position("top")
+
+    fig.savefig(path.with_suffix(".png"), dpi=300)
     fig.savefig(path.with_suffix(".pdf"))
     plt.close(fig)
 
@@ -231,7 +219,7 @@ def main() -> None:
     parser.add_argument("out", type=Path)
     parser.add_argument("--analysis", action="append", required=True,
                         help="TITLE::TEMPLATE, the template as 43_'s cycling layout takes it")
-    parser.add_argument("--limit", type=float, default=3.0,
+    parser.add_argument("--limit", type=float, default=2.0,
                         help="Colour limit |NES|, shared by every figure; points beyond it take the end "
                              "colour and the colour bar shows an arrow. The values are in the CSV")
     args = parser.parse_args()
