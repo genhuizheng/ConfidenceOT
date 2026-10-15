@@ -213,7 +213,10 @@ def main() -> None:
         primaries = tumours[tumours["kind"].eq("primary") & tumours["mouse"].eq(metastasis.mouse)]
         if primaries.empty:
             pairs.append({"pair_id": f"{metastasis.mouse}__none__{metastasis.tumor}",
-                          "patient_id": metastasis.mouse, "source_sample": "", "target_sample": metastasis.tumor,
+                          "dataset_id": args.dataset_id, "patient_id": metastasis.mouse,
+                          "source_sample": "", "target_sample": metastasis.tumor,
+                          "target_malignant_n": int(metastasis.malignant_cells),
+                          "target_met_family": metastasis.met_family, "same_met_family": False,
                           "eligible": False, "skip_reason": "no primary tumour in this mouse"})
             continue
         for primary in primaries.itertuples(index=False):
@@ -267,7 +270,7 @@ def main() -> None:
         "pairs": int(len(manifest)),
         "pairs_eligible": int(manifest["eligible"].astype(bool).sum()),
         "pairs_eligible_same_family": int((manifest["eligible"].astype(bool)
-                                           & manifest.get("same_met_family", False).astype(bool)).sum()),
+                                           & manifest["same_met_family"].fillna(False).astype(bool)).sum()),
         "h5ads_written": len(written),
         "minimum_cells_per_side": args.minimum_cells_per_side,
     }
