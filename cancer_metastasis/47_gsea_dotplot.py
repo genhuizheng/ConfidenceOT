@@ -186,28 +186,28 @@ def draw(frame: pd.DataFrame, title: str, missing: list[str], limit: float, path
                 fontsize=10.5, color="black", linespacing=1.0, clip_on=False)
 
     # Legends in one column, bottom left, below the row labels: size, outline, colour.
-    legend_ax = fig.add_axes([0.010, 0.012, (left - 0.15) / width, (bottom - 0.10) / height])
+    legend_ax = fig.add_axes([0.010, 0.70 / height, (left - 0.15) / width, (bottom - 0.80) / height])
     legend_ax.set_axis_off()
     legend_ax.set_xlim(0, 1)
     legend_ax.set_ylim(0, 1)
     legend_ax.text(0.02, 0.99, "−log10 (FDR)", fontsize=10, va="top", color="black")
     for row, value in enumerate(SIZE_LEGEND):
-        y = 0.86 - row * 0.115
+        y = 0.84 - row * 0.155
         legend_ax.scatter([0.13], [y], s=size_of(np.asarray([value])), facecolor="#a6a6a6",
                           edgecolor="black", linewidths=1.0, clip_on=False)
         legend_ax.text(0.30, y, f"{value:g}", fontsize=10, va="center", color="black")
-    for y, outlined, text in ((0.47, False, "NS"), (0.36, True, f"FDR < {FDR_CALL:g}")):
+    for y, outlined, text in ((0.30, False, "NS"), (0.14, True, f"FDR < {FDR_CALL:g}")):
         legend_ax.scatter([0.13], [y], s=size_of(np.asarray([2.0])), facecolor="#a6a6a6",
                           edgecolor="black" if outlined else "none", linewidths=1.0 if outlined else 0,
                           clip_on=False)
         legend_ax.text(0.30, y, text, fontsize=10, va="center", color="black")
-    legend_ax.text(0.02, 0.22, "NES", fontsize=10, va="center", color="black")
     cax = fig.add_axes([0.20 / width, 0.22 / height, 1.45 / width, 0.15 / height])
     bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, orientation="horizontal",
                        ticks=np.arange(-limit, limit + 0.5, 1.0))
     bar.outline.set_visible(False)
     bar.ax.tick_params(labelsize=9.5, length=0, colors="black")
     bar.ax.xaxis.set_ticks_position("top")
+    cax.set_title("NES", loc="left", fontsize=10, pad=16, color="black")
 
     fig.savefig(path.with_suffix(".png"), dpi=300)
     fig.savefig(path.with_suffix(".pdf"))
