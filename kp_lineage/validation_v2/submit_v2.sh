@@ -23,6 +23,10 @@
 #          Reads the existing gates and the authors' trees only; no OT is rerun.
 #          Refuses if lineage/SUCCESS or export/MANIFEST.tsv already exists.
 #
+# Every phase checks for existing outputs twice: when it is submitted, and again
+# when the job starts (the wrap begins with a test, and 04_/05_ refuse on their
+# own), so a job that waited in the queue cannot overwrite a result written meanwhile.
+#
 # Later phases (cross-mouse control, baselines) are added after D1.
 #
 # No set -u, as everywhere in this repo.
@@ -57,10 +61,14 @@ submit() {
 case "$phase" in
     audit)
         out=$v2/audit
+        if [[ -f "$out/audit.json" ]]; then
+            echo "$out/audit.json exists; the audit is not rerun" >&2
+            exit 2
+        fi
         mkdir -p "$out"
         submit "lineage data audit" -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J kp_audit \
             -o "$logs/audit_%j.out" -e "$logs/audit_%j.err" \
-            --wrap "$activate && python kp_lineage/validation_v2/03_audit_lineage.py --tracer $tracer --prepared $root/prepared --ot-block $root/ot/kptracer --out $out" > /dev/null
+            --wrap "test ! -f $out/audit.json && $activate && python kp_lineage/validation_v2/03_audit_lineage.py --tracer $tracer --prepared $root/prepared --ot-block $root/ot/kptracer --out $out" > /dev/null
         ;;
     readout)
         out=$root/readout
@@ -71,7 +79,7 @@ case "$phase" in
         mkdir -p "$out"
         submit "preregistered primary readout" -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J kp_readout \
             -o "$out/readout_%j.log" -e "$out/readout_%j.err" \
-            --wrap "$activate && python kp_lineage/02_kptracer_readout.py $root/prepared $root/ot/kptracer $out" > /dev/null
+            --wrap "test ! -f $out/readout_summary.json && $activate && python kp_lineage/02_kptracer_readout.py $root/prepared $root/ot/kptracer $out" > /dev/null
         ;;
     lineage)
         out=$v2/lineage

@@ -1,6 +1,6 @@
 # KP-Tracer lineage data audit (validation_v2)
 
-Status: **complete, 2026-10-15.** Sections A and B were verified from the repository code and the files already inspected. Section C is the output of `03_audit_lineage.py`, run on the TACC login node on 2026-10-15 (a light read-only script; the gg queue was long) into `<root>/validation_v2/audit/`. No association between lineage and any gate outcome is computed in this audit.
+Status: **complete, 2026-10-15.** Sections A and B were verified from the repository code and the files already inspected. Section C is the output of `03_audit_lineage.py`, run twice on 2026-10-15 with the same code and inputs: as gg job 1074424 (15:36:56-15:37:24) and then on the TACC login node (15:42), whose files are the ones on disk in `<root>/validation_v2/audit/`. The two runs' stdout is identical (`diff logs/audit_1074424.out audit/audit_login.log` is empty). No association between lineage and any gate outcome is computed in this audit.
 
 ## A. Verified from code
 
