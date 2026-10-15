@@ -81,6 +81,20 @@ def read_obs_column(group: h5py.Group, name: str) -> np.ndarray:
         out[codes >= 0] = categories[codes[codes >= 0]]
         return out
     values = node[:]
+    # anndata < 0.8 stored a categorical as its integer codes, with the
+    # categories behind an object reference in the dataset's attributes (or,
+    # older still, under uns/<name>_categories). Reading only the codes would
+    # turn every tumour name into a number.
+    categories = None
+    if "categories" in node.attrs:
+        categories = text(group.file[node.attrs["categories"]][:])
+    elif "uns" in group.file and f"{name}_categories" in group.file["uns"]:
+        categories = text(group.file["uns"][f"{name}_categories"][:])
+    if categories is not None:
+        codes = np.asarray(values)
+        out = np.full(codes.shape, "nan", dtype=object)
+        out[codes >= 0] = categories[codes[codes >= 0]]
+        return out
     if values.dtype.kind in "OS" or h5py.check_string_dtype(node.dtype):
         return text(values)
     return values
@@ -144,6 +158,11 @@ def main() -> None:
     if raw_shape[1] != len(raw_genes):
         raise RuntimeError(f"raw/X has {raw_shape[1]} columns for {len(raw_genes)} raw/var rows")
     obs["tumor"] = obs["tumor"].astype(str)
+    named = obs["tumor"].str.count("_").ge(2)
+    if not named.any():
+        raise RuntimeError("No Tumor value has the form <mouse>_<genotype>_<tumour id>; "
+                           f"first values {obs['tumor'].unique()[:5].tolist()}. "
+                           "A categorical was probably read as its codes.")
     obs["met_family"] = obs["met_family"].astype(str)
     obs["mouse"] = obs["mouse"].astype(str)
     normal = obs["is_normal"]
