@@ -997,7 +997,10 @@ def main() -> None:
         },
         "pipeline_seconds": pipeline_seconds, "methods": metric_rows,
         "hvg_n": len(hvg), "hvg": hvg, "preprocessing": preprocessing,
-    }, indent=2), encoding="utf-8")
+    # default: manifest values arrive as NumPy scalars -- a numeric patient_id
+    # such as a KP-Tracer mouse number is read by pandas as int64 -- which the
+    # json module refuses; json_ready turns them into Python scalars.
+    }, indent=2, default=json_ready), encoding="utf-8")
     (output / "SUCCESS").write_text("complete\n", encoding="utf-8")
     print(pd.DataFrame(metric_rows).to_string(index=False))
 

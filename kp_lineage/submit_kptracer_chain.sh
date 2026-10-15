@@ -1,7 +1,10 @@
 #!/bin/bash
 # KP-Tracer through the project's own chain, in one or both of two arms.
 #
-#   bash kp_lineage/submit_kptracer_chain.sh --max-cells N [--arm ds|raw|both] [--dry-run]
+#   bash kp_lineage/submit_kptracer_chain.sh --max-cells N [--arm ds|raw|both] [--reuse-downsampled] [--dry-run]
+#
+# --reuse-downsampled skips step 1 of the ds arm and gates the equalised counts
+# an earlier, completed 27_ run left in downsampled/, for resubmitting the OT alone.
 #
 # Arm ds (the default; the project's chosen preprocessing):
 # 1. 27_downsample_counts.py on the prepared manifest (01_prepare_kptracer_pairs.py
@@ -33,11 +36,13 @@ set -eo pipefail
 max_cells=""
 arm=ds
 dry_run=0
+reuse_downsampled=0
 while (( $# )); do
     case "$1" in
         --max-cells) max_cells=$2; shift 2 ;;
         --arm) arm=$2; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
+        --reuse-downsampled) reuse_downsampled=1; shift ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -107,11 +112,22 @@ export CONFIDENCEOT_FACTORIAL_EXTRA_ARGS="--within-side-acceptance-minimum 0.99"
 ds_job=-; ot_job=-; raw_job=-
 if [[ "$arm" == ds || "$arm" == both ]]; then
     label=ranknm256_noscale_ds_cos
-    ds_job=$(submit "depth equalisation" -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J kp_ds \
-        -o "$logs/downsample_%j.out" -e "$logs/downsample_%j.err" \
-        --wrap "source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/27_downsample_counts.py $prepared/pair_manifest_eligible.csv $downsampled --malignant-column malignant --malignant-value malignant --target-quantile 0.10")
     dependency=()
-    (( dry_run )) || dependency=(--dependency=afterok:$ds_job)
+    if (( reuse_downsampled )); then
+        # The equalised counts of an earlier, completed 27_ run, used as they are.
+        for needed in pair_manifest_downsampled.csv predownsample_depth.csv.gz; do
+            if [[ ! -f "$downsampled/$needed" ]]; then
+                echo "--reuse-downsampled, but $downsampled/$needed does not exist" >&2
+                exit 2
+            fi
+        done
+        ds_job=reused
+    else
+        ds_job=$(submit "depth equalisation" -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J kp_ds \
+            -o "$logs/downsample_%j.out" -e "$logs/downsample_%j.err" \
+            --wrap "source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; python cancer_metastasis/27_downsample_counts.py $prepared/pair_manifest_eligible.csv $downsampled --malignant-column malignant --malignant-value malignant --target-quantile 0.10")
+        (( dry_run )) || dependency=(--dependency=afterok:$ds_job)
+    fi
     # In a subshell, so these settings reach this sbatch (--export=ALL) and no other.
     ot_job=$(
         export CONFIDENCEOT_FACTORIAL_MANIFEST="$downsampled/pair_manifest_downsampled.csv"
