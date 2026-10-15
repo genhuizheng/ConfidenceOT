@@ -33,3 +33,19 @@ Status: **proposed, awaiting the user's confirmation.** It was committed before 
 - Any clade or subclone label derived from the trees.
 - The cross-mouse mismatched control (`28_build_mismatched_manifest.py`). It is the next step and gets its own dated section.
 - Any change to the configuration after the gates are seen.
+
+## Added 2026-10-14, before any gate was seen: the raw comparison arm
+
+The user asked for a comparison version: `raw` against the project's chosen preprocessing, `ranknm256_noscale_ds_cos`.
+
+**What is held fixed between the two arms:**
+- the pairs, the malignant call and the gate (M4-E);
+- the null, the acceptance (0.99), the cap (0) and the seed;
+- the cell set. The QC that `27_downsample_counts.py` applies before equalising (1000 counts, 500 genes, 20% mitochondrial, through the same `cell_qc_table`) is applied inside `02_run_pair.py` for the raw arm, so both arms gate the same cells.
+
+**What differs:** only the representation, and with it the equalisation that `_ds` names.
+
+**Readout:**
+- The primary readout above is computed for each arm separately, with the same entry rule, test and threshold.
+- `ranknm256_noscale_ds_cos` remains the primary arm.
+- The raw arm is reported beside it, never instead of it. Neither arm's result changes which arm is primary.
