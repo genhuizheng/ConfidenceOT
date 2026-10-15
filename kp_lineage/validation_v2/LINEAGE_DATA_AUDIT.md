@@ -1,6 +1,6 @@
 # KP-Tracer lineage data audit (validation_v2)
 
-Status: **partial.** Sections A and B were verified from the repository code and the files already inspected. Section C is filled from `03_audit_lineage.py` (job `audit`) and stays marked *pending* until that job's output has been read. No association between lineage and any gate outcome is computed in this audit.
+Status: **complete, 2026-10-15.** Sections A and B were verified from the repository code and the files already inspected. Section C is the output of `03_audit_lineage.py`, run on the TACC login node on 2026-10-15 (a light read-only script; the gg queue was long) into `<root>/validation_v2/audit/`. No association between lineage and any gate outcome is computed in this audit.
 
 ## A. Verified from code
 
@@ -79,10 +79,54 @@ Status: **partial.** Sections A and B were verified from the repository code and
 - **Old Cassiopeia.** The reconstruction is fixed and was not repeated here. Where both a `_Fam` and an `_All` tree, or a neighbor-joining tree, cover a pair, the other one is a sensitivity tree.
 - **Mostly-normal metastases** (3508 lymph nodes, 3513_NT_N1): small malignant target sets.
 
-## C. From `03_audit_lineage.py` — *pending*
+## C. From `03_audit_lineage.py` (2026-10-15)
 
-- **C1.** Per tree: leaves, internal nodes, branch lengths (present, informative), polytomies, unary nodes, depth, the leaf-name format, and whether leaves match the expression ids exactly. Per tree, the tumours its leaves come from.
-- **C2.** Per label: the spread of source retained fractions, active bounds, budget overrides, and agreement of `retained` with `margin < 0`.
-- **C3.** Per eligible same-family pair: which family tree holds both sides, and how many source cells, target cells, retained cells and rejected cells are leaves of it.
-- **C4.** Character matrices: cells, characters, missing fraction, and overlap with the same-name tree.
-- **Blocker rule.** If the leaves do not match the expression ids, or fewer than half of the same-family pairs are covered, the cell-level analysis stops here. The report then states the blocker, and no substitute truth is built from expression.
+Files: `audit.json`, `audit.txt`, `trees.tsv`, `tree_tumours.tsv`, `character_matrices.tsv`, `pair_coverage.tsv`, `gate_semantics.tsv`, under `/scratch/10119/ghzheng/OT_project/kp_tracer_confidenceot/validation_v2/audit/`.
+
+### C1. Trees
+
+- **Count.** 169 newick files: 85 Cassiopeia trees and 84 neighbor-joining trees.
+- **Leaf ids.** In every tree, every leaf matches a `KPTracer_meta.csv` index exactly (format `L28.CTCTAATAGGAGTTTA-1`).
+- **Branch lengths.** No tree has a branch length on any edge (`trees_with_branch_lengths` = 0). Under the preregistration's rule (1.6, item 3), the patristic-distance sensitivity analysis does not apply.
+- **Unary internal nodes.** Present in most trees, for example 921 in Cassiopeia 3724_NT_All and 997 in 3508_Apc_All. Under the fixed rule (1.2), they are contracted before `s` is computed.
+- **Polytomies.** Large and common. The largest internal node has 8,362 children in Cassiopeia 3724_NT_T1, 6,519 in 3724_NT_All, 1,033 in 3508_Apc_All and 552 in 3513_NT_T1_Fam. Many source cells therefore share the same `s`. Cliff's delta counts ties as neither greater nor smaller, so ties lower |δ| without biasing its sign.
+- **Depth.** Median leaf depth (edges, before contraction) ranges from 4 to 25 in the Cassiopeia trees.
+- **Family trees present** (Cassiopeia unless marked): 3454_Lkb1_All, 3457_Apc_T1_Fam, 3457_Apc_T4_Fam, 3460_Lkb1_T1_Fam, 3508_Apc_All, 3508_Apc_T2_Fam, 3513_NT_T1_Fam, 3513_NT_All (NJ only), 3513_NT_Mets (NJ only), 3515_Lkb1_All, 3515_Lkb1_T1_Fam, 3519_Lkb1_All, 3519_Lkb1_T1_Fam, 3724_NT_All. Neighbor-joining versions exist for all of them except 3457_Apc_T1_Fam and 3457_Apc_T4_Fam.
+
+### C2. Gate semantics in the outputs
+
+- **Retained flag.** `retained` agrees with `signed_rejection_margin < 0` in every pair (minimum agreement 1.0000).
+- **Overrides and bounds.** No pair has a budget-overridden source cell, an active lower bound or an active upper bound.
+- **Cell ids.** All 242,974 source-cell observations of the OT outputs are found in `KPTracer_meta.csv`.
+- **Source retained fraction across the 104 pairs:**
+
+| Label | min | q25 | median | q75 | max |
+|---|---|---|---|---|---|
+| ranknm256_noscale_ds_cos | 0.049 | 0.287 | 0.604 | 0.884 | 1.000 |
+| raw | 0.827 | 0.974 | 0.991 | 0.998 | 1.000 |
+
+In the raw arm almost every source cell is retained, so the rejected group is small in every pair.
+
+### C3. Coverage of the 40 eligible same-family pairs
+
+- **Covered: 28 of 40, the same in both arms.** These are in 7 mice: 3454 (1 pair), 3457 (3), 3460 (5), 3508 (8), 3513 (1), 3515 (6) and 3724 (4).
+- **Not covered: 12 pairs.** No family tree holds both sides of:
+  - 3451, all 5 pairs;
+  - 3465, all 5 pairs;
+  - 3466_Lkb1_T2 → N1;
+  - 3454_Lkb1_T1 → L1 (3454_Lkb1_All does not contain L1).
+- **Mapping.** In every covered pair, every source cell and every target cell of the OT is a leaf of the covering tree. Retained and rejected cells are mapped at the same rate (100%), so target-site dropout does not differ between the groups. Sensitivity analysis 4 (1.6) is therefore trivially satisfied.
+- **Evaluability under the fixed rule (1.1):** at least 5 mapped retained cells, at least 5 mapped rejected cells and at least 1 mapped target cell.
+  - **ranknm256_noscale_ds_cos: 26 of 28 evaluable, 7 mice.** Not evaluable: 3460 → N2 and 3460 → N4, with 0 rejected cells each. 3460 → N3 has exactly 5 and enters.
+  - **raw: 21 of 28 evaluable, 6 mice.** Not evaluable: 3457 → L1 (2 rejected), 3460 → N3 (1), 3460 → N5 (3), 3508 → N3 (4), 3513 → N1 (2), 3515 → K1 (3) and 3515 → N1 (1). Mouse 3513 drops out.
+- **Candidate trees.** Each covered pair can have several candidate trees (a `_Fam`, an `_All`, Cassiopeia or neighbor-joining), listed in `pair_coverage.tsv`. The primary tree is chosen by the fixed rule in 1.1; the others are sensitivity trees (1.6, item 2).
+
+### C4. Character matrices
+
+- **Count.** 85 matrices, one per Cassiopeia tree.
+- **Size.** 5 to 73 characters; missing fraction 0.010 to 0.481.
+- **Overlap.** Every row matches a meta id. Every matrix row is a leaf of the same-name tree, and every leaf of that tree is a matrix row.
+
+### Blocker rule: not triggered
+
+The leaves match the expression ids exactly, and 28 of 40 same-family pairs (70%) are covered, above the stated threshold of half. The cell-level analysis can proceed after the preregistration is frozen.
