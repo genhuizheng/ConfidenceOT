@@ -13,11 +13,15 @@
 #          with its established arguments, into <root>/readout/. Refuses if that
 #          directory already holds a readout_summary.json, so it never overwrites.
 #
-# lineage  D1: 04_lineage_concordance.py, E1/E1b and their sensitivity analyses
-#          under the preregistration frozen 2026-10-15 (text of b0817f1), both
-#          labels, into <root>/validation_v2/lineage/. Reads the existing gates and
-#          the authors' trees only; no OT is rerun. Refuses if that directory
-#          already holds SUCCESS.
+# lineage  One job, three steps, each only if the previous one succeeded:
+#          1. D1, 04_lineage_concordance.py: E1/E1b and their sensitivity analyses
+#             under the preregistration frozen 2026-10-15 (text of b0817f1), both
+#             labels, into <root>/validation_v2/lineage/ (no figures);
+#          2. 05_export_package.py: the visualization-ready package in
+#             <root>/validation_v2/export/ with MANIFEST.tsv and MD5SUMS;
+#          3. one tarball of export/ and its md5, for download.
+#          Reads the existing gates and the authors' trees only; no OT is rerun.
+#          Refuses if lineage/SUCCESS or export/MANIFEST.tsv already exists.
 #
 # Later phases (cross-mouse control, baselines) are added after D1.
 #
@@ -79,8 +83,17 @@ case "$phase" in
             echo "the preregistration in $repo is not the frozen one; pull the repository first" >&2
             exit 2
         fi
+        export_dir=$v2/export
+        tarball=$v2/kp_tracer_lineage_validation_export.tar.gz
+        if [[ -f "$export_dir/MANIFEST.tsv" ]]; then
+            echo "$export_dir/MANIFEST.tsv exists; the export is not rewritten" >&2
+            exit 2
+        fi
         mkdir -p "$out"
-        submit "lineage concordance D1" -p gg -N 1 -n 1 -t 02:00:00 -A MCB26031 -J kp_d1             -o "$logs/lineage_%j.out" -e "$logs/lineage_%j.err"             --wrap "$activate && python kp_lineage/validation_v2/04_lineage_concordance.py --tracer $tracer --prepared $root/prepared --ot-block $root/ot/kptracer --depth $root/downsampled/predownsample_depth.csv.gz --out $out" > /dev/null
+        d1="python kp_lineage/validation_v2/04_lineage_concordance.py --tracer $tracer --prepared $root/prepared --ot-block $root/ot/kptracer --depth $root/downsampled/predownsample_depth.csv.gz --out $out"
+        package="python kp_lineage/validation_v2/05_export_package.py --d1 $out --readout $root/readout --audit $v2/audit --tracer $tracer --prepared $root/prepared --ot-block $root/ot/kptracer --out $export_dir"
+        archive="tar -C $v2 -czf $tarball export && cd $v2 && md5sum $(basename $tarball) > $(basename $tarball).md5 && cat $(basename $tarball).md5"
+        submit "lineage concordance D1, export and archive" -p gg -N 1 -n 1 -t 02:00:00 -A MCB26031 -J kp_d1             -o "$logs/lineage_%j.out" -e "$logs/lineage_%j.err"             --wrap "$activate && $d1 && $package && $archive" > /dev/null
         ;;
     *)
         echo "usage: $0 audit|readout|lineage [--dry-run]" >&2; exit 2 ;;

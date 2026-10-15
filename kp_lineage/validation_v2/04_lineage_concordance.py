@@ -34,11 +34,13 @@ which must not already hold a SUCCESS file.
 Diagnostics written alongside: group sizes, ties of s (within and between
 groups), tree resolution, and per-pair differences between trees. Figures: one
 descriptive drawing of the actual primary tree per evaluable pair of
---figure-label, and per-pair delta by mouse. They describe; the test is E1.
+--figure-label, and per-pair delta by mouse, only with --figures. They
+describe; the test is E1. cell_scores.csv.gz holds s and r for every mapped
+source cell on every covering tree (column role: primary or a sensitivity tree).
 
 Outputs: pair_trees.tsv (one row per label, pair and covering tree),
 pairs.tsv (primary tree only), metastases.tsv, mice.tsv, cell_scores.csv.gz,
-summary.json, report.txt, provenance.json, figures/, SUCCESS.
+summary.json, report.txt, provenance.json, figures/ (with --figures), SUCCESS.
 """
 
 from __future__ import annotations
@@ -345,6 +347,8 @@ def main() -> None:
     parser.add_argument("--depth", type=Path, required=True, help="27_'s predownsample_depth.csv.gz")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--labels", nargs="+", default=["ranknm256_noscale_ds_cos", "raw"])
+    parser.add_argument("--figures", action="store_true",
+                        help="also draw the descriptive tree figures (off by default: figures are made locally)")
     parser.add_argument("--figure-label", default="ranknm256_noscale_ds_cos")
     args = parser.parse_args()
 
@@ -354,7 +358,8 @@ def main() -> None:
     if FROZEN_MARK not in prereg:
         raise SystemExit(f"{PREREGISTRATION} is not frozen; D1 runs only under the frozen protocol")
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "figures").mkdir(exist_ok=True)
+    if args.figures:
+        (args.out / "figures").mkdir(exist_ok=True)
     lines: list[str] = []
 
     def say(text: str = "") -> None:
@@ -442,17 +447,18 @@ def main() -> None:
                              and result["mapped_target"] >= 1)
                 record = {**base, "role": role, "status": "evaluable" if evaluable else "not evaluable",
                           "tree": stem, "kind": kind, "tree_rule": rule_note, "fam_tree_exists": fam_exists, **result}
-                if role == "primary" and table is not None:
+                if table is not None:
                     sample = row["source_sample"]
                     table["predownsample_total_counts"] = [depth.get((sample, c), np.nan) for c in table["observation_id"]]
                     genes = detected_genes(row["source_h5ad"], gene_cache) if isinstance(row.get("source_h5ad"), str) else pd.Series(dtype=float)
                     table["detected_genes"] = genes.reindex(table["observation_id"]).to_numpy(dtype=float)
+                    cell_tables.append(table.assign(label=label, pair_id=pair_id, tree=stem, kind=kind, role=role))
+                if role == "primary" and table is not None:
                     record["rho_s_depth"] = spearman(table["s"].to_numpy(float), table["predownsample_total_counts"].to_numpy(float))
                     record["rho_s_detected_genes"] = spearman(table["s"].to_numpy(float), table["detected_genes"].to_numpy(float))
                     record["depth_missing"] = int(table["predownsample_total_counts"].isna().sum())
                     record["genes_missing"] = int(table["detected_genes"].isna().sum())
-                    cell_tables.append(table.assign(label=label, pair_id=pair_id, tree=stem))
-                    if label == args.figure_label and evaluable:
+                    if args.figures and label == args.figure_label and evaluable:
                         draw_tree(tree, source[source["observation_id"].isin(tree.leaf_of)], target_ids,
                                   f"{pair_id}   tree {stem} (Cassiopeia)   label {label}",
                                   args.out / "figures" / f"tree_{pair_id}")
@@ -529,7 +535,7 @@ def main() -> None:
             metastasis_tables.append(met.assign(label=label))
             mouse = met.groupby("patient_id", sort=True)[["delta", "rho"]].mean().reset_index()
             mouse_tables.append(mouse.assign(label=label))
-        if label == args.figure_label and len(evaluable):
+        if args.figures and label == args.figure_label and len(evaluable):
             draw_delta(evaluable, entry["E1"]["mouse_means"], args.out / "figures" / f"delta_by_mouse_{label}")
     if metastasis_tables:
         pd.concat(metastasis_tables).to_csv(args.out / "metastases.tsv", sep="\t", index=False)

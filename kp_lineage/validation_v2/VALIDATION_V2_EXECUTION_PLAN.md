@@ -11,12 +11,13 @@ Outputs live under `/scratch/10119/ghzheng/OT_project/kp_tracer_confidenceot/val
 | A | Lineage data audit, `03_audit_lineage.py` | `submit_v2.sh audit`, 1 job | 1 node, under 1 h (reads ~90 trees and 208 small CSVs) | done 2026-10-15 (login node), section C filled, e9e1a1f |
 | B | Existing primary readout, `02_kptracer_readout.py`, unchanged | `submit_v2.sh readout`, 1 job | 1 node, under 30 min | done 2026-10-15 (login node); supported in the primary arm |
 | C | Freeze the preregistration | none (a commit) | — | done: frozen 2026-10-15, text of b0817f1, freeze commit 5577e5f |
-| D1 | E1 and E1b lineage concordance, `04_lineage_concordance.py` | `submit_v2.sh lineage`, 1 job | 1 node, 2 h limit (expected minutes: about 28 pairs × up to 4 trees × 2 labels, plus 26 tree figures) | implemented, tested on synthetic data |
+| D1 | E1 and E1b lineage concordance, `04_lineage_concordance.py` (no figures on TACC) | `submit_v2.sh lineage`, 1 job, together with E | 1 node, 2 h limit (expected minutes) | implemented, tested on synthetic data |
+| E | Visualization-ready export, `05_export_package.py`: per-cell, per-pair, per-mouse tables, original trees, leaf map, metadata, configuration, MANIFEST.tsv, MD5SUMS; then one tarball and its md5 | same job as D1, runs only if D1 succeeded | minutes | implemented, tested on synthetic data |
 | D2 | Cross-mouse manifests: `28_ --size-column target_malignant_n`, then path mapping | 1 job | minutes | to implement after C |
 | D3 | Cross-mouse OT, 2 arms × 6 tasks | 2 arrays, 12 tasks | 72 cores per task. The matched runs took 0.5–15 min per task, so expect the same order | after D2 |
 | D4 | E2 readout | 1 job | minutes | after D3 |
 | D5 | E3 baselines | to be designed | — | exploratory, after D1 |
-| F | Figures and `VALIDATION_V2_REPORT.md` | 1 job | minutes | last |
+| F | Statistical report first, then figures, locally from the downloaded export | local | — | after the statistics are reviewed |
 
 Every analysis script:
 - takes explicit arguments;
