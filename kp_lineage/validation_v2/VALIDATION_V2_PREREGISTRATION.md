@@ -1,7 +1,7 @@
 # KP-Tracer validation_v2 preregistration
 
-Status: **FROZEN 2026-10-15.** The text below is unchanged from commit b0817f1; only this status line changed, in the commit that froze it. The user approved freezing it unchanged after reading the audit (`LINEAGE_DATA_AUDIT.md`, section C, commit e9e1a1f). Before freezing it read:
-- It is frozen when two conditions hold: (1) the audit (`LINEAGE_DATA_AUDIT.md`, section C) has been read, and (2) the user approves. Both held on 2026-10-15.
+Status: **FROZEN 2026-10-15 b0817f1.** Approved unchanged by the user after the audit (`LINEAGE_DATA_AUDIT.md` section C, commit e9e1a1f). Everything below this line is identical to commit b0817f1.
+- It is frozen when two conditions hold: (1) the audit (`LINEAGE_DATA_AUDIT.md`, section C) has been read, and (2) the user approves.
 - Freezing is a commit that changes this line to `FROZEN <date> <commit>`. After that, changes go only into new dated sections.
 - No result of any endpoint below has been computed. The existing tumour-level readout (`READOUT_PRESPECIFICATION_2026-10-14.md`) is unchanged and is reported separately whatever these endpoints show.
 - Choices below that depend on facts the audit reports are written as explicit rules on those facts, never on any outcome.
