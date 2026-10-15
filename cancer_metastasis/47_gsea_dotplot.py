@@ -14,7 +14,8 @@ computed:
   in rejected cells. Blue-white-orange with limits +/-2, the reference figure's
   scale, shared by every figure; a point beyond them takes the end colour and
   its exact NES is in the CSV.
-* **Size** is -log10 FDR. GSEApy reports FDR = 0 below its permutation
+* **Size** is -log10 FDR in four bins (< 1, 1-2, 2-3, >= 3), one marker area
+  per bin, so every size in the figure is one of the four in the legend. GSEApy reports FDR = 0 below its permutation
   resolution; the runs used 2,000 permutations (tacc_factorial_downstream.slurm),
   so 0 is drawn at 1/2000 (-log10 = 3.3).
 * **Outline** marks FDR < 0.05, the call 41_ made.
@@ -88,14 +89,18 @@ assert len(PATHWAYS) == 50 and len(set(PATHWAYS)) == 50
 NEGATIVE = "#2b6cb4"
 MIDPOINT = "#ffffff"
 POSITIVE = "#f28c1c"
-# -log10 FDR values the size legend shows; FDR 0 is drawn at 1/PERMUTATIONS.
-SIZE_LEGEND = (1.0, 2.0, 3.0)
+# -log10 FDR in four bins, each drawn at one marker area, so a size reads as one
+# bin rather than as a position on a continuum: FDR > 0.1, 0.01-0.1, 0.001-0.01,
+# and <= 0.001 (FDR 0, below the 1/PERMUTATIONS resolution, falls in the last).
+SIZE_BREAKS = (1.0, 2.0, 3.0)
+SIZE_AREAS = (8.0, 50.0, 135.0, 275.0)
+SIZE_LABELS = ("< 1", "1–2", "2–3", "≥ 3")
 
 
 def size_of(strength):
-    """Marker area for -log10 FDR, from a visible dot at 0 to the cap 1/PERMUTATIONS."""
-    top = -np.log10(1.0 / PERMUTATIONS)
-    return 12 + 230 * np.clip(np.asarray(strength, dtype=float), 0, top) / top
+    """Marker area for -log10 FDR, by bin."""
+    bins = np.digitize(np.asarray(strength, dtype=float), SIZE_BREAKS)
+    return np.asarray(SIZE_AREAS)[bins]
 
 
 
@@ -191,13 +196,13 @@ def draw(frame: pd.DataFrame, title: str, missing: list[str], limit: float, path
     legend_ax.set_xlim(0, 1)
     legend_ax.set_ylim(0, 1)
     legend_ax.text(0.02, 0.99, "−log10 (FDR)", fontsize=10, va="top", color="black")
-    for row, value in enumerate(SIZE_LEGEND):
-        y = 0.84 - row * 0.155
-        legend_ax.scatter([0.13], [y], s=size_of(np.asarray([value])), facecolor="#a6a6a6",
+    for row, (area, label) in enumerate(zip(SIZE_AREAS, SIZE_LABELS)):
+        y = 0.86 - row * 0.165
+        legend_ax.scatter([0.13], [y], s=area, facecolor="#a6a6a6",
                           edgecolor="black", linewidths=1.0, clip_on=False)
-        legend_ax.text(0.30, y, f"{value:g}", fontsize=10, va="center", color="black")
-    for y, outlined, text in ((0.30, False, "NS"), (0.14, True, f"FDR < {FDR_CALL:g}")):
-        legend_ax.scatter([0.13], [y], s=size_of(np.asarray([2.0])), facecolor="#a6a6a6",
+        legend_ax.text(0.30, y, label, fontsize=10, va="center", color="black")
+    for y, outlined, text in ((0.20, False, "NS"), (0.06, True, f"FDR < {FDR_CALL:g}")):
+        legend_ax.scatter([0.13], [y], s=SIZE_AREAS[2], facecolor="#a6a6a6",
                           edgecolor="black" if outlined else "none", linewidths=1.0 if outlined else 0,
                           clip_on=False)
         legend_ax.text(0.30, y, text, fontsize=10, va="center", color="black")
