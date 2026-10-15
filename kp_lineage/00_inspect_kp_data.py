@@ -99,44 +99,57 @@ def describe_h5ad(path, max_levels, write):
             if group in f:
                 write(f"  {group}: {sorted(f[group].keys())}")
         if "var" in f:
-            var = f["var"]
-            index_key = var.attrs.get("_index", "_index")
-            if isinstance(index_key, bytes):
-                index_key = index_key.decode()
-            names = decode(var[index_key][:5]) if index_key in var else []
-            write(f"  var columns: {[k for k in var.keys() if k != index_key]}; first names {names}")
+            try:
+                var = f["var"]
+                index_key = var.attrs.get("_index", "_index")
+                if isinstance(index_key, bytes):
+                    index_key = index_key.decode()
+                write(f"  var columns: {[k for k in var.keys() if k != index_key]}")
+                if index_key in var and isinstance(var[index_key], h5py.Dataset):
+                    write(f"  var first names {decode(var[index_key][:5])}")
+            except Exception as error:  # noqa: BLE001 - report and continue
+                write(f"  var: cannot read ({type(error).__name__}: {error})")
         if "obs" not in f:
             return
         obs = f["obs"]
         index_key = obs.attrs.get("_index", "_index")
         if isinstance(index_key, bytes):
             index_key = index_key.decode()
-        if index_key in obs:
-            index = obs[index_key]
-            write(f"  n_obs {index.shape[0]}; first obs names {decode(index[:3])}")
+        try:
+            if index_key in obs and isinstance(obs[index_key], h5py.Dataset):
+                index = obs[index_key]
+                write(f"  n_obs {index.shape[0]}; first obs names {decode(index[:3])}")
+        except Exception as error:  # noqa: BLE001 - report and continue
+            write(f"  obs index: cannot read ({type(error).__name__}: {error})")
         order = obs.attrs.get("column-order", None)
         columns = decode(list(order)) if order is not None and len(order) else [k for k in obs.keys()]
         for name in columns:
             if name == index_key or name not in obs:
                 continue
-            values = read_column(obs, name)
-            if values is None:
-                write(f"  obs[{name}]: (unreadable group)")
-                continue
-            if values.dtype.kind in "fiub":
-                finite = values[np.isfinite(values)] if values.dtype.kind == "f" else values
-                distinct = np.unique(finite).size if finite.size else 0
-                if distinct <= max_levels:
-                    counts = Counter(finite.tolist())
-                    write(f"  obs[{name}] {values.dtype}: {distinct} values {dict(sorted(counts.items()))}")
-                else:
-                    write(f"  obs[{name}] {values.dtype}: {distinct} distinct; "
-                          f"min {finite.min():.4g} median {np.median(finite):.4g} max {finite.max():.4g}; "
-                          f"missing {values.size - finite.size}")
-            else:
-                counts = Counter(values.tolist())
-                shown = dict(counts.most_common(max_levels))
-                write(f"  obs[{name}] text: {len(counts)} distinct; top {shown}")
+            try:
+                describe_column(name, read_column(obs, name), max_levels, write)
+            except Exception as error:  # noqa: BLE001 - report and continue
+                write(f"  obs[{name}]: cannot read ({type(error).__name__}: {error})")
+
+
+def describe_column(name, values, max_levels, write):
+    if values is None:
+        write(f"  obs[{name}]: (unreadable group)")
+        return
+    if values.dtype.kind in "fiub":
+        finite = values[np.isfinite(values)] if values.dtype.kind == "f" else values
+        distinct = np.unique(finite).size if finite.size else 0
+        if distinct <= max_levels:
+            counts = Counter(finite.tolist())
+            write(f"  obs[{name}] {values.dtype}: {distinct} values {dict(sorted(counts.items()))}")
+        else:
+            write(f"  obs[{name}] {values.dtype}: {distinct} distinct; "
+                  f"min {finite.min():.4g} median {np.median(finite):.4g} max {finite.max():.4g}; "
+                  f"missing {values.size - finite.size}")
+    else:
+        counts = Counter(values.tolist())
+        shown = dict(counts.most_common(max_levels))
+        write(f"  obs[{name}] text: {len(counts)} distinct; top {shown}")
 
 
 def describe_table(path, write, value_columns_max=60, max_levels=40):
@@ -197,7 +210,10 @@ def main():
              + sorted(glob.glob(os.path.join(args.spatial, "KP_2022", "*.h5ad")))
              + sorted(glob.glob(os.path.join(args.tracer, "expression", "*.h5ad"))))
     for path in files:
-        describe_h5ad(path, args.max_levels, write)
+        try:
+            describe_h5ad(path, args.max_levels, write)
+        except Exception as error:  # noqa: BLE001 - report and continue with the next file
+            write(f"  stopped on this file ({type(error).__name__}: {error})")
     write("\nDONE")
     handle.close()
     return 0
