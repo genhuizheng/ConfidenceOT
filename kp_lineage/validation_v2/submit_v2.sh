@@ -3,6 +3,7 @@
 #
 #   bash kp_lineage/validation_v2/submit_v2.sh audit   [--dry-run]
 #   bash kp_lineage/validation_v2/submit_v2.sh readout [--dry-run]
+#   bash kp_lineage/validation_v2/submit_v2.sh lineage [--dry-run]
 #
 # audit    03_audit_lineage.py: trees, character matrices, identifier mapping,
 #          coverage of the same-family pairs, observed gate semantics. Read only;
@@ -12,8 +13,13 @@
 #          with its established arguments, into <root>/readout/. Refuses if that
 #          directory already holds a readout_summary.json, so it never overwrites.
 #
-# Later phases (lineage concordance, cross-mouse control, baselines) are added
-# only after VALIDATION_V2_PREREGISTRATION.md is frozen.
+# lineage  D1: 04_lineage_concordance.py, E1/E1b and their sensitivity analyses
+#          under the preregistration frozen 2026-10-15 (text of b0817f1), both
+#          labels, into <root>/validation_v2/lineage/. Reads the existing gates and
+#          the authors' trees only; no OT is rerun. Refuses if that directory
+#          already holds SUCCESS.
+#
+# Later phases (cross-mouse control, baselines) are added after D1.
 #
 # No set -u, as everywhere in this repo.
 set -eo pipefail
@@ -63,7 +69,20 @@ case "$phase" in
             -o "$out/readout_%j.log" -e "$out/readout_%j.err" \
             --wrap "$activate && python kp_lineage/02_kptracer_readout.py $root/prepared $root/ot/kptracer $out" > /dev/null
         ;;
+    lineage)
+        out=$v2/lineage
+        if [[ -f "$out/SUCCESS" ]]; then
+            echo "$out/SUCCESS exists; D1 is not rerun into the same directory" >&2
+            exit 2
+        fi
+        if ! grep -q "Status: \*\*FROZEN 2026-10-15 b0817f1" "$repo/kp_lineage/validation_v2/VALIDATION_V2_PREREGISTRATION.md"; then
+            echo "the preregistration in $repo is not the frozen one; pull the repository first" >&2
+            exit 2
+        fi
+        mkdir -p "$out"
+        submit "lineage concordance D1" -p gg -N 1 -n 1 -t 02:00:00 -A MCB26031 -J kp_d1             -o "$logs/lineage_%j.out" -e "$logs/lineage_%j.err"             --wrap "$activate && python kp_lineage/validation_v2/04_lineage_concordance.py --tracer $tracer --prepared $root/prepared --ot-block $root/ot/kptracer --depth $root/downsampled/predownsample_depth.csv.gz --out $out" > /dev/null
+        ;;
     *)
-        echo "usage: $0 audit|readout [--dry-run]" >&2; exit 2 ;;
+        echo "usage: $0 audit|readout|lineage [--dry-run]" >&2; exit 2 ;;
 esac
 echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown)"
