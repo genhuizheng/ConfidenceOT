@@ -24,6 +24,12 @@ normalize_total 1e4, log1p, 2,000 Seurat HVGs, scale (max 10), PCA 40 (arpack),
 every gate representation. Nothing is aligned between pairs; coordinates
 compare only within one pair. They are written once and never recomputed.
 
+**CNV embedding.** With --cnv-root, a second frozen embedding of each pair from
+the inferCNV profiles the CNV gates read (profile - 1, PCA 40, then the same
+neighbours and UMAP), for the reference cells that have a profile, and each
+cell's mean (profile - 1) per chromosome. It sits beside the RNA reference and
+never replaces it; a patient without profiles (prostate, so far) is recorded.
+
 **Configurations.** Every ``<modality>/arm_<X>/<label>`` under --gates-root,
 crossed with the methods in --methods; a configuration reads the block
 directory ``<modality>/arm_<X>/<block>/<label>`` of each pair's dataset. Block is
@@ -217,6 +223,50 @@ def reference_umap(row: dict, gates: dict, out: Path) -> dict:
     return record
 
 
+def cnv_reference(row: dict, cells: pd.DataFrame, cnv_root: Path, out: Path) -> dict:
+    """A second frozen embedding of the same pair, from each cell's own inferCNV profile.
+
+    The profiles are the ones the CNV gates read (44_export_cnv_cells.R:
+    cnv.f32, cells.tsv, genes.tsv per patient, 1 = copy-neutral). Reference cells
+    without a profile are left out of this embedding and counted. Also writes
+    each cell's mean (profile - 1) over the genes of every chromosome.
+    """
+    import anndata as ad
+    import scanpy as sc
+    from sklearn.decomposition import PCA
+
+    unit = cnv_root / str(row["dataset_id"]) / str(row["patient_id"])
+    if not (unit / "cnv.f32").exists():
+        return {"cnv_status": "no CNV profiles for this patient", "cnv_unit": str(unit)}
+    names = pd.read_csv(unit / "cells.tsv", sep="\t", dtype=str)
+    genes = pd.read_csv(unit / "genes.tsv", sep="\t", dtype=str)
+    if names["barcode"].duplicated().any():
+        raise ValueError(f"{unit}: a cell name repeats in cells.tsv")
+    values = np.memmap(unit / "cnv.f32", dtype=np.float32, mode="r", shape=(len(names), len(genes)))
+    position = pd.Index(names["barcode"]).get_indexer(pd.Index(cells["observation_id"].astype(str)))
+    have = position >= 0
+    use = cells[have].reset_index(drop=True)
+    joint = np.asarray(values[position[have]], dtype=np.float64) - 1.0
+    components = min(N_PCS, joint.shape[0] - 1, joint.shape[1])
+    pcs = PCA(n_components=components, random_state=SEED).fit_transform(joint).astype(np.float32)
+    data = ad.AnnData(X=np.zeros((len(use), 1), dtype=np.float32))
+    data.obs_names = use["cell_uid"].astype(str).to_numpy()
+    data.obsm["X_pca"] = pcs
+    sc.pp.neighbors(data, n_neighbors=N_NEIGHBORS, use_rep="X_pca", random_state=SEED)
+    sc.tl.umap(data, random_state=SEED)
+    table = use[["pair_id", "dataset_id", "patient_id", "cell_uid", "side"]].copy()
+    table["umap_1"], table["umap_2"] = data.obsm["X_umap"][:, 0], data.obsm["X_umap"][:, 1]
+    table.to_csv(out / "reference_umap_cnv.csv.gz", index=False, compression="gzip")
+    chromosome = genes["chr"].astype(str).to_numpy()
+    means = use[["pair_id", "cell_uid", "side"]].copy()
+    for name in pd.unique(chromosome):
+        means[f"cnv_mean_{name}"] = joint[:, chromosome == name].mean(axis=1)
+    means.to_csv(out / "cnv_chromosome_means.csv.gz", index=False, compression="gzip")
+    return {"cnv_status": "done", "cnv_unit": str(unit), "cnv_genes": int(len(genes)), "cnv_pcs": int(components),
+            "cnv_cells": {side: int((use["side"] == side).sum()) for side in ("source", "target")},
+            "cnv_cells_without_profile": {side: int(((cells["side"] == side) & ~have).sum()) for side in ("source", "target")}}
+
+
 def run_pairs(args) -> int:
     manifest = read_manifests(args.manifest, args.datasets)
     configs = configurations(args.gates_root, args.methods)
@@ -234,6 +284,14 @@ def run_pairs(args) -> int:
             if not gates:
                 raise RuntimeError("no configuration completed this pair")
             record = reference_umap(row, gates, out)
+            if args.cnv_root is not None:
+                cells = pd.read_csv(out / "reference_umap.csv.gz", usecols=["pair_id", "dataset_id", "patient_id",
+                                                                             "cell_uid", "side", "observation_id"])
+                try:
+                    record.update(cnv_reference(row, cells, args.cnv_root, out))
+                except Exception as error:  # noqa: BLE001 - the RNA reference stands; the CNV one is reported
+                    record.update({"cnv_status": f"error: {type(error).__name__}: {error}"})
+                (out / "reference.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
             (out / "DONE").write_text("done\n", encoding="utf-8")
             (out / "FAILED").unlink(missing_ok=True)
             print(f"{row['pair_id']}: {record['cells']}", flush=True)
@@ -256,21 +314,34 @@ def run_export(args) -> int:
     blocks = {**DEFAULT_BLOCKS, **dict(x.split("=", 1) for x in args.block)}
     (export / "annotations").mkdir(parents=True, exist_ok=True)
 
-    coordinates, pair_status = [], []
+    coordinates, pair_status, cnv_coordinates, cnv_means = [], [], [], []
     for row in manifest.to_dict("records"):
         folder = args.out / "pairs" / safe(str(row["pair_id"]))
         if (folder / "DONE").exists():
             coordinates.append(pd.read_csv(folder / "reference_umap.csv.gz"))
+            if (folder / "reference_umap_cnv.csv.gz").exists():
+                cnv_coordinates.append(pd.read_csv(folder / "reference_umap_cnv.csv.gz"))
+                cnv_means.append(pd.read_csv(folder / "cnv_chromosome_means.csv.gz"))
             info = json.loads((folder / "reference.json").read_text())
             pair_status.append({"pair_id": row["pair_id"], "dataset_id": row["dataset_id"], "status": "done",
                                 "source_cells": info["cells"]["source"], "target_cells": info["cells"]["target"],
-                                "hvg_md5": info["hvg_md5"]})
+                                "hvg_md5": info["hvg_md5"], "cnv_status": info.get("cnv_status", "not requested"),
+                                "cnv_source_cells": info.get("cnv_cells", {}).get("source"),
+                                "cnv_target_cells": info.get("cnv_cells", {}).get("target"),
+                                "cnv_source_cells_without_profile": info.get("cnv_cells_without_profile", {}).get("source"),
+                                "cnv_target_cells_without_profile": info.get("cnv_cells_without_profile", {}).get("target")})
         else:
             message = (folder / "FAILED").read_text().splitlines()[0] if (folder / "FAILED").exists() else "not run"
             pair_status.append({"pair_id": row["pair_id"], "dataset_id": row["dataset_id"], "status": "failed", "error": message})
     reference = pd.concat(coordinates, ignore_index=True)
     reference.to_csv(export / "reference_coordinates.csv.gz", index=False, compression="gzip")
-    pd.DataFrame(pair_status).to_csv(export / "pairs.csv", index=False)
+    if cnv_coordinates:
+        pd.concat(cnv_coordinates, ignore_index=True).to_csv(export / "reference_coordinates_cnv.csv.gz", index=False, compression="gzip")
+        pd.concat(cnv_means, ignore_index=True).to_csv(export / "cnv_chromosome_means.csv.gz", index=False, compression="gzip")
+    status_table = pd.DataFrame(pair_status)
+    for column in [c for c in status_table if c.endswith("_cells") or c.endswith("_without_profile")]:
+        status_table[column] = status_table[column].astype("Int64")
+    status_table.to_csv(export / "pairs.csv", index=False)
     done = set(reference["pair_id"])
 
     writers = {c["configuration"]: export / "annotations" / f"{c['file_stem']}.csv.gz" for c in configs}
@@ -358,6 +429,9 @@ def run_export(args) -> int:
         "",
         "- `reference_coordinates.csv.gz`: one row per pair and reference cell; `umap_1`, `umap_2` are that pair's frozen",
         "  coordinates (log-normalised RNA, 2,000 HVGs, PCA 40, 20 neighbours, seed 20260904). Compare positions only within one pair.",
+        "- `reference_coordinates_cnv.csv.gz`: a second frozen embedding of the same pairs from each cell's inferCNV profile",
+        "  (profile - 1, PCA 40, 20 neighbours, same seed), for cells with a profile; prostate has none yet. The RNA one is the reference;",
+        "  the two are never mixed. `cnv_chromosome_means.csv.gz`: each cell's mean (profile - 1) per chromosome.",
         "- `annotations/<configuration>.csv.gz`: that gate's label of every reference cell of every pair it completed;",
         "  `status` is retained, rejected or excluded (a reference cell this configuration did not gate). Join on `pair_id` + `cell_uid`.",
         "- `annotation_coverage.csv`: per configuration and pair, completed / not completed / not run for this dataset.",
@@ -398,6 +472,7 @@ def main() -> None:
     parser.add_argument("--block", action="append", default=[], help="DATASET=BLOCK, overriding the default")
     parser.add_argument("--task-index", type=int, default=0)
     parser.add_argument("--task-count", type=int, default=1)
+    parser.add_argument("--cnv-root", type=Path, help="44_export_cnv_cells.R output; adds the CNV embedding")
     args = parser.parse_args()
     sys.exit(run_pairs(args) if args.mode == "pairs" else run_export(args))
 

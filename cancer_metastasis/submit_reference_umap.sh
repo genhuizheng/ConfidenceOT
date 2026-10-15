@@ -1,5 +1,6 @@
 #!/bin/bash
-# Frozen reference UMAP per pair, with every cycling x CNV gate's labels on it.
+# Frozen reference UMAP per pair (RNA, plus a CNV embedding from the inferCNV
+# profiles where they exist), with every cycling x CNV gate's labels on it.
 #
 #   bash cancer_metastasis/submit_reference_umap.sh [--tasks N] [--dry-run]
 #
@@ -33,6 +34,7 @@ env_path=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withco
 uniform_manifest=$result/manifest/pancancer_20260924/pair_manifest_eligible.csv
 prostate_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
 gates=$result/cycling_cnv_acc0.99
+cnv_root=$result/cnv_profiles/infercnv_r_patient
 out=$result/reference_umap_cycling_cnv_acc0.99
 logs=$out/logs
 tarball=$out/reference_umap_export.tar.gz
@@ -47,7 +49,7 @@ if [[ -f "$out/export/MANIFEST.tsv" ]]; then
 fi
 (( dry_run )) || mkdir -p "$logs"
 
-common="--manifest $uniform_manifest --manifest $prostate_manifest --datasets GSE180661 GSE225857 GSE271675 --gates-root $gates --out $out"
+common="--manifest $uniform_manifest --manifest $prostate_manifest --datasets GSE180661 GSE225857 GSE271675 --gates-root $gates --out $out --cnv-root $cnv_root"
 activate="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo; export OMP_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16 MKL_NUM_THREADS=16 NUMBA_NUM_THREADS=16 MPLBACKEND=Agg PYTHONUNBUFFERED=1"
 
 submit() {
