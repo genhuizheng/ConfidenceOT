@@ -3,6 +3,7 @@
 #
 #   bash kp_lineage/validation_v3/submit_v3.sh audit [--dry-run]
 #   bash kp_lineage/validation_v3/submit_v3.sh pilot [--dry-run]
+#   bash kp_lineage/validation_v3/submit_v3.sh compare [--dry-run]
 #
 # audit  01_audit_v3.py: data inventory, shared-tree pairs, lineage informativeness of
 #        L, Cassiopeia vs neighbor-joining, character-matrix statistics. Read only;
@@ -65,7 +66,18 @@ case "$phase" in
             -o "$logs/pilot_%j.out" -e "$logs/pilot_%j.err" \
             --wrap "test ! -f $out/report/SUCCESS || exit 2; $activate && $rerun --label ranknm256_noscale_ds_cos && $rerun --label raw && $compare" > /dev/null
         ;;
+    compare)
+        # The comparison step of the pilot alone, on the reruns already in coupling_pilot/.
+        # Added after pilot job 1075006: all six reruns exited 0 and reproduction.tsv was
+        # written, but 03_ crashed while writing reproduction.json (fixed). Nothing is refit.
+        out=$v3/coupling_pilot
+        [[ -f "$out/report/SUCCESS" ]] && { echo "$out/report/SUCCESS exists; the comparison is not rerun" >&2; exit 2; }
+        compare="python kp_lineage/validation_v3/03_compare_reproduction.py --root $root --rerun $out --out $out/report"
+        submit "coupling reproduction comparison" -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J kp_compare \
+            -o "$logs/compare_%j.out" -e "$logs/compare_%j.err" \
+            --wrap "test ! -f $out/report/SUCCESS || exit 2; $activate && $compare" > /dev/null
+        ;;
     *)
-        echo "usage: $0 audit|pilot [--dry-run]" >&2; exit 2 ;;
+        echo "usage: $0 audit|pilot|compare [--dry-run]" >&2; exit 2 ;;
 esac
 echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown)"

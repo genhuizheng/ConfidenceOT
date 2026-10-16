@@ -107,8 +107,12 @@ def main() -> None:
                 rows.append(record)
     table = pd.DataFrame(rows)
     table.to_csv(args.out / "reproduction.tsv", sep="\t", index=False)
+    # A list comprehension, not DataFrame.agg: on an empty selection (every row passes) agg returns
+    # a DataFrame, which has no tolist.
+    failed = [" ".join(str(row.get(key, "")) for key in ("label", "pair_id", "method")).strip()
+              for row in rows if not row["pass"]]
     summary = {"compared": int(len(table)), "passed": int(table["pass"].sum()) if len(table) else 0,
-               "failed": table.loc[~table["pass"], ["label", "pair_id"]].astype(str).agg(" ".join, axis=1).tolist() if len(table) else [],
+               "failed": failed,
                "tolerances": {"margin": MARGIN_TOL, "mass": MASS_TOL}}
     (args.out / "reproduction.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     with pd.option_context("display.width", 250, "display.max_columns", 50):
