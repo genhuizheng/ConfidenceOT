@@ -1,7 +1,7 @@
 # KP-Tracer Level 3 validation design: coupling against CRISPR lineage
 
 Status: **DRAFT, not frozen.**
-- It is frozen only after three things: the v3 audit (`01_audit_v3.py`) has been read, the literature review (`LINEAGE_VALIDATION_LITERATURE_REVIEW.md`) has checked every definition, and the user approves.
+- It is frozen only after three things: the v3 audit (`01_audit_v3.py`) has been read, the literature review (`LINEAGE_VALIDATION_LITERATURE_REVIEW.md`, complete 2026-10-15) has checked every definition, and the user approves.
 - Freezing is a commit that changes this line to `FROZEN <date> <commit>`.
 
 **What has and has not been seen.**
@@ -41,6 +41,17 @@ For one primary-metastasis pair and one representation:
 - a ⊗ b is the independent coupling with π's own marginals. It keeps which source cells carry mass and which target cells receive it, and removes only the pairing.
 - ΔS > 0: given those marginals, mass flows preferentially between cells that share deeper ancestry.
 - ΔS = 0 identically when L has zero variance under a ⊗ b. Such a pair is reported, not tested.
+
+**Normalised P1 (proposed for aggregation across pairs; decision needed).**
+- ΔS is in edges of shared ancestry, and the trees differ in depth: 3724 reaches about 12 levels, 3508 mostly 2.
+- The scale-free version is the share of the achievable enrichment: ΔS_norm = ΔS / ΔS_max. Here ΔS_max = S* − S(a ⊗ b), and S* = max S(ρ) over couplings ρ with marginals a and b.
+- **How S\* is computed.** S(ρ) = ½[Σᵢ aᵢhᵢ + Σⱼ bⱼhⱼ − E_ρ(d)], so S* comes from the minimum expected tree cost W_tree(a, b).
+  - W_tree(a, b) is the earth mover's distance on the tree, Σ over edges e of |a(below e) − b(below e)| (Evans & Matsen 2012, equal to weighted UniFrac). It takes one pass over the edges.
+  - Hence ΔS_max = ½[E_{a⊗b}(d) − W_tree(a, b)].
+- **Link to the literature.** 1 − ΔS_norm equals the normalised tree cost R = (C(T) − W_tree)/(C(a⊗b) − W_tree) recommended by the literature review. That ratio follows moslin's normalisation by the independent coupling (Lange et al. 2024), where 1 means uninformative.
+- ΔS_norm is 1 when T is as lineage-concentrated as any coupling with its marginals, 0 when it is no better than independence, and negative when it is worse.
+- **Proposed roles:** ΔS_norm for the across-pair test; raw ΔS reported for every pair.
+- Undefined when ΔS_max = 0, i.e. no coupling with these marginals can beat independence. Such a pair is reported, not tested.
 
 ### P2, transport-weighted tree path distance (sensitivity of P1, not independent)
 
@@ -115,6 +126,11 @@ It splits into three terms that **sum to E_tot exactly**. The two marginal steps
   - π0_ij = π(Bs(i), Bt(j)) · aᵢ bⱼ / (a(Bs(i)) b(Bt(j))), with Bs and Bt the quintiles of pre-equalisation total counts among the pair's source and target cells.
   - It keeps a, b and the mass flowing between depth strata. ΔS_depth = S(π) − S(π0) is the enrichment beyond depth-to-depth flow.
   - Reported for every pair, and singled out for mouse 3724.
+- **Expression-stratified permutation (stringent sensitivity).**
+  - Target cells are permuted only within transcriptional clusters of the pair's joint PCA (Leiden, resolution 1.0, 15 neighbours, seed 20261016, fixed here).
+  - Expression is heritable in this system (Yang et al. 2022; Quinn et al. 2021). Without this null, lineage agreement of an expression-based coupling may only restate that heritability.
+  - It asks whether T still prefers related cells *within* an expression state.
+  - It is our adaptation (no established source; literature review, section 5).
 - **Diagnostics per pair:**
   - Spearman of hᵢ and of the gate score with pre-equalisation counts and with detected genes;
   - source and target cell counts;
@@ -183,7 +199,9 @@ Nothing larger is submitted unless all six pass.
   - reported with mice > 0, and a 95% percentile bootstrap of the mean of mouse means (10,000 resamples of mice, seed 20261016);
   - "supported" if the mean > 0 and p < 0.05; otherwise "inconclusive". With 7 mice the smallest attainable one-sided p is 1/128.
 - **P3:** two paired contrasts (vs balanced OT, vs kNN), each one-sided H1 > 0 on mouse means; Holm correction within this family of two.
-- **Effect scale.** ΔS is in edges of shared ancestry, so it is not on a common scale across trees. The standardised ΔS / SD_{a⊗b}(L) is reported as a sensitivity analysis.
+- **Effect scale.** ΔS is in edges of shared ancestry, so it is not on a common scale across trees.
+  - The proposed across-pair test uses ΔS_norm (section 2), pending the user's decision.
+  - Raw ΔS and the standardised ΔS / SD_{a⊗b}(L) are reported as sensitivity analyses.
 - **Sensitivity (reported, none replaces the primary):**
   - the raw arm;
   - M4-R;
@@ -197,7 +215,28 @@ Nothing larger is submitted unless all six pass.
 - **Exploratory.** Every other Level 3 metric in `METRIC_TAXONOMY_AND_FEASIBILITY.md` is exploratory: corrected within its family (Benjamini-Hochberg) and never used to restate the primary result.
 - **Never** a p value over cell pairs or transport edges.
 
-## 8. Not done
+## 8. Literature status of each element (from `LINEAGE_VALIDATION_LITERATURE_REVIEW.md`)
+
+**Established and used directly:**
+- the independent coupling a ⊗ b as the uninformative reference (Peyré & Cuturi 2019; moslin, Lange et al. 2024);
+- the earth mover's distance on a tree, which equals weighted UniFrac (Evans & Matsen 2012);
+- tip-label permutation nulls (Wang 2001; Parker 2008; Yang 2022);
+- Cassiopeia's prior-weighted Hamming distance;
+- the Cassiopeia vs NJ comparison (Yang 2022, with the caveat that both are built from the same characters).
+
+**Our adaptations, with no established source:**
+- every evaluation of a coupling against a lineage tree for same-time primary and metastatic cells. The published coupling benchmarks (LineageOT, moslin, CoSpar, LARRY) assume ancestor-descendant ground truth across time points, which does not exist here;
+- P1, ΔS_norm and R;
+- the decomposition;
+- the depth-adjusted and expression-stratified nulls;
+- the use of the gate label as a trait on the tree.
+
+**Not available this round:**
+- branch-length statistics (Fritz-Purvis D, Pagel's λ, Blomberg's K);
+- the intBC-block bootstrap, which needs allele tables that are not in KPTracer-Data;
+- Yang's mutation-count distance, which needs Camin-Sokal ancestral reconstruction, unless the audit finds Cassiopeia installed.
+
+## 9. Not done
 
 - No lineage, tree or edit information enters any OT fit, representation, QC, gate or calibration.
 - No lineage reference is built from expression.

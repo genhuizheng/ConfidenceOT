@@ -228,6 +228,14 @@ def main() -> None:
                 text = f"<unreadable: {error}>"
             heads.append(f"===== {item['path']} ({item['bytes']} bytes)\n{text}\n")
     (args.out / "file_heads.txt").write_text("\n".join(heads), encoding="utf-8")
+    packages = {}
+    for name in ("cassiopeia", "ete3", "dendropy", "skbio", "ot"):
+        try:
+            module = __import__(name)
+            packages[name] = str(getattr(module, "__version__", "present"))
+        except Exception as error:  # noqa: BLE001 - availability is the finding
+            packages[name] = f"absent ({type(error).__name__})"
+    say(f"packages: {packages}")
     kinds = pd.Series([p["path"].split("/")[0] for p in inventory]).value_counts()
     say(f"inventory: {len(inventory)} files; top-level: {kinds.to_dict()}")
     say(f"prior/expansion/fitness/allele files: {len(heads)}")
@@ -328,6 +336,7 @@ def main() -> None:
         "zero_variance_pairs": shared.loc[shared["L_variance"] <= 0, "pair_id"].tolist(),
         "raw_arm_cell_sets_identical": bool(eligibility["raw_arm_same_cells"].fillna(False).all()),
         "files": {"inventory": len(inventory), "prior_expansion_fitness_allele": len(heads)},
+        "packages": packages,
     }
     (args.out / "audit_v3.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     say(json.dumps(summary, indent=2))
