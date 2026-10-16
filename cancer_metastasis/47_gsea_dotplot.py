@@ -24,7 +24,8 @@ The figure carries no title or note -- row and column labels, the category
 brackets and the legends only -- so a slide or a figure legend says the rest.
 
 Rows are the arms of the cycling x representation design (43_'s cycling layout:
-RNA, RNA+CNV and CNV; arms A-D; ranknm256_noscale_ds_cos and raw). An arm a
+RNA, RNA+CNV and CNV; arms A-D; ranknm256_noscale_ds_cos and raw), or with
+--layout factorial the 32 preprocessing arms in 43_'s factorial order. An arm a
 panel lacks -- prostate has no CNV arms -- is not drawn; gsea_dotplot.json lists
 it.
 
@@ -105,7 +106,16 @@ def size_of(strength):
 
 
 
+LAYOUT = "cycling"
+
+
+def layout():
+    return heatmap43.LAYOUTS[LAYOUT]()
+
+
 def arm_label(arm: str) -> str:
+    if "/" not in arm:  # a factorial arm is its preprocessing name
+        return arm
     rep, cycle, label = arm.split("/")
     rep_text = dict(heatmap43.CYCLING_REPS)[rep]
     preprocessing = "ds_cos" if label == "ranknm256_noscale_ds_cos" else "raw"
@@ -115,10 +125,10 @@ def arm_label(arm: str) -> str:
 
 
 def load(template: str) -> tuple[pd.DataFrame, list[str]]:
-    layout = heatmap43.cycling_layout()
+    design = layout()
     rows, missing = [], []
-    for arm in layout.arms:
-        path = layout.arm_dir(template, arm) / "gsea" / "contrasts" / CONTRAST / "all_gene_discovery_gsea_results.csv"
+    for arm in design.arms:
+        path = design.arm_dir(template, arm) / "gsea" / "contrasts" / CONTRAST / "all_gene_discovery_gsea_results.csv"
         if not path.is_file():
             missing.append(arm)
             continue
@@ -137,7 +147,7 @@ def load(template: str) -> tuple[pd.DataFrame, list[str]]:
 
 def draw(frame: pd.DataFrame, title: str, missing: list[str], limit: float, path: Path) -> None:
     """The figure alone: no title, subtitle or note; legends only."""
-    arms = [arm for arm in heatmap43.cycling_layout().arms if arm in set(frame["arm"])]
+    arms = [arm for arm in layout().arms if arm in set(frame["arm"])]
     y_of = {arm: float(i) for i, arm in enumerate(arms)}
     x_of, x, spans = {}, 0.0, []
     for name, members in CATEGORIES:
@@ -149,7 +159,9 @@ def draw(frame: pd.DataFrame, title: str, missing: list[str], limit: float, path
     n_rows, n_cols = len(arms), len(PATHWAYS)
 
     cell = 0.30
-    left, right, top, bottom = 1.75, 0.25, 0.80, 2.35
+    # Wide enough for the longest row label (about 0.088 in per character at 10.5 pt).
+    left = max(1.75, 0.30 + 0.088 * max(len(arm_label(a)) for a in arms))
+    right, top, bottom = 0.25, 0.80, 2.35
     width = left + cell * n_cols + right
     height = top + cell * n_rows + bottom
     fig = plt.figure(figsize=(width, height))
@@ -223,11 +235,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("out", type=Path)
     parser.add_argument("--analysis", action="append", required=True,
-                        help="TITLE::TEMPLATE, the template as 43_'s cycling layout takes it")
+                        help="TITLE::TEMPLATE, the template as 43_'s layout takes it")
+    parser.add_argument("--layout", choices=sorted(heatmap43.LAYOUTS), default="cycling",
+                        help="cycling (default): the cycling x representation arms; factorial: the 32 "
+                             "preprocessing arms, TEMPLATE being the directory that holds one folder per arm")
     parser.add_argument("--limit", type=float, default=2.0,
                         help="Colour limit |NES|, shared by every figure; points beyond it take the end "
                              "colour and the colour bar shows an arrow. The values are in the CSV")
     args = parser.parse_args()
+    global LAYOUT
+    LAYOUT = args.layout
     args.out.mkdir(parents=True, exist_ok=True)
     loaded = []
     for spec in args.analysis:
@@ -237,7 +254,7 @@ def main() -> None:
             raise RuntimeError(f"{title}: no GSEA table found under {template}")
         loaded.append((title, frame, missing))
     limit = float(args.limit)
-    record = {"limit": limit, "permutations": PERMUTATIONS, "figures": []}
+    record = {"limit": limit, "permutations": PERMUTATIONS, "layout": LAYOUT, "figures": []}
     for title, frame, missing in loaded:
         stem = "gsea_dotplot_" + "".join(c if c.isalnum() else "_" for c in title).strip("_").lower()
         draw(frame, title, missing, limit, args.out / stem)

@@ -43,6 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from make_journal_figure import STYLE  # noqa: E402
 
+# --bare: the figure alone, for a slide whose notes carry the explanation. Panel
+# headings, subtitles and reading notes are left out; axes, labels that identify
+# a column or row, colour bars and legends stay.
+BARE = False
+
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +61,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, default=Path("figures/schematic"),
                         help="Every schematic is written to one folder, "
                              "apart from the results")
+    parser.add_argument("--bare", action="store_true",
+                        help="no panel headings, subtitles or reading notes")
     return parser.parse_args()
 
 
@@ -225,15 +232,16 @@ def problem_figure(out: Path, cells: int, genes: int, depth_sd: float,
                 for spine in axes.spines.values():
                     spine.set_color("#d8d8d2")
                     spine.set_linewidth(0.6)
-                axes.set_title(facts[kind], loc="center", fontsize=8,
-                               color="#55555a", pad=4)
+                if not BARE:
+                    axes.set_title(facts[kind], loc="center", fontsize=8,
+                                   color="#55555a", pad=4)
                 if column == 1:
                     bar = figure.colorbar(dots, ax=axes, fraction=0.055,
                                           pad=0.025)
                     bar.set_label(facts["colour_by"], fontsize=7)
                     bar.ax.tick_params(labelsize=6.5)
                     bar.outline.set_linewidth(0.5)
-                if column == 0:
+                if column == 0 and not BARE:
                     axes.text(0.0, 1.14, f"({chr(97 + row)})  {facts['title']}",
                               transform=axes.transAxes, fontsize=8.4,
                               fontweight="semibold", ha="left", va="bottom")
@@ -359,8 +367,9 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
         figure = plt.figure(figsize=(7.6, 6.6))
 
         # ---- (a) the technical setting --------------------------------------
-        figure.text(0.035, 0.983, "(a)  technical degradation", fontsize=8.6,
-                    fontweight="semibold", ha="left", va="top")
+        if not BARE:
+            figure.text(0.035, 0.983, "(a)  technical degradation", fontsize=8.6,
+                        fontweight="semibold", ha="left", va="top")
 
         for index, name in enumerate(("reference source",) + levels):
             panel, x0 = panels[name], column_x[index]
@@ -371,11 +380,12 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
             if index:
                 for line, key in enumerate(("total", "detected")):
                     ratio = np.median(panel[key]) / np.median(reference[key])
-                    figure.text(
-                        x0 + column_w / 2, 0.924 - 0.020 * line,
-                        f"x{ratio:.2f}", fontsize=7.0,
-                        color=C_COUNT if key == "total" else C_FEATURE,
-                        ha="center", va="top")
+                    if not BARE:
+                        figure.text(
+                            x0 + column_w / 2, 0.924 - 0.020 * line,
+                            f"x{ratio:.2f}", fontsize=7.0,
+                            color=C_COUNT if key == "total" else C_FEATURE,
+                            ha="center", va="top")
                 report[name] = {
                     "nCount_ratio": round(float(
                         np.median(panel["total"]) / np.median(reference["total"])), 3),
@@ -415,8 +425,9 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                 color="#55555a", labelpad=3)
 
         # ---- (b) the two ground-truth regimes --------------------------------
-        figure.text(0.035, 0.555, "(b)  evaluation cases", fontsize=8.6,
-                    fontweight="semibold", ha="left", va="top")
+        if not BARE:
+            figure.text(0.035, 0.555, "(b)  evaluation cases", fontsize=8.6,
+                        fontweight="semibold", ha="left", va="top")
 
         n = 48
         case_w, case_x = 0.251, (0.165, 0.444, 0.723)
@@ -455,9 +466,10 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
                                 ("example gate", "ground truth")[line],
                                 fontsize=7.0, color="#55555a", ha="right",
                                 va="center")
-            figure.text(x0, 0.427, reading, fontsize=7.2,
-                        color=C_KEEP if column == 0 else C_DROP,
-                        ha="left", va="top")
+            if not BARE:
+                figure.text(x0, 0.427, reading, fontsize=7.2,
+                            color=C_KEEP if column == 0 else C_DROP,
+                            ha="left", va="top")
 
         # ---- legend ----------------------------------------------------------
         bar = figure.colorbar(image, cax=figure.add_axes(
@@ -489,7 +501,9 @@ def benchmark_figure(out: Path, cells: int, genes: int, depth_sd: float,
 
 
 def main() -> None:
+    global BARE
     args = parse_args()
+    BARE = args.bare
     args.out.mkdir(parents=True, exist_ok=True)
     report: dict[str, object] = {
         "cells": int(args.cells), "genes": int(args.genes),

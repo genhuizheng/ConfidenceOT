@@ -107,6 +107,8 @@ def parse_args() -> argparse.Namespace:
     # with it.
     parser.add_argument("--mark", action="append", default=[],
                         help="Outline this arm's row; may be repeated")
+    parser.add_argument("--bare", action="store_true",
+                        help="no title or reading notes, for a slide whose notes explain")
     return parser.parse_args()
 
 
@@ -200,22 +202,24 @@ def main() -> None:
         a, b = min(starts), max(starts) + len(LEVELS)
         ax.plot([a + 0.15, b - 0.15], [-2.45, -2.45], color=RULE, linewidth=1.0,
                 clip_on=False)
-        ax.text((a + b) / 2, -2.7, GROUPS[group], ha="center", va="bottom",
-                fontsize=6.8, color=MUTED)
+        if not args.bare:
+            ax.text((a + b) / 2, -2.7, GROUPS[group], ha="center", va="bottom",
+                    fontsize=6.8, color=MUTED)
         ax.text((a + b) / 2, -3.55, group, ha="center", va="bottom",
                 fontsize=7.2, fontweight="semibold", color=INK)
 
-    fig.text(left / fig_w, 1 - 0.18 / fig_h,
-             "Rejected fraction for each preprocessing arm",
-             fontsize=10.5, fontweight="semibold", color=INK, va="top")
-    fig.text(left / fig_w, 1 - 0.42 / fig_h,
-             f"Native-depth simulation, {args.method}, mean over 3 sizes x 5 replicates. "
-             "Every cell is the fraction of the named cells that the gate rejected.",
-             fontsize=7.4, color=MUTED, va="top")
-    fig.text(left / fig_w, 1 - 0.62 / fig_h,
-             "Ground truth under each column: 0 = those cells all have a match and "
-             "should be kept; 1 = they have none and should be rejected.",
-             fontsize=7.4, color=MUTED, va="top")
+    if not args.bare:
+        fig.text(left / fig_w, 1 - 0.18 / fig_h,
+                 "Rejected fraction for each preprocessing arm",
+                 fontsize=10.5, fontweight="semibold", color=INK, va="top")
+        fig.text(left / fig_w, 1 - 0.42 / fig_h,
+                 f"Native-depth simulation, {args.method}, mean over 3 sizes x 5 replicates. "
+                 "Every cell is the fraction of the named cells that the gate rejected.",
+                 fontsize=7.4, color=MUTED, va="top")
+        fig.text(left / fig_w, 1 - 0.62 / fig_h,
+                 "Ground truth under each column: 0 = those cells all have a match and "
+                 "should be kept; 1 = they have none and should be rejected.",
+                 fontsize=7.4, color=MUTED, va="top")
 
     cax = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w, bottom / fig_h,
                         0.13 / fig_w, min(2.6, n_rows * cell_h) / fig_h])
@@ -239,7 +243,8 @@ def main() -> None:
                  "undefined", fontsize=6.4, color=MUTED, va="center")
 
     for suffix in ("png", "pdf"):
-        fig.savefig(args.output_dir / f"arm_error_heatmap.{suffix}", dpi=220)
+        fig.savefig(args.output_dir / f"arm_error_heatmap.{suffix}", dpi=220,
+                    **({"bbox_inches": "tight", "pad_inches": 0.05} if args.bare else {}))
     plt.close(fig)
     print(f"wrote {args.output_dir / 'arm_error_heatmap.png'}, .pdf and the values table")
 

@@ -104,6 +104,9 @@ PALETTE = {
 C_REJECT = "#c4553b"
 
 
+BARE = False
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -137,6 +140,8 @@ def parse_args() -> argparse.Namespace:
                              "embedding. joint: one embedding per scenario. "
                              "paired: two panels on that embedding. "
                              "schematic: drawn, no counts.")
+    parser.add_argument("--bare", action="store_true",
+                        help="shared layout: no scenario headings, for a slide whose notes explain")
     parser.add_argument("--out", type=Path, default=Path("figures/schematic"),
                         help="Every schematic is written to one folder, "
                              "apart from the results")
@@ -808,11 +813,12 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
                           fontsize=7.5, color="#55555a",
                           ha="center", va="bottom")
 
-        panels["source"].text(
-            0.0, 1.085 if row == 0 else 1.015,
-            f"({chr(97 + row)})  {TITLES[scenario]}",
-            transform=panels["source"].transAxes, fontsize=8.4,
-            fontweight="semibold", ha="left", va="bottom")
+        if not BARE:
+            panels["source"].text(
+                0.0, 1.085 if row == 0 else 1.015,
+                f"({chr(97 + row)})  {TITLES[scenario]}",
+                transform=panels["source"].transAxes, fontsize=8.4,
+                fontweight="semibold", ha="left", va="bottom")
         # One arrow, between the panels, for the direction of the question --
         # not one per population, which is the version that produced rails.
         figure.add_artist(ConnectionPatch(
@@ -840,7 +846,9 @@ def draw_shared(figure, grid, scenarios, loaded, seed: int,
 
 
 def main() -> None:
+    global BARE
     args = parse_args()
+    BARE = args.bare
     args.out.mkdir(parents=True, exist_ok=True)
     provenance = ("Splatter" if args.splatter_root
                   else "structure-matched synthetic counts, not Splatter")

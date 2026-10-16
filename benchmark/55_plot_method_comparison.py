@@ -86,6 +86,12 @@ KEYS = ["strategy", "arm", "pair_id", "n_cells_nominal", "replicate", "technical
 ARM_COLOURS = ["#2a78d6", "#eb6834", "#1baf7a"]
 
 
+# --bare: the figures alone, for a slide whose notes carry the explanation: no
+# title, reading notes or group subtitle; labels, legends and colour bars stay.
+BARE = False
+TIGHT = {}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -94,6 +100,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--check-against", type=Path, default=None,
                         metavar="BENCHMARK_METRICS_CSV")
+    parser.add_argument("--bare", action="store_true",
+                        help="no titles or reading notes")
     return parser.parse_args()
 
 
@@ -216,33 +224,35 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
         a, b = min(starts), max(starts) + len(LEVELS)
         ax.plot([a + 0.15, b - 0.15], [-2.45, -2.45], color=RULE, linewidth=1.0,
                 clip_on=False)
-        ax.text((a + b) / 2, -2.7, GROUPS[group], ha="center", va="bottom",
-                fontsize=6.8, color=MUTED)
+        if not BARE:
+            ax.text((a + b) / 2, -2.7, GROUPS[group], ha="center", va="bottom",
+                    fontsize=6.8, color=MUTED)
         ax.text((a + b) / 2, -3.55, group, ha="center", va="bottom",
                 fontsize=7.2, fontweight="semibold", color=INK)
 
-    fig.text(0.3 / fig_w, 1 - 0.18 / fig_h,
-             "Rejected fraction for each method, strategy and preprocessing arm",
-             fontsize=10.5, fontweight="semibold", color=INK, va="top")
-    over = ("mean over 3 sizes x 5 replicates" if complete else
-            "mean over the pairs present (15 per cell when complete)")
-    for line, text in enumerate((
-            f"Native-depth simulation, {over}. u = the share of a cell's own mass left "
-            "untransported; Balanced OT transports all of it and rejects nothing.",
-            "Global-optimal threshold: one per method and arm, chosen with the truth (largest "
-            "mean pair F1 on the sides holding both classes), then applied unchanged "
-            "everywhere -- an upper bound.",
-            "Partial OT is given m from each pair's truth. Ground truth under each column: "
-            "0 = those cells all have a match and should be kept; 1 = they have none.",
-            "IC-POT runs at the literature's constant unmatched cost, c_s = c_t = 0.5 "
-            "(Tripathi et al., arXiv:2605.20030); nothing in it comes from the truth.",
-            "ConfidenceOT acceptance: the share of a within-side null its calibrated rejection "
-            "cost must accept; M4-R uses the cost M4-E was calibrated to.",
-            "ConfidenceOT M4-R is the same run's reversible gate; at acceptance 0.90 its outer "
-            "loop cycled and stopped at the iteration cap in most pairs other than "
-            "populations_disjoint.")):
-        fig.text(0.3 / fig_w, 1 - (0.42 + 0.2 * line) / fig_h, text,
-                 fontsize=7.4, color=MUTED, va="top")
+    if not BARE:
+        fig.text(0.3 / fig_w, 1 - 0.18 / fig_h,
+                 "Rejected fraction for each method, strategy and preprocessing arm",
+                 fontsize=10.5, fontweight="semibold", color=INK, va="top")
+        over = ("mean over 3 sizes x 5 replicates" if complete else
+                "mean over the pairs present (15 per cell when complete)")
+        for line, text in enumerate((
+                f"Native-depth simulation, {over}. u = the share of a cell's own mass left "
+                "untransported; Balanced OT transports all of it and rejects nothing.",
+                "Global-optimal threshold: one per method and arm, chosen with the truth (largest "
+                "mean pair F1 on the sides holding both classes), then applied unchanged "
+                "everywhere -- an upper bound.",
+                "Partial OT is given m from each pair's truth. Ground truth under each column: "
+                "0 = those cells all have a match and should be kept; 1 = they have none.",
+                "IC-POT runs at the literature's constant unmatched cost, c_s = c_t = 0.5 "
+                "(Tripathi et al., arXiv:2605.20030); nothing in it comes from the truth.",
+                "ConfidenceOT acceptance: the share of a within-side null its calibrated rejection "
+                "cost must accept; M4-R uses the cost M4-E was calibrated to.",
+                "ConfidenceOT M4-R is the same run's reversible gate; at acceptance 0.90 its outer "
+                "loop cycled and stopped at the iteration cap in most pairs other than "
+                "populations_disjoint.")):
+            fig.text(0.3 / fig_w, 1 - (0.42 + 0.2 * line) / fig_h, text,
+                     fontsize=7.4, color=MUTED, va="top")
     cax = fig.add_axes([(left + n_cols * cell_w + 0.32) / fig_w, bottom / fig_h,
                         0.13 / fig_w, min(2.6, n_rows * cell_h) / fig_h])
     bar = fig.colorbar(mesh, cax=cax)
@@ -251,7 +261,7 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
     bar.outline.set_visible(False)
     cax.set_title("fraction\nrejected", fontsize=7.0, color=INK, loc="left", pad=6)
     for suffix in ("png", "pdf"):
-        fig.savefig(out / f"method_comparison_heatmap.{suffix}", dpi=220)
+        fig.savefig(out / f"method_comparison_heatmap.{suffix}", dpi=220, **TIGHT)
     plt.close(fig)
 
 
@@ -319,26 +329,30 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
     fig.legend(handles=handles, frameon=False, fontsize=7.4, ncol=3,
                loc="upper left", bbox_to_anchor=(0.058, 0.83))
     pairs = int(summary["count"].max()) if summary["count"].notna().any() else 0
-    fig.text(0.065, 0.97, "Directional F1 for each method, strategy and preprocessing arm",
-             fontsize=10.5, fontweight="semibold", color=INK, va="top")
-    fig.text(0.065, 0.915,
-             "F1 of rejection on the side holding the cells to reject: the source in "
-             "population_lost and populations_disjoint, the target in population_emerged. "
-             f"Mean over up to {pairs} pairs; whisker 1 SD, cut at 0 and 1.",
-             fontsize=7.0, color=MUTED, va="top")
-    fig.text(0.065, 0.88,
-             "The global-optimal threshold and Partial OT's m are taken from the truth: "
-             "upper bounds, not usable rules. ConfidenceOT and the fixed cutoff use no truth. "
-             "At acceptance 0.90, M4-R's outer loop cycled in most pairs other than "
-             "populations_disjoint.",
-             fontsize=7.0, color=MUTED, va="top")
+    if not BARE:
+        fig.text(0.065, 0.97, "Directional F1 for each method, strategy and preprocessing arm",
+                 fontsize=10.5, fontweight="semibold", color=INK, va="top")
+        fig.text(0.065, 0.915,
+                 "F1 of rejection on the side holding the cells to reject: the source in "
+                 "population_lost and populations_disjoint, the target in population_emerged. "
+                 f"Mean over up to {pairs} pairs; whisker 1 SD, cut at 0 and 1.",
+                 fontsize=7.0, color=MUTED, va="top")
+        fig.text(0.065, 0.88,
+                 "The global-optimal threshold and Partial OT's m are taken from the truth: "
+                 "upper bounds, not usable rules. ConfidenceOT and the fixed cutoff use no truth. "
+                 "At acceptance 0.90, M4-R's outer loop cycled in most pairs other than "
+                 "populations_disjoint.",
+                 fontsize=7.0, color=MUTED, va="top")
     for suffix in ("png", "pdf"):
-        fig.savefig(out / f"method_comparison_f1.{suffix}", dpi=220)
+        fig.savefig(out / f"method_comparison_f1.{suffix}", dpi=220, **TIGHT)
     plt.close(fig)
 
 
 def main() -> None:
+    global BARE, TIGHT
     args = parse_args()
+    BARE = args.bare
+    TIGHT = {"bbox_inches": "tight", "pad_inches": 0.05} if BARE else {}
     table = collect(args.decisions_csv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     present = coverage(table)
