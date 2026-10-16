@@ -164,8 +164,9 @@ It splits into three terms that **sum to E_tot exactly**. The two marginal steps
 - 53 shared-tree pairs: 28 same-family in 7 mice (3454, 3457, 3460, 3508, 3513, 3515, 3724), 25 different-family.
 - Rule 3 fails for 3 different-family pairs (one distinct L): 3454 T2 → N1, 3513 T3 → N1, 3513 T5 → N1.
 - Low-information flag, different-family: 14 of the remaining 22 flagged (3508 T1 × 8, all at the root; 3513 T2 and T4 → N1, NJ only; 3515 T3 → K2, K3, L1, L2); 8 not flagged (3515 T2 × 6; 3515 T3 → K1, N1).
-- Low-information flag, same-family: 3508 T2 → N2 (0.901); 3457 T1 → K1 and T1 → N2 print as 0.900 and are decided on the unrounded value.
-- Rule 2 (every scored cell is a leaf) is read from `LINEAGE_PAIR_ELIGIBILITY.tsv` before the full run.
+- Low-information flag, same-family, on the unrounded values: 3 of 28 flagged, 3457 T1 → K1 (0.900285), 3457 T1 → N2 (0.900285), 3508 T2 → N2 (0.900641). Just below the threshold: 3508 T2 → N6 (0.898152) and T2 → N1 (0.896288). The threshold stays 0.9, as fixed before the audit.
+- Rule 2 holds for all 53 shared-tree pairs: every scored source and target cell is a leaf of the chosen tree (`LINEAGE_PAIR_ELIGIBILITY.tsv`, 0 pairs with unmapped cells).
+- So the primary set is the 28 same-family pairs in 7 mice (rules 1–3 hold for all; rule 4 is checked per pair after the full rerun), with 3 flagged for the low-information sensitivity.
 - Cassiopeia and neighbor-joining disagree on L for the 3508 T2 family (Spearman about 0.0–0.26) and partly for 3460 (−0.21 to 0.64); the NJ sensitivity matters most there.
 
 ## 6. Reproducibility
