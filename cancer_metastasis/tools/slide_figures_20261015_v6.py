@@ -205,8 +205,31 @@ def comparator_f1(manifest: list, height: float = 3.45) -> None:
 
 # --- GSEA dot plots ------------------------------------------------------------------------------
 
+# Cycling x CNV rows, written out: what each representation is and what each arm removed.
+CYCLE_TEXT = {"A": "A: nothing removed", "B": "B: non-G1 cells removed",
+              "C": "C: 97 cell-cycle genes removed", "D": "D: non-G1 cells + cycle genes removed"}
+REP_TEXT = {"rna": "RNA", "rna_cnv": "RNA + CNV", "cnv": "CNV only"}
+
+
+def cycling_rows(arms: list[str]):
+    """Row labels (the cycle arm) and row groups (representation and RNA preprocessing)."""
+    labels, groups = [], []
+    for k, arm in enumerate(arms):
+        rep, cycle, label = arm.split("/")
+        labels.append(CYCLE_TEXT[cycle])
+        if rep == "cnv":
+            text = "CNV only\n(each cell's inferCNV\nprofile; no RNA)"
+        else:
+            text = f"{REP_TEXT[rep]}\nRNA preprocessing:\n{label}"
+        if groups and groups[-1][0] == text:
+            groups[-1][2] = k
+        else:
+            groups.append([text, k, k])
+    return labels, groups
+
+
 def gsea(frame: pd.DataFrame, arms: list[str], stem: str, sources: list[Path], manifest: list,
-         limit: float = 2.0) -> None:
+         limit: float = 2.0, row_labels: list[str] | None = None, groups: list | None = None) -> None:
     pathways, categories = dotplot.PATHWAYS, dotplot.CATEGORIES
     x_of, x, spans = {}, 0.0, []
     for name, members in categories:
@@ -221,9 +244,16 @@ def gsea(frame: pd.DataFrame, arms: list[str], stem: str, sources: list[Path], m
     y_of = {arm: float(i) for i, arm in enumerate(arms)}
     n_rows, n_cols = len(arms), len(pathways)
 
-    row_labels = [dotplot.arm_label(a) for a in arms]
-    left = 0.25 + 0.083 * max(len(t) for t in row_labels)
-    legend_w, top, bottom = 1.45, 0.62, 2.3
+    grouped = groups is not None
+    row_labels = row_labels or [dotplot.arm_label(a) for a in arms]
+    if grouped:
+        # Group column (representation, RNA preprocessing) left of the row labels; legend bottom left.
+        group_w = 2.0
+        left = group_w + 0.2 + 0.066 * max(len(t) for t in row_labels)
+        legend_w, top, bottom = 0.15, 0.62, 2.3
+    else:
+        left = 0.25 + 0.083 * max(len(t) for t in row_labels)
+        legend_w, top, bottom = 1.45, 0.62, 2.3
     cell_w = (AREA_W - left - legend_w) / n_cols
     cell_h = min(0.32, (AREA_H - top - bottom) / n_rows)
     fig_h = top + n_rows * cell_h + bottom
@@ -251,7 +281,19 @@ def gsea(frame: pd.DataFrame, arms: list[str], stem: str, sources: list[Path], m
     ax.set_xticklabels([dotplot.heatmap43.display_name("HALLMARK_" + p) for p in pathways], rotation=60,
                        ha="right", rotation_mode="anchor", fontsize=9, color="black")
     ax.set_yticks(range(n_rows))
-    ax.set_yticklabels(row_labels, fontsize=10.5, color="black")
+    ax.set_yticklabels(row_labels, fontsize=9 if grouped else 10.5, color="black")
+    if grouped:
+        for text, first, last in groups:
+            if first > 0:
+                ax.axhline(first - 0.5, color="black", linewidth=0.9, zorder=1)
+            y_mid = bottom + (n_rows - (first + last + 1) / 2) * cell_h
+            fig.text(0.08 / AREA_W, y_mid / fig_h, text, ha="left", va="center", fontsize=9.5, color="black",
+                     linespacing=1.15, fontweight="normal")
+            # A bracket spanning the group's rows, between the group text and the row labels.
+            y0 = bottom + (n_rows - first - 0.1) * cell_h
+            y1 = bottom + (n_rows - last - 0.9) * cell_h
+            xb = (group_w - 0.05) / AREA_W
+            fig.add_artist(plt.Line2D([xb, xb], [y0 / fig_h, y1 / fig_h], color="black", linewidth=1.0))
     ax.tick_params(length=3, width=1, color="black")
     for spine in ax.spines.values():
         spine.set_color("black")
@@ -264,8 +306,15 @@ def gsea(frame: pd.DataFrame, arms: list[str], stem: str, sources: list[Path], m
             ax.plot([x_end, x_end], [y_line, y_line + 0.07 * units], color="black", lw=1.0, clip_on=False)
         text = name if (end - start + 1) * cell_w < 0.95 else name.replace("\n", " ")
         ax.text((start + end) / 2, y_line - 0.03 * units, text, ha="center", va="bottom",
-                fontsize=10 if "\n" not in text else 8.5, color="black", linespacing=1.0, clip_on=False)
+                fontsize=(10 if "\n" not in text else 8.5) if cell_w >= 0.17 else (9 if "\n" not in text else 7.5),
+                color="black", linespacing=1.0, clip_on=False)
 
+    if grouped:
+        legend_bottom_left(fig, fig_h, areas, norm, cmap, limit)
+        save(fig, stem, sources, manifest)
+        manifest[-1]["size_in"] = [AREA_W, round(fig_h, 3)]
+        manifest[-1]["arms"] = arms
+        return
     # Legend in the right column: size bins, outline, colour.
     lx = (left + cell_w * n_cols + 0.22) / AREA_W
     legend_h = min(fig_h - top - 0.2, 2.75)
@@ -299,6 +348,31 @@ def gsea(frame: pd.DataFrame, arms: list[str], stem: str, sources: list[Path], m
     manifest[-1]["arms"] = arms
 
 
+def legend_bottom_left(fig, fig_h: float, areas, norm, cmap, limit: float) -> None:
+    """Size bins, outline and colour bar in the free corner below the row labels."""
+    lax = fig.add_axes([0.08 / AREA_W, 0.15 / fig_h, 3.3 / AREA_W, 1.75 / fig_h])
+    lax.set_axis_off()
+    lax.set_xlim(0, 3.3)
+    lax.set_ylim(0, 1.75)
+    lax.text(0.0, 1.72, "−log10 (FDR)", fontsize=10, va="top", color="black")
+    for k, (area, label) in enumerate(zip(areas, dotplot.SIZE_LABELS)):
+        y = 1.35 - 0.3 * k
+        lax.scatter([0.12], [y], s=area, facecolor="#a6a6a6", edgecolor="black", linewidths=0.8, clip_on=False)
+        lax.text(0.3, y, label, fontsize=10, va="center", color="black")
+    for k, (outlined, label) in enumerate(((False, "NS"), (True, f"FDR < {dotplot.FDR_CALL:g}"))):
+        y = 1.35 - 0.3 * k
+        lax.scatter([1.05], [y], s=areas[2], facecolor="#a6a6a6", edgecolor="black" if outlined else "none",
+                    linewidths=0.8 if outlined else 0, clip_on=False)
+        lax.text(1.23, y, label, fontsize=10, va="center", color="black")
+    cax = fig.add_axes([1.15 / AREA_W, 0.45 / fig_h, 1.25 / AREA_W, 0.13 / fig_h])
+    bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, orientation="horizontal",
+                       ticks=np.arange(-limit, limit + 0.5, 1.0))
+    bar.outline.set_visible(False)
+    bar.ax.tick_params(labelsize=9.5, length=0, colors="black")
+    bar.ax.xaxis.set_ticks_position("top")
+    cax.set_title("NES", loc="left", fontsize=10, pad=17, color="black")
+
+
 def gsea_figures(manifest: list) -> None:
     dotplot.LAYOUT = "factorial"
     factorial = dotplot.layout().arms
@@ -316,7 +390,8 @@ def gsea_figures(manifest: list) -> None:
         source = DOWN / "gsea_dotplot" / f"{stem}.csv"
         frame = pd.read_csv(source)
         arms = [a for a in cycling if a in set(frame["arm"])]
-        gsea(frame, arms, f"gsea_cycling_{dataset}", [source], manifest)
+        labels, groups = cycling_rows(arms)
+        gsea(frame, arms, f"gsea_cycling_{dataset}", [source], manifest, row_labels=labels, groups=groups)
 
 
 def main() -> None:
