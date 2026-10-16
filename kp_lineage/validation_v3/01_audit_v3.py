@@ -333,7 +333,9 @@ def main() -> None:
         "shared_tree_pairs": {"same_family": int(shared["same_met_family"].sum()),
                               "different_family": int((~shared["same_met_family"]).sum())},
         "unsupported_pairs": int(eligibility["status"].str.startswith("unsupported").sum()),
-        "zero_variance_pairs": shared.loc[shared["L_variance"] <= 0, "pair_id"].tolist(),
+        # One distinct L value, not L_variance <= 0: the float variance of a single value can come
+        # out a few ulp above 0 (3513 T3 -> N1 in the 2026-10-15 audit).
+        "zero_variance_pairs": shared.loc[shared["L_distinct"] <= 1, "pair_id"].tolist(),
         "raw_arm_cell_sets_identical": bool(eligibility["raw_arm_same_cells"].fillna(False).all()),
         "files": {"inventory": len(inventory), "prior_expansion_fitness_allele": len(heads)},
         "packages": packages,

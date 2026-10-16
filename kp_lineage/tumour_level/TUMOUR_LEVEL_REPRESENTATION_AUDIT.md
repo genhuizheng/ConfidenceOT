@@ -22,7 +22,7 @@
 - Same 131-row pair manifest, same 104 eligible pairs (at least 20 malignant cells per side), same malignant call (`not is_normal`, the authors' label), same MetFamily labels, same retained-fraction definition.
 - Same informative lesions for the readout: 31 in 8 mice in both labels.
 - The cell sets agree pair by pair, which was checked: all 208 pair-sides (104 pairs × source and target) hold identical cell IDs in the two labels. The raw arm applies inside `02_run_pair.py` the same QC that `27_downsample_counts.py` applies before equalising (1000 counts, 500 genes, 20% mitochondrial).
-- The audit v3 (running) will report the same check as `raw_arm_cell_sets_identical`.
+- The audit v3 (job 1075005, completed) reports the same check: `raw_arm_cell_sets_identical: true`.
 
 ## 2. What each label does (from run.json and the preprocessing code)
 
@@ -48,7 +48,7 @@
 **Released data.**
 - `KPTracer-Data` (README and the 2026-10-14 inspection) has expression, trees, character matrices, metadata, fitness, expansions and plasticity scores.
 - **No CNV profile is released.**
-- The audit v3 inventory (running) will list every file, to confirm this.
+- Confirmed by the audit v3 inventory (job 1075005): none of its 500 files matches "cnv" (case-insensitive).
 
 **What the authors did** (Yang et al. 2022, STAR Methods):
 - inferCNV on single-cell expression, per tumour;
