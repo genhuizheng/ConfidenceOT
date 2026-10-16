@@ -2,6 +2,7 @@
 
 Status: **DRAFT, not frozen.**
 - It is frozen only after three things: the v3 audit (`01_audit_v3.py`) has been read, the literature review (`LINEAGE_VALIDATION_LITERATURE_REVIEW.md`, complete 2026-10-15) has checked every definition, and the user approves.
+- 2026-10-15: audit read (job 1075005); coupling pilot passed, 12 of 12 (section 6); the user chose ΔS_norm as the across-pair primary and R as a secondary metric. Still needed: the user's approval of the whole text.
 - Freezing is a commit that changes this line to `FROZEN <date> <commit>`.
 
 **What has and has not been seen.**
@@ -42,7 +43,7 @@ For one primary-metastasis pair and one representation:
 - ΔS > 0: given those marginals, mass flows preferentially between cells that share deeper ancestry.
 - ΔS = 0 identically when L has zero variance under a ⊗ b. Such a pair is reported, not tested.
 
-**Normalised P1 (proposed for aggregation across pairs; decision needed).**
+**Normalised P1 (the across-pair primary; chosen by the user 2026-10-15).**
 - ΔS is in edges of shared ancestry, and the trees differ in depth: 3724 reaches about 12 levels, 3508 mostly 2.
 - The scale-free version is the share of the achievable enrichment: ΔS_norm = ΔS / ΔS_max. Here ΔS_max = S* − S(a ⊗ b), and S* = max S(ρ) over couplings ρ with marginals a and b.
 - **How S\* is computed.** S(ρ) = ½[Σᵢ aᵢhᵢ + Σⱼ bⱼhⱼ − E_ρ(d)], so S* comes from the minimum expected tree cost W_tree(a, b).
@@ -50,7 +51,7 @@ For one primary-metastasis pair and one representation:
   - Hence ΔS_max = ½[E_{a⊗b}(d) − W_tree(a, b)].
 - **Link to the literature.** 1 − ΔS_norm equals the normalised tree cost R = (C(T) − W_tree)/(C(a⊗b) − W_tree) recommended by the literature review. That ratio follows moslin's normalisation by the independent coupling (Lange et al. 2024), where 1 means uninformative.
 - ΔS_norm is 1 when T is as lineage-concentrated as any coupling with its marginals, 0 when it is no better than independence, and negative when it is worse.
-- **Proposed roles:** ΔS_norm for the across-pair test; raw ΔS reported for every pair.
+- **Roles:** ΔS_norm for the across-pair test; raw ΔS reported for every pair.
 - Undefined when ΔS_max = 0, i.e. no coupling with these marginals can beat independence. Such a pair is reported, not tested.
 
 ### P2, transport-weighted tree path distance (sensitivity of P1, not independent)
@@ -69,7 +70,7 @@ The two couplings in ΔD have the same marginals, so the first two terms cancel 
 - The identity is checked numerically on every pair (|ΔD + 2ΔS| ≤ 1e-10 on the same weighting).
 - P2 is never counted as confirmation of P1.
 
-**Decision needed.** A non-additive complementary metric that is not tied to P1 by an identity, proposed for the user's approval:
+**Secondary metric R (approved by the user 2026-10-15).** A non-additive complementary metric that is not tied to P1 by an identity:
 
 - **R, row-wise rank enrichment:** R(π) = Σᵢ aᵢ Σⱼ (πᵢⱼ / aᵢ) Fᵢ(Lᵢⱼ), with Fᵢ(x) = Σⱼ′ bⱼ′ [1(Lᵢⱼ′ < x) + ½·1(Lᵢⱼ′ = x)], the mid-rank distribution of source cell i's row under the target marginal b.
 - Under a ⊗ b, R = ½ exactly, so ΔR = R(π) − ½.
@@ -159,6 +160,14 @@ It splits into three terms that **sum to E_tot exactly**. The two marginal steps
 - Those meeting rules 1–4 are analysed with the same metrics, **reported separately and never pooled** with same-family pairs.
 - They enter no primary test.
 
+**Audit facts (job 1075005, read 2026-10-15; the rules above were fixed before it).**
+- 53 shared-tree pairs: 28 same-family in 7 mice (3454, 3457, 3460, 3508, 3513, 3515, 3724), 25 different-family.
+- Rule 3 fails for 3 different-family pairs (one distinct L): 3454 T2 → N1, 3513 T3 → N1, 3513 T5 → N1.
+- Low-information flag, different-family: 14 of the remaining 22 flagged (3508 T1 × 8, all at the root; 3513 T2 and T4 → N1, NJ only; 3515 T3 → K2, K3, L1, L2); 8 not flagged (3515 T2 × 6; 3515 T3 → K1, N1).
+- Low-information flag, same-family: 3508 T2 → N2 (0.901); 3457 T1 → K1 and T1 → N2 print as 0.900 and are decided on the unrounded value.
+- Rule 2 (every scored cell is a leaf) is read from `LINEAGE_PAIR_ELIGIBILITY.tsv` before the full run.
+- Cassiopeia and neighbor-joining disagree on L for the 3508 T2 family (Spearman about 0.0–0.26) and partly for 3460 (−0.21 to 0.64); the NJ sensitivity matters most there.
+
 ## 6. Reproducibility
 
 **Coupling reruns** (`02_rerun_with_coupling.py`):
@@ -181,7 +190,7 @@ A pair that fails is excluded from Level 3 and listed with its discrepancies. It
 - 3515 → K2 (710 × 362);
 - 3724 → L1 (14,775 × 90).
 
-Nothing larger is submitted unless all six pass.
+Nothing larger is submitted unless all six pass. **Result (2026-10-15): passed.** Job 1075006 refit all six; its comparison crashed writing the summary when every row passed (fixed, e4a09d2) and was rerun alone: 12 of 12 (pairs × labels × M4-E/M4-R) reproduce with identical rejection cost, 0 gate disagreements and zero margin and mass differences.
 
 **Numerical checks on every pair:**
 - tree S equals brute force (enumerable pairs);
@@ -194,13 +203,14 @@ Nothing larger is submitted unless all six pass.
 ## 7. Statistical aggregation
 
 - **Units.** Pair effect, then mean per metastasis (one same-family pair per metastasis), then mean per mouse. The mouse is the independent unit.
-- **Primary test (P1, M4-E, `ranknm256_noscale_ds_cos`):**
+- **Primary test (ΔS_norm of P1, M4-E, `ranknm256_noscale_ds_cos`):**
   - one-sided Wilcoxon signed-rank of the mouse means, H1: median > 0;
   - reported with mice > 0, and a 95% percentile bootstrap of the mean of mouse means (10,000 resamples of mice, seed 20261016);
   - "supported" if the mean > 0 and p < 0.05; otherwise "inconclusive". With 7 mice the smallest attainable one-sided p is 1/128.
+- **Secondary (ΔR):** the same test, bootstrap and reporting on the mouse means of ΔR = R − ½. Reported beside the primary; it never replaces or rescues it.
 - **P3:** two paired contrasts (vs balanced OT, vs kNN), each one-sided H1 > 0 on mouse means; Holm correction within this family of two.
 - **Effect scale.** ΔS is in edges of shared ancestry, so it is not on a common scale across trees.
-  - The proposed across-pair test uses ΔS_norm (section 2), pending the user's decision.
+  - The across-pair test uses ΔS_norm (section 2). A pair with ΔS_max = 0 has no ΔS_norm; it is listed and leaves its metastasis mean.
   - Raw ΔS and the standardised ΔS / SD_{a⊗b}(L) are reported as sensitivity analyses.
 - **Sensitivity (reported, none replaces the primary):**
   - the raw arm;
@@ -210,8 +220,7 @@ Nothing larger is submitted unless all six pass.
   - without low-information pairs;
   - leave one mouse out;
   - ΔS_depth;
-  - P2 (raw edges);
-  - R, if approved.
+  - P2 (raw edges).
 - **Exploratory.** Every other Level 3 metric in `METRIC_TAXONOMY_AND_FEASIBILITY.md` is exploratory: corrected within its family (Benjamini-Hochberg) and never used to restate the primary result.
 - **Never** a p value over cell pairs or transport edges.
 
@@ -233,7 +242,7 @@ Nothing larger is submitted unless all six pass.
 
 **Not available this round:**
 - branch-length statistics (Fritz-Purvis D, Pagel's λ, Blomberg's K);
-- the intBC-block bootstrap, which needs allele tables that are not in KPTracer-Data;
+- the intBC-block bootstrap. Correction 2026-10-15: the allele tables are in KPTracer-Data (audit v3: `KPTracer.alleleTable.FINAL.txt` and `.unfiltered.txt`), so the earlier reason was wrong; each replicate would still need a Cassiopeia reconstruction, which is not planned this round;
 - Yang's mutation-count distance, which needs Camin-Sokal ancestral reconstruction, unless the audit finds Cassiopeia installed.
 
 ## 9. Not done
