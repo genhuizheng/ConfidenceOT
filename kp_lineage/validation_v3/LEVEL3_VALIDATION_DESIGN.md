@@ -1,9 +1,10 @@
 # KP-Tracer Level 3 validation design: coupling against CRISPR lineage
 
-Status: **DRAFT, not frozen.**
-- It is frozen only after three things: the v3 audit (`01_audit_v3.py`) has been read, the literature review (`LINEAGE_VALIDATION_LITERATURE_REVIEW.md`, complete 2026-10-15) has checked every definition, and the user approves.
-- 2026-10-15: audit read (job 1075005); coupling pilot passed, 12 of 12 (section 7); the user chose ΔS_norm as the across-pair primary and ΔR as the key secondary metric, and asked for the refinements now in sections 0, 2, 3, 4, 5, 8 and 9 before freezing.
-- Freezing is a commit that changes this line to `FROZEN <date> <commit>`. The frozen definitions also cover `METRIC_TAXONOMY_AND_FEASIBILITY.md`.
+Status: **FROZEN 2026-10-15 7fe6202**
+- The definitions in this file and in `METRIC_TAXONOMY_AND_FEASIBILITY.md` are the text of commit 7fe6202. This freeze commit changes only this status block.
+- Frozen after: the v3 audit was read (job 1075005); the coupling pilot passed, 12 of 12 (section 7); the literature review was complete; the user approved with refinements (2026-10-15), all incorporated in 7fe6202.
+- Frozen before any lineage quantity was computed from any coupling.
+- Any later change is a new dated section, reported as post hoc.
 
 ## 0. The question
 
