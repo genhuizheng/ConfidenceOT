@@ -4,6 +4,7 @@
 #   bash kp_lineage/validation_v3/submit_v3.sh audit [--dry-run]
 #   bash kp_lineage/validation_v3/submit_v3.sh pilot [--dry-run]
 #   bash kp_lineage/validation_v3/submit_v3.sh compare [--dry-run]
+#   bash kp_lineage/validation_v3/submit_v3.sh couplings [--dry-run]
 #
 # audit  01_audit_v3.py: data inventory, shared-tree pairs, lineage informativeness of
 #        L, Cassiopeia vs neighbor-joining, character-matrix statistics. Read only;
@@ -77,7 +78,42 @@ case "$phase" in
             -o "$logs/compare_%j.out" -e "$logs/compare_%j.err" \
             --wrap "test ! -f $out/report/SUCCESS || exit 2; $activate && $compare" > /dev/null
         ;;
+    couplings)
+        # Stage D: coupling reruns for every shared-tree pair with more than one distinct L
+        # (design rules 1-3; 53 - 3 = 50), both labels, at the original calibrated cost.
+        # Then 03_compare_reproduction.py over all of them (rule 4). No lineage quantity is
+        # computed. Refuses unless the design is frozen and the audit and pilot passed.
+        out=$v3/coupling
+        design=$repo/kp_lineage/validation_v3/LEVEL3_VALIDATION_DESIGN.md
+        [[ -f "$out/report/SUCCESS" ]] && { echo "$out/report/SUCCESS exists; the couplings are not rerun" >&2; exit 2; }
+        grep -q '^Status: \*\*FROZEN' "$design" || { echo "the Level 3 design is not frozen" >&2; exit 2; }
+        [[ -f "$v3/audit/SUCCESS" ]] || { echo "the audit has not completed" >&2; exit 2; }
+        [[ -f "$v3/coupling_pilot/report/SUCCESS" ]] || { echo "the pilot has not passed" >&2; exit 2; }
+        pairs=$(awk -F'\t' 'NR==1{for(i=1;i<=NF;i++)c[$i]=i; next} $c["status"]=="shared tree" && ($c["L_distinct"]+0)>1 {print $c["pair_id"]}' "$v3/audit/LINEAGE_PAIR_ELIGIBILITY.tsv" | sort)
+        count=$(printf '%s\n' "$pairs" | grep -c . || true)
+        [[ "$count" -eq 50 ]] || { echo "expected 50 eligible pairs, found $count" >&2; exit 2; }
+        list=$out/pairs.txt
+        tasks=8
+        if (( dry_run )); then
+            echo "DRY RUN  $count pairs, $tasks tasks per label (round robin over the sorted list)" >&2
+        else
+            mkdir -p "$out"
+            printf '%s\n' "$pairs" > "$list"
+        fi
+        ids=""
+        for label in ranknm256_noscale_ds_cos raw; do
+            rerun="python kp_lineage/validation_v3/02_rerun_with_coupling.py --root $root --label $label --pair-list $list --task-index \$SLURM_ARRAY_TASK_ID --task-count $tasks --out $out"
+            id=$(submit "coupling reruns $label" --array=0-$((tasks - 1)) -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J kp_cpl \
+                -o "$logs/couplings_${label}_%A_%a.out" -e "$logs/couplings_${label}_%A_%a.err" \
+                --wrap "test ! -f $out/report/SUCCESS || exit 2; $activate && $rerun")
+            ids="$ids:$id"
+        done
+        compare="python kp_lineage/validation_v3/03_compare_reproduction.py --root $root --rerun $out --out $out/report"
+        submit "coupling reproduction check" --dependency=afterok$ids -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J kp_cplcmp \
+            -o "$logs/couplings_compare_%j.out" -e "$logs/couplings_compare_%j.err" \
+            --wrap "test ! -f $out/report/SUCCESS || exit 2; $activate && $compare" > /dev/null
+        ;;
     *)
-        echo "usage: $0 audit|pilot|compare [--dry-run]" >&2; exit 2 ;;
+        echo "usage: $0 audit|pilot|compare|couplings [--dry-run]" >&2; exit 2 ;;
 esac
 echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown)"

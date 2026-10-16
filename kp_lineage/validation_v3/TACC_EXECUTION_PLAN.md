@@ -15,15 +15,16 @@
 |---|---|---|---|---|
 | A | Audit v3 (`01_audit_v3.py`): inventory; prior, expansion and fitness files; 53 shared-tree pairs; L informativeness; Cassiopeia vs NJ; edit statistics | 1 | 1 node, 2 h limit (expected well under 1 h) | **done**, job 1075005 (2026-10-15); see the audit notes below |
 | B | Coupling pilot: 3 pairs × 2 representations rerun at the original cost (`02_rerun_with_coupling.py`), then `03_compare_reproduction.py` | 1 | 1 node, 2 h limit (largest: 3724 → L1, 14,775 × 90) | **passed**: refits in job 1075006 (all six exit 0); its comparison step crashed writing the summary when every row passed (fixed, e4a09d2) and was rerun alone with `submit_v3.sh compare`: 12 of 12 (3 pairs × 2 labels × M4-E/M4-R) reproduce exactly (rejection cost identical, 0 gate disagreements, margin and mass differences 0) |
-| C | Freeze `LEVEL3_VALIDATION_DESIGN.md` | — | — | after A, B, the literature review and the user's approval |
-| D | Coupling reruns for the eligible shared-tree pairs: M4-E, M4-R, PCA coordinates; balanced OT on all cells and on the M4-E-retained cells (needs an opt-in balanced flag added to 02_run_pair.py, default unchanged) | 2 arrays × 8 tasks = 16 | 1 node per task, 4 h limit; about 7 pairs per task, the 4 pairs of mouse 3724 one per task | after C |
+| C | Freeze `LEVEL3_VALIDATION_DESIGN.md` and `METRIC_TAXONOMY_AND_FEASIBILITY.md` | — | — | after A, B, the literature review and the user's approval (given 2026-10-15 with refinements) |
+| D | Coupling reruns (`submit_v3.sh couplings`): the 50 shared-tree pairs with more than one distinct L (design rules 1–3), both labels, M4-E and M4-R couplings and joint PCA coordinates; then `03_compare_reproduction.py` over all (rule 4). No lineage quantity. `02_run_pair.py` unchanged: every baseline is built in F from the saved coordinates and `cost_scale` | 2 arrays × 8 tasks + 1 dependent check = 17 | 1 node per task, 4 h limit (pilot: 3724 → L1 took 13 s; the largest, 3724 → S1, is 14,775 × 3,782); 6–7 pairs per task, round robin over the sorted list, which puts the 4 pairs of 3724 in 4 different tasks | after C; submitted only after the user sees the plan and the queue |
 | E | Level 2 exploratory multi-metric | 1 | 1 node, 2 h | after A |
-| F | Level 3 references, P1/P2(/R), decomposition, nulls, baselines (incl. kNN) | 16 (by pair blocks) | 1 node, 2 h each | after D |
+| F | Level 3: lineage-resolution diagnostics; P1, ΔS_norm, ΔR, P2; cost rebuild and scaling-form check; baselines EOT_C(a,b), balanced OT, kNN at the three comparison levels; decompositions; nulls with their constraint checks | 16 (by pair blocks) | 1 node, 2 h each | after D; code not yet written |
 | G | Mouse-level statistics, report tables, export package | 1 | 1 node, 1 h | last |
 
 **Storage (scratch).**
 - One coupling matrix for all 53 shared-tree pairs, in one representation, is 0.78 GB as float64 (mouse 3724: 0.73 GB).
 - Four couplings × two representations come to about 6.3 GB uncompressed, written as compressed npz.
+- Expected for stage D (from the pilot, scaling with n × k, compressed): about 2–3 GB per label, mostly mouse 3724 (3724 → S1 alone is about 42 times 3724 → L1).
 - Measured in the pilot (whole pair directory, both couplings, PCA coordinates and edges, compressed): 3457 → L1 0.6 / 0.7 MB, 3515 → K2 2.0 / 4.6 MB, 3724 → L1 23 / 29 MB (ranknm256_noscale_ds_cos / raw). The compressed size is far below the float64 estimate.
 - The local export carries every coupling except mouse 3724's in full (about 0.4 GB). For 3724 it carries clade-aggregated matrices and per-cell summaries.
 
