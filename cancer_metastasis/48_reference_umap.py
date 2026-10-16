@@ -282,7 +282,12 @@ def run_pairs(args) -> int:
         try:
             gates = pair_gates(row, configs, blocks)
             if not gates:
-                raise RuntimeError("no configuration completed this pair")
+                # In the manifest, but no gate ever ran on it: nothing to overlay, and not a failure.
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "NOT_GATED").write_text("no configuration completed this pair\n", encoding="utf-8")
+                (out / "FAILED").unlink(missing_ok=True)
+                print(f"not gated {row['pair_id']}", flush=True)
+                continue
             record = reference_umap(row, gates, out)
             if args.cnv_root is not None:
                 cells = pd.read_csv(out / "reference_umap.csv.gz", usecols=["pair_id", "dataset_id", "patient_id",
@@ -330,6 +335,9 @@ def run_export(args) -> int:
                                 "cnv_target_cells": info.get("cnv_cells", {}).get("target"),
                                 "cnv_source_cells_without_profile": info.get("cnv_cells_without_profile", {}).get("source"),
                                 "cnv_target_cells_without_profile": info.get("cnv_cells_without_profile", {}).get("target")})
+        elif (folder / "NOT_GATED").exists():
+            pair_status.append({"pair_id": row["pair_id"], "dataset_id": row["dataset_id"], "status": "not gated",
+                                "error": "no configuration completed this pair"})
         else:
             message = (folder / "FAILED").read_text().splitlines()[0] if (folder / "FAILED").exists() else "not run"
             pair_status.append({"pair_id": row["pair_id"], "dataset_id": row["dataset_id"], "status": "failed", "error": message})
@@ -452,8 +460,9 @@ def run_export(args) -> int:
     with open(export / "MD5SUMS", "w", encoding="utf-8", newline="\n") as handle:
         for row in rows:
             handle.write(f"{row['md5']}  {row['path']}\n")
-    failed = [p for p in pair_status if p["status"] != "done"]
-    print(f"pairs {len(pair_status)}, reference UMAP done {len(done)}, failed {len(failed)}; "
+    failed = [p for p in pair_status if p["status"] == "failed"]
+    not_gated = sum(p["status"] == "not gated" for p in pair_status)
+    print(f"pairs {len(pair_status)}, reference UMAP done {len(done)}, not gated {not_gated}, failed {len(failed)}; "
           f"configurations {len(configs)}; files {len(rows)}")
     for p in failed:
         print(f"  FAILED {p['pair_id']}: {p.get('error')}")
