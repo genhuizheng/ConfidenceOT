@@ -75,6 +75,7 @@ scripts/tacc/*
 !/kp_lineage/READOUT_PRESPECIFICATION_2026-10-14.md
 !/kp_lineage/validation_v2/*.md
 !/kp_lineage/validation_v3/*.md
+!/kp_lineage/tumour_level/*.md
 # The deck is generated, so review feedback has to live where the generator
 # does or the next rebuild silently drops it.
 !/cancer_metastasis/REPORT_DECK_FEEDBACK.md
