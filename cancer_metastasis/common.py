@@ -310,7 +310,7 @@ def cell_qc_table(
 
 
 REPRESENTATIONS = ("log_cpm", "rank_value", "rank_no_median",
-                   "pearson_residuals")
+                   "pearson_residuals", "log1p")
 
 
 def gene_symbols(data: Any) -> np.ndarray:
@@ -458,6 +458,10 @@ def _library_normalisation(representation: str, kind: str) -> tuple[str, str | N
     layer knows both, which is why the mapping lives here and not in
     ``confidenceot.preprocessing``.
     """
+    if representation == "log1p" and ("log" in kind or ("normalized" in kind and "raw" not in kind)):
+        # log1p here is log(1 + count), with no library-size scaling; on values
+        # that are already normalised or logged it would be a different transform.
+        raise ValueError(f"log1p takes raw counts; the expression kind is {kind!r}")
     if representation != "log_cpm":
         return representation, None
     if "log-normalized" in kind or "log normalized" in kind:

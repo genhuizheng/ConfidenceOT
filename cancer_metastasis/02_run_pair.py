@@ -491,11 +491,15 @@ def main() -> None:
                 f"this script cannot compute. It builds the representation "
                 f"from counts, so the label's transform has to be one of "
                 f"log_cpm (logcpm), rank_value (rank<N>), rank_no_median "
-                f"(ranknm<N>) or pearson_residuals (pearson)."
+                f"(ranknm<N>), pearson_residuals (pearson) or log1p (log1p)."
             )
         args.representation = configuration.normalisation
         args.rank_top_n = configuration.rank_top_n
         args.cost = configuration.cost
+        if configuration.cost == "pearson":
+            # The pcc label means every gene and no PCA; --n-hvg and --n-pcs do
+            # not apply to it, and the configuration refuses anything but 0.
+            args.n_hvg, args.n_pcs = configuration.n_hvg, configuration.n_pcs
         args.scale_genes = configuration.scale_genes
         args.label_stem = configuration.label_stem
         args.equalise_depth_upstream = configuration.equalise_depth

@@ -60,6 +60,12 @@ if [[ -n "$acceptance" ]]; then
     runs_dir=runs_acceptance_$acceptance
 fi
 echo "within-side acceptance ${acceptance:-0.90, the runner default} -> $root/$runs_dir"
+# 0 drops --save-pairing-edges, which also writes the joint coordinates. For a
+# gene-space representation (log1p_noscale_pcc: every gene is a coordinate) that
+# file is cells x genes as text; the scorer reads only the gate and the coupling.
+save_edges=${CONFIDENCEOT_BENCH_SAVE_EDGES:-1}
+edge_args=(--save-pairing-edges)
+[[ "$save_edges" == "0" ]] && edge_args=()
 
 total=$(( $(wc -l < "$worklist") - 1 ))
 start=$(( chunk * chunk_size ))
@@ -103,7 +109,7 @@ for (( unit = start; unit < stop; unit++ )); do
         --epsilon "${CONFIDENCEOT_BENCH_EPSILON:-0.1}" \
         --lambda-a 1.0 --lambda-b 1.0 \
         --tolerance 1e-4 \
-        --save-coupling --save-pairing-edges \
+        --save-coupling "${edge_args[@]}" \
         --device "$device" \
         --workers "$workers" \
         --seed "${CONFIDENCEOT_BENCH_SEED:-20260925}" \

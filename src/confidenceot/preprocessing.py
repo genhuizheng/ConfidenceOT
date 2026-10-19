@@ -64,14 +64,14 @@ Normalisation = Literal[
     "cpm", "log_cpm", "log1p", "precomputed",
     "pearson_residuals", "rank_value", "rank_no_median",
 ]
-Cost = Literal["squared_euclidean", "cosine"]
+Cost = Literal["squared_euclidean", "cosine", "pearson"]
 Scale = Literal["median_sampled_pair", "none"]
 
 NORMALISATIONS: tuple[str, ...] = (
     "cpm", "log_cpm", "log1p", "precomputed",
     "pearson_residuals", "rank_value", "rank_no_median",
 )
-COSTS: tuple[str, ...] = ("squared_euclidean", "cosine")
+COSTS: tuple[str, ...] = ("squared_euclidean", "cosine", "pearson")
 SCALES: tuple[str, ...] = ("median_sampled_pair", "none")
 
 # Short names the screen's own tables use, so one object generates both the
@@ -234,11 +234,17 @@ def median_pair_scale(
     a = np.asarray(source)
     b = np.asarray(target)
     count = min(int(pairs), max(len(a) * len(b), 1))
-    sampled = np.sum(
-        (a[rng.integers(len(a), size=count)]
-         - b[rng.integers(len(b), size=count)]) ** 2,
-        axis=1,
-    )
+    left = rng.integers(len(a), size=count)
+    right = rng.integers(len(b), size=count)
+    # In chunks, so a gene-space representation (thousands of columns, as the
+    # pearson cost uses) does not gather a million rows at once. Each pair's sum
+    # is the same row reduction as before, so the scale is unchanged for every
+    # existing configuration.
+    step = max(1, int(2 ** 25 // max(a.shape[1] if a.ndim == 2 else 1, 1)))
+    sampled = np.concatenate([
+        np.sum((a[left[start:start + step]] - b[right[start:start + step]]) ** 2, axis=1)
+        for start in range(0, count, step)
+    ]) if count else np.zeros(0)
     positive = sampled[sampled > 0]
     return float(np.median(positive)) if positive.size else 1.0
 
@@ -437,7 +443,11 @@ class Preprocessing:
         Genes kept by joint variance, and principal components retained.
     cost:
         ``squared_euclidean`` or ``cosine``.  This is the choice the screen
-        separated on; see the module docstring.
+        separated on; see the module docstring.  ``pearson`` (label tag
+        ``pcc``) is the correlation distance over every common gene: no HVG
+        selection, no PCA and no gene scaling; each cell's transformed vector
+        is centred over genes and set to unit length, so the squared Euclidean
+        cost is ``2 - 2 r`` with ``r`` the Pearson correlation of two cells.
     scale:
         Divide the cost by the median sampled cross-side pair distance, or not
         at all.  ``none`` leaves the cost in the representation's own units,
@@ -478,7 +488,18 @@ class Preprocessing:
             raise ValueError("rank_top_n must be at least 2")
         if not 0.0 <= self.minimum_detection_rate <= 1.0:
             raise ValueError("minimum_detection_rate must lie in [0, 1]")
-        if self.n_hvg < 2 or self.n_pcs < 1:
+        if self.cost == "pearson":
+            # Correlation over genes is defined on the genes themselves, so the
+            # configuration is all genes, no PCA, no gene scaling, by definition.
+            if self.n_hvg != 0 or self.n_pcs != 0:
+                raise ValueError("cost='pearson' uses every gene without PCA: "
+                                 "n_hvg and n_pcs must be 0")
+            if self.scale_genes:
+                raise ValueError("cost='pearson' correlates the transformed values "
+                                 "as they are: scale_genes must be False (noscale)")
+            if self.regress_out:
+                raise ValueError("cost='pearson' does not combine with regress_out")
+        elif self.n_hvg < 2 or self.n_pcs < 1:
             raise ValueError("n_hvg must be >= 2 and n_pcs >= 1")
         if self.equalise_target is not None and self.equalise_target < 1:
             raise ValueError("equalise_target must be a positive read count")
@@ -524,6 +545,8 @@ class Preprocessing:
             parts.append("ds")
         if self.cost == "cosine":
             parts.append("cos")
+        elif self.cost == "pearson":
+            parts.append("pcc")
         return "_".join(parts)
 
     @classmethod
@@ -554,6 +577,8 @@ class Preprocessing:
         cost = "squared_euclidean"
         if parts[-1] == "cos":
             cost, parts = "cosine", parts[:-1]
+        elif parts[-1] == "pcc":
+            cost, parts = "pearson", parts[:-1]
         equalise = False
         if parts and parts[-1] == "ds":
             equalise, parts = True, parts[:-1]
@@ -577,6 +602,8 @@ class Preprocessing:
         settings: dict[str, Any] = {"cost": cost, "equalise_depth": equalise,
                                     "regress_out": regressed,
                                     "scale_genes": scale_genes}
+        if cost == "pearson":
+            settings.update(n_hvg=0, n_pcs=0)
         inverse = {value: key for key, value in _LABEL_STEM.items()}
         rank_stems = tuple(
             value for key, value in _LABEL_STEM.items() if key.startswith("rank")
@@ -755,7 +782,8 @@ class Preprocessing:
             )
 
         source_n = source_x.shape[0]
-        limit = min(self.n_hvg, len(common))
+        # n_hvg = 0 (the pearson cost) keeps every common gene.
+        limit = len(common) if self.n_hvg == 0 else min(self.n_hvg, len(common))
         if self.normalisation == "pearson_residuals":
             counts = sparse.vstack([source_x, target_x], format="csr")
             variances = pearson_residual_gene_variance(counts, self.residual_theta)
@@ -808,11 +836,17 @@ class Preprocessing:
             # still happens, one step later and inside the decomposition.
             scaling_note = ("no per-gene variance scaling; PCA centers "
                             "internally")
-        from sklearn.decomposition import PCA  # optional dependency
+        if self.n_pcs == 0:
+            # The pearson cost: the genes themselves are the coordinates.
+            components = 0
+            coordinates = dense
+            scaling_note = "no gene scaling and no PCA: every common gene is a coordinate"
+        else:
+            from sklearn.decomposition import PCA  # optional dependency
 
-        components = min(self.n_pcs, dense.shape[0] - 1, dense.shape[1])
-        coordinates = PCA(n_components=components,
-                          random_state=seed).fit_transform(dense)
+            components = min(self.n_pcs, dense.shape[0] - 1, dense.shape[1])
+            coordinates = PCA(n_components=components,
+                              random_state=seed).fit_transform(dense)
         regression_note = "no covariate regressed out"
         if self.regress_out:
             # Before the cosine step, not after. Normalising to unit length and
@@ -844,6 +878,10 @@ class Preprocessing:
         target_pca = coordinates[source_n:]
         if self.cost == "cosine":
             source_pca, target_pca = unit_rows(source_pca), unit_rows(target_pca)
+        elif self.cost == "pearson":
+            # Centre each cell over genes, then unit length: ||a - b||^2 = 2 - 2r.
+            source_pca = unit_rows(source_pca - source_pca.mean(axis=1, keepdims=True))
+            target_pca = unit_rows(target_pca - target_pca.mean(axis=1, keepdims=True))
 
         provenance = {
             **self.as_dict(),
