@@ -12,13 +12,16 @@
 # same un-equalised counts as the raw arm: the work list is the raw rows of the
 # 32-arm work list, relabelled, dealt round robin by size into 9 blocks of 20.
 #
-# Two acceptances, each its own runs directory, so nothing existing is written:
+# Three acceptances, the three of the acceptance sweep, each its own runs directory,
+# so nothing existing is written:
 #   0.99 -> runs_acceptance_0.99/log1p_noscale_pcc   (beside the three arms rerun there)
+#   0.95 -> runs_acceptance_0.95/log1p_noscale_pcc   (likewise)
 #   0.90 -> runs_acceptance_0.90/log1p_noscale_pcc   (0.90 is the runner default; the
 #           32-arm grid at 0.90 is runs/, already scored in benchmark_metrics.csv)
 # Then one scoring job per acceptance (score_arms.slurm, afterany), into
-#   metrics_log1p_pcc/acceptance_<a>/ ; at 0.99 the three arms already there are
-#   scored beside it with the same scorer.
+#   metrics_log1p_pcc/acceptance_<a>/ ; at 0.99 and 0.95 the three arms already there
+#   are scored beside it with the same scorer.
+# CONFIDENCEOT_PCC_ACCEPTANCES overrides the list (space-separated).
 #
 # No joint coordinates are written (CONFIDENCEOT_BENCH_SAVE_EDGES=0): here they would
 # be cells x 10,000 genes as text, and the scorer reads only the gate and coupling.
@@ -62,7 +65,9 @@ bad=$(printf '%s\n' "$rows" | awk -F',' -v arm="$arm" '$4 != arm' | wc -l)
 [[ "$bad" -eq 0 ]] || { echo "relabelling failed on $bad rows" >&2; exit 2; }
 
 queued=$( { squeue -u "$USER" -h -r 2> /dev/null || true; } | wc -l )
-wanted=$(( 2 * blocks + 2 ))
+acceptances=${CONFIDENCEOT_PCC_ACCEPTANCES:-0.99 0.95 0.90}
+set -- $acceptances
+wanted=$(( $# * (blocks + 1) ))
 if (( queued + wanted > 40 )); then
     echo "$queued jobs queued; $wanted more would pass the 40-job cap" >&2
     exit 3
@@ -85,14 +90,14 @@ submit() {
     sbatch --parsable "$@" | tail -n 1 | tr -dc '0-9'
 }
 
-for acceptance in 0.99 0.90; do
+for acceptance in $acceptances; do
     runs_dir=runs_acceptance_$acceptance
     ot=$(submit --array=0-$(( blocks - 1 )) -J cot_pcc_$acceptance \
             --export=ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_BENCH_ROOT=$root,CONFIDENCEOT_BENCH_WORKLIST=$worklist,CONFIDENCEOT_BENCH_CHUNK=$chunk,CONFIDENCEOT_BENCH_WITHIN_SIDE_ACCEPTANCE=$acceptance,CONFIDENCEOT_BENCH_SAVE_EDGES=0 \
             -o "$logs/pcc_ot_${acceptance}_%A_%a.out" -e "$logs/pcc_ot_${acceptance}_%A_%a.err" \
             "$repo/benchmark/tacc/ot_array.slurm")
     arms=$arm
-    [[ "$acceptance" == 0.99 ]] && arms="$arm+ranknm256_noscale_ds_cos+ranknm256_noscale_cos+raw"
+    [[ "$acceptance" == 0.99 || "$acceptance" == 0.95 ]] && arms="$arm+ranknm256_noscale_ds_cos+ranknm256_noscale_cos+raw"
     submit --dependency=afterany:$ot -J cot_pcc_score \
             --export=ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_BENCH_ROOT=$root,CONFIDENCEOT_SCORE_RUNS=$runs_dir,CONFIDENCEOT_SCORE_ARMS=$arms,CONFIDENCEOT_SCORE_OUT=$root/metrics_log1p_pcc/acceptance_$acceptance \
             -o "$logs/pcc_score_${acceptance}_%j.out" -e "$logs/pcc_score_${acceptance}_%j.err" \

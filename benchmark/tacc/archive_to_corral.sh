@@ -46,7 +46,7 @@ preflight() {  # $1: one source
     test -d "$project/$name" || { echo "no $project/$name" >&2; exit 2; }
     test ! -e "$dest/$name" || { echo "$dest/$name already exists; not written into" >&2; exit 2; }
     if [[ "$name" == benchmark_native ]] && (( need_pcc )); then
-        for a in 0.99 0.90; do
+        for a in 0.99 0.95 0.90; do
             test -f "$project/benchmark_native/metrics_log1p_pcc/acceptance_$a/SUCCESS" || {
                 echo "log1p_noscale_pcc at $a is not scored yet; archive after it (or --without-pcc)" >&2; exit 2; }
         done
