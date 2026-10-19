@@ -2,7 +2,7 @@
 # Copy the simulation benchmark to corral, as it is, and check the copy.
 #
 #   bash benchmark/tacc/archive_to_corral.sh --dry-run
-#   bash benchmark/tacc/archive_to_corral.sh               # submits one gg job
+#   bash benchmark/tacc/archive_to_corral.sh               # submits one gg job per source (48 h)
 #   bash benchmark/tacc/archive_to_corral.sh --without-pcc # do not wait for log1p_noscale_pcc
 #
 # Destination: /corral/utexas/MCB26031/genhui/Primary_Metastasis_archive/simulation_benchmark/
@@ -24,12 +24,14 @@ set -eo pipefail
 mode=submit
 dry_run=0
 need_pcc=1
-for argument in "$@"; do
-    case "$argument" in
-        --dry-run) dry_run=1 ;;
-        --without-pcc) need_pcc=0 ;;
-        --run) mode=run ;;
-        *) echo "unknown option: $argument" >&2; exit 2 ;;
+only=""
+while (( $# )); do
+    case "$1" in
+        --dry-run) dry_run=1; shift ;;
+        --without-pcc) need_pcc=0; shift ;;
+        --run) mode=run; shift ;;
+        --only) only=$2; shift 2 ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
@@ -39,13 +41,12 @@ dest=${CONFIDENCEOT_ARCHIVE:-/corral/utexas/MCB26031/genhui/Primary_Metastasis_a
 sources="benchmark_native benchmark_technical"
 logs=$project/archive_logs
 
-preflight() {
+preflight() {  # $1: one source
+    local name=$1
     test -d "$(dirname "$dest")" || { echo "no $(dirname "$dest")" >&2; exit 2; }
-    for name in $sources; do
-        test -d "$project/$name" || { echo "no $project/$name" >&2; exit 2; }
-        test ! -e "$dest/$name" || { echo "$dest/$name already exists; not written into" >&2; exit 2; }
-    done
-    if (( need_pcc )); then
+    test -d "$project/$name" || { echo "no $project/$name" >&2; exit 2; }
+    test ! -e "$dest/$name" || { echo "$dest/$name already exists; not written into" >&2; exit 2; }
+    if [[ "$name" == benchmark_native ]] && (( need_pcc )); then
         for a in 0.99 0.90; do
             test -f "$project/benchmark_native/metrics_log1p_pcc/acceptance_$a/SUCCESS" || {
                 echo "log1p_noscale_pcc at $a is not scored yet; archive after it (or --without-pcc)" >&2; exit 2; }
@@ -63,48 +64,62 @@ checksums() {  # md5 of every file under 50 MB, sorted by path
 }
 
 if [[ "$mode" == submit ]]; then
-    preflight
+    # One job per source, so a failure or a time-out in one does not hold the other.
+    need_kb=0
+    for name in $sources; do
+        preflight "$name"
+        kb=$(du -sk "$project/$name" | cut -f1)
+        need_kb=$(( need_kb + kb ))
+        echo "$name: $(( kb / 1024 / 1024 )) GB"
+    done
+    avail_kb=$(df -Pk "$(dirname "$dest")" | awk 'NR == 2 { print $4 }')
+    echo "needed $(( need_kb / 1024 / 1024 )) GB; available on $(dirname "$dest"): $(( avail_kb / 1024 / 1024 )) GB (df; the project quota may be lower)"
+    if (( avail_kb < need_kb * 105 / 100 )); then
+        echo "not enough room on corral for both copies with 5% to spare; nothing submitted" >&2; exit 3
+    fi
     if (( dry_run )); then
-        for name in $sources; do echo "DRY RUN  cp $project/$name -> $dest/$name ($(du -sh "$project/$name" | cut -f1))"; done
-        echo "DRY RUN  code $(git -C "$repo" rev-parse --short HEAD), manifest, checks -> $dest"
+        for name in $sources; do echo "DRY RUN  job: cp $project/$name -> $dest/$name"; done
+        echo "DRY RUN  code $(git -C "$repo" rev-parse --short HEAD) and the manifest go with the benchmark_native job"
         exit 0
     fi
     mkdir -p "$logs"
     flags=""
     (( need_pcc )) || flags="--without-pcc"
-    sbatch -p gg -N 1 -n 1 -t 24:00:00 -A MCB26031 -J cot_archive \
-        -o "$logs/archive_%j.out" -e "$logs/archive_%j.err" \
-        --wrap "bash $repo/benchmark/tacc/archive_to_corral.sh --run $flags"
+    for name in $sources; do
+        sbatch -p gg -N 1 -n 1 -t 48:00:00 -A MCB26031 -J cot_archive \
+            -o "$logs/archive_${name}_%j.out" -e "$logs/archive_${name}_%j.err" \
+            --wrap "bash $repo/benchmark/tacc/archive_to_corral.sh --run --only $name $flags"
+    done
     exit 0
 fi
 
-# --- the job ------------------------------------------------------------------------------
-preflight
+# --- the job: one source -----------------------------------------------------------------
+name=$only
+[[ " $sources " == *" $name "* ]] || { echo "--run needs --only one of: $sources" >&2; exit 2; }
+preflight "$name"
 mkdir -p "$dest/checks"
 commit=$(git -C "$repo" rev-parse --short HEAD)
-echo "archive at commit $commit -> $dest ($(date -Iseconds))"
-git -C "$repo" archive --format=tar.gz -o "$dest/code_${commit}.tar.gz" HEAD
-cp "$repo/benchmark/ARCHIVE_MANIFEST.md" "$dest/ARCHIVE_MANIFEST.md"
-status=0
-for name in $sources; do
-    echo "== $name: listing and checksums on scratch ($(date -Iseconds))"
-    listing "$project/$name" > "$dest/checks/${name}.scratch.files.tsv"
-    checksums "$project/$name" > "$dest/checks/${name}.scratch.md5"
-    echo "== $name: cp ($(date -Iseconds))"
-    # Mode and timestamps only: cp -a also carries extended attributes and ACLs,
-    # which a copy from Lustre to corral can refuse, and that would stop the job.
-    cp -r --preserve=mode,timestamps "$project/$name" "$dest/$name"
-    echo "== $name: checking the copy ($(date -Iseconds))"
-    listing "$dest/$name" > "$dest/checks/${name}.corral.files.tsv"
-    checksums "$dest/$name" > "$dest/checks/${name}.corral.md5"
-    files=$(wc -l < "$dest/checks/${name}.scratch.files.tsv")
-    if diff "$dest/checks/${name}.scratch.files.tsv" "$dest/checks/${name}.corral.files.tsv" > "$dest/checks/${name}.files.diff" \
-       && diff "$dest/checks/${name}.scratch.md5" "$dest/checks/${name}.corral.md5" > "$dest/checks/${name}.md5.diff"; then
-        echo "OK $name: $files files, names and sizes identical; md5 identical for files under 50 MB" | tee -a "$dest/checks/STATUS"
-    else
-        echo "FAILED $name: see checks/${name}.*.diff" | tee -a "$dest/checks/STATUS"
-        status=1
-    fi
-done
-echo "code ${commit}; finished $(date -Iseconds)" >> "$dest/checks/STATUS"
-exit $status
+echo "archive of $name at commit $commit -> $dest ($(date -Iseconds))"
+if [[ "$name" == benchmark_native ]]; then
+    git -C "$repo" archive --format=tar.gz -o "$dest/code_${commit}.tar.gz" HEAD
+    cp "$repo/benchmark/ARCHIVE_MANIFEST.md" "$dest/ARCHIVE_MANIFEST.md"
+fi
+echo "== $name: listing and checksums on scratch ($(date -Iseconds))"
+listing "$project/$name" > "$dest/checks/${name}.scratch.files.tsv"
+checksums "$project/$name" > "$dest/checks/${name}.scratch.md5"
+echo "== $name: cp ($(date -Iseconds))"
+# Mode and timestamps only: cp -a also carries extended attributes and ACLs,
+# which a copy from Lustre to corral can refuse, and that would stop the job.
+cp -r --preserve=mode,timestamps "$project/$name" "$dest/$name"
+echo "== $name: checking the copy ($(date -Iseconds))"
+listing "$dest/$name" > "$dest/checks/${name}.corral.files.tsv"
+checksums "$dest/$name" > "$dest/checks/${name}.corral.md5"
+files=$(wc -l < "$dest/checks/${name}.scratch.files.tsv")
+if diff "$dest/checks/${name}.scratch.files.tsv" "$dest/checks/${name}.corral.files.tsv" > "$dest/checks/${name}.files.diff" \
+   && diff "$dest/checks/${name}.scratch.md5" "$dest/checks/${name}.corral.md5" > "$dest/checks/${name}.md5.diff"; then
+    echo "OK $name: $files files, names and sizes identical; md5 identical for files under 50 MB; code $commit; $(date -Iseconds)" \
+        | tee -a "$dest/checks/STATUS"
+else
+    echo "FAILED $name: see checks/${name}.*.diff; code $commit; $(date -Iseconds)" | tee -a "$dest/checks/STATUS"
+    exit 1
+fi

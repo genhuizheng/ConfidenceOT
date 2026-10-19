@@ -1,7 +1,7 @@
 # Simulation benchmark archive
 
 **Archive location (TACC):** `/corral/utexas/MCB26031/genhui/Primary_Metastasis_archive/simulation_benchmark/`
-- Written by `benchmark/tacc/archive_to_corral.sh` as one gg job.
+- Written by `benchmark/tacc/archive_to_corral.sh`, one gg job per source (48 h limit each).
 - `benchmark_native/` and `benchmark_technical/` are copied from `/scratch/10119/ghzheng/OT_project/` as they are: every file, nothing filtered, mode and timestamps kept.
 - The scratch originals are not changed or removed by the archive.
 
