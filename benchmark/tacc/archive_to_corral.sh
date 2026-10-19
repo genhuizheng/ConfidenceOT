@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copy the simulation benchmark to corral, as it is, and check the copy.
+# Copy the native simulation benchmark to corral, as it is, and check the copy.
 #
 #   bash benchmark/tacc/archive_to_corral.sh --dry-run
 #   bash benchmark/tacc/archive_to_corral.sh               # submits one gg job per source (48 h)
@@ -7,7 +7,6 @@
 #
 # Destination: /corral/utexas/MCB26031/genhui/Primary_Metastasis_archive/simulation_benchmark/
 #   benchmark_native/      copy of /scratch/.../OT_project/benchmark_native     (current benchmark)
-#   benchmark_technical/   copy of /scratch/.../OT_project/benchmark_technical  (superseded thinning version)
 #   code_<commit>.tar.gz   git archive of the repository at the commit that ran this
 #   ARCHIVE_MANIFEST.md    what each directory holds and which reported result it backs
 #   checks/                per source: file list with sizes on both sides, their diff,
@@ -38,7 +37,7 @@ done
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 project=${CONFIDENCEOT_PROJECT:-/scratch/10119/ghzheng/OT_project}
 dest=${CONFIDENCEOT_ARCHIVE:-/corral/utexas/MCB26031/genhui/Primary_Metastasis_archive}/simulation_benchmark
-sources="benchmark_native benchmark_technical"
+sources="benchmark_native"  # the superseded benchmark_technical is not archived (user, 2026-10-19)
 logs=$project/archive_logs
 
 preflight() {  # $1: one source

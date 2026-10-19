@@ -1,14 +1,15 @@
-# Simulation benchmark archive
+# Native simulation benchmark archive
 
 **Archive location (TACC):** `/corral/utexas/MCB26031/genhui/Primary_Metastasis_archive/simulation_benchmark/`
-- Written by `benchmark/tacc/archive_to_corral.sh`, one gg job per source (48 h limit each).
-- `benchmark_native/` and `benchmark_technical/` are copied from `/scratch/10119/ghzheng/OT_project/` as they are: every file, nothing filtered, mode and timestamps kept.
+- Written by `benchmark/tacc/archive_to_corral.sh`, one gg job (48 h limit).
+- `benchmark_native/` is copied from `/scratch/10119/ghzheng/OT_project/` as it is: every file, nothing filtered, mode and timestamps kept.
+- Only the native benchmark is archived (user, 2026-10-19). The superseded thinning benchmark, `benchmark_technical/`, is not.
 - The scratch originals are not changed or removed by the archive.
 
 **Checks written beside the copy** (`checks/`):
-- for each source, the list of every file with its size, on scratch and on corral, and their diff;
+- the list of every file with its size, on scratch and on corral, and their diff;
 - md5 of every file under 50 MB on both sides, and their diff;
-- `STATUS`, one line per source: OK or FAILED.
+- `STATUS`: OK or FAILED.
 
 **Code:**
 - `code_<commit>.tar.gz` is `git archive` of the repository at the commit that ran the archive.
@@ -50,17 +51,21 @@ Design: `benchmark/DESIGN.md`; metrics: `BENCHMARK_METRICS.md`.
 - `figures/slides_20261015_v6/`;
 - `benchmark_results/native/heatmaps/`.
 
-## `benchmark_technical/`
+## Not archived: `benchmark_technical/`
 
-The earlier benchmark, in which the target's depth was a binomial thinning of Splatter's output. It is superseded by the native generator (33fa384, 2026-09-30) and archived for the record only.
+The earlier benchmark, superseded by the native generator (33fa384, 2026-09-30):
+- the target's depth was a binomial thinning of Splatter's output;
+- weaker L2 dropout;
+- three cases, without `populations_disjoint`.
 
-On reading it: equalisation inverts that thinning by construction, so its equalised L1 results are not evidence about depth (`benchmark/DESIGN.md`).
+No reported result comes from it, and it is not in this archive.
 
 ## Caveats that travel with the results
 
 - **No single best arm** over the heatmap's columns. Name the criterion with any ranking.
 - **Acceptance 0.99 was chosen with the truth in view**, from three values. It is not confirmed on independent data.
-- **Native L2 dropout** is `dropout.mid` 1.0, against −1.0 in the thinning version. Native and thinning are comparable only at L1.
+- **Equalised L1 is not evidence about depth.** Splatter's composition does not depend on library size, so equalisation removes the L1 depth difference by construction. Equalisation can be judged only at L2 (`benchmark/DESIGN.md`).
+- **Native L2 dropout** is `dropout.mid` 1.0, against −1.0 in the earlier thinning version.
 - **M4-R cycled** at acceptance 0.90 in most pairs other than `populations_disjoint`; its numbers there are stopped oscillations.
 - **Vanilla UOT on raw** has pairs whose plan mass diverges; its raw numbers are unreliable.
 
