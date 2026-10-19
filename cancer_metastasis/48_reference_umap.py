@@ -308,10 +308,45 @@ def run_pairs(args) -> int:
     return 1 if failures else 0
 
 
+def run_cnv(args) -> int:
+    """Add the CNV embedding to pairs that are already DONE, leaving their RNA reference as it is.
+
+    For pairs finished before the CNV embedding existed (or run without --cnv-root):
+    reads the pair's own reference_umap.csv.gz cells, writes reference_umap_cnv.csv.gz
+    and cnv_chromosome_means.csv.gz, and adds the cnv_* fields to reference.json. A pair
+    that already has its CNV embedding, or is not DONE, is skipped. reference_umap.csv.gz
+    is never rewritten.
+    """
+    if args.cnv_root is None:
+        raise SystemExit("cnv mode needs --cnv-root")
+    manifest = read_manifests(args.manifest, args.datasets)
+    failures = 0
+    for index, row in enumerate(manifest.to_dict("records")):
+        if index % args.task_count != args.task_index:
+            continue
+        out = args.out / "pairs" / safe(str(row["pair_id"]))
+        if not (out / "DONE").exists() or (out / "reference_umap_cnv.csv.gz").exists():
+            continue
+        try:
+            cells = pd.read_csv(out / "reference_umap.csv.gz", usecols=["pair_id", "dataset_id", "patient_id",
+                                                                         "cell_uid", "side", "observation_id"])
+            record = json.loads((out / "reference.json").read_text())
+            record.update(cnv_reference(row, cells, args.cnv_root, out))
+            (out / "reference.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+            (out / "CNV_FAILED").unlink(missing_ok=True)
+            print(f"{row['pair_id']}: {record['cnv_status']}", flush=True)
+        except Exception as error:  # noqa: BLE001 - recorded and reported, never hidden
+            failures += 1
+            (out / "CNV_FAILED").write_text(f"{type(error).__name__}: {error}\n{traceback.format_exc()}",
+                                            encoding="utf-8")
+            print(f"CNV FAILED {row['pair_id']}: {type(error).__name__}: {error}", flush=True)
+    return 1 if failures else 0
+
+
 # --- export --------------------------------------------------------------------
 
 def run_export(args) -> int:
-    export = args.out / "export"
+    export = args.out / args.export_name
     if (export / "MANIFEST.tsv").exists():
         raise SystemExit(f"{export}/MANIFEST.tsv exists; the export is not rewritten")
     manifest = read_manifests(args.manifest, args.datasets)
@@ -472,7 +507,7 @@ def run_export(args) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["pairs", "export"])
+    parser.add_argument("mode", choices=["pairs", "cnv", "export"])
     parser.add_argument("--manifest", type=Path, action="append", required=True)
     parser.add_argument("--datasets", nargs="+", required=True)
     parser.add_argument("--gates-root", type=Path, required=True)
@@ -482,8 +517,11 @@ def main() -> None:
     parser.add_argument("--task-index", type=int, default=0)
     parser.add_argument("--task-count", type=int, default=1)
     parser.add_argument("--cnv-root", type=Path, help="44_export_cnv_cells.R output; adds the CNV embedding")
+    parser.add_argument("--export-name", default="export",
+                        help="Folder under --out for the export; a new name keeps an earlier export intact")
     args = parser.parse_args()
-    sys.exit(run_pairs(args) if args.mode == "pairs" else run_export(args))
+    modes = {"pairs": run_pairs, "cnv": run_cnv, "export": run_export}
+    sys.exit(modes[args.mode](args))
 
 
 if __name__ == "__main__":
