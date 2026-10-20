@@ -29,6 +29,11 @@ Written to CNV_ROOT/<dataset>/<patient>/:
                         reference and observation cells, overall and within total-count quintiles
   provenance.json, SUCCESS
 Refuses to overwrite a unit that has SUCCESS.
+
+--unit-h5ad UNIT.h5ad instead of --unit reads one H5AD holding the same four things: raw
+counts in X (cells x genes), obs columns group, source_file and barcode, and var columns
+chr, start and stop (built for KP-Tracer by kp_lineage/cnv/01_build_infercnvpy_units.py).
+Everything after reading is the same code.
 """
 
 from __future__ import annotations
@@ -90,7 +95,9 @@ def window_table(var: pd.DataFrame, chr_pos: dict, n_windows: int, window: int, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--unit", type=Path, required=True)
+    unit_input = parser.add_mutually_exclusive_group(required=True)
+    unit_input.add_argument("--unit", type=Path)
+    unit_input.add_argument("--unit-h5ad", type=Path)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--patient", required=True)
     parser.add_argument("--out", type=Path, required=True)
@@ -106,26 +113,50 @@ def main() -> None:
         sys.exit(f"{out}/SUCCESS exists; not overwritten")
     out.mkdir(parents=True, exist_ok=True)
     started = time.time()
-    unit = args.unit
-    inputs = {name: unit / name for name in ("counts.tsv.gz", "annotations.tsv", "gene_order.tsv", "cell_meta.tsv.gz")}
-    for name, path in inputs.items():
-        if not path.exists():
-            sys.exit(f"{unit}: {name} is missing")
-
-    annotations = pd.read_csv(inputs["annotations.tsv"], sep="\t", header=None, names=["cell", "group"], dtype=str)
-    order = pd.read_csv(inputs["gene_order.tsv"], sep="\t", header=None, dtype=str)
-    if order.shape[1] < 4:
-        raise ValueError(f"{inputs['gene_order.tsv']}: expected gene, chr, start, stop")
-    order = order.iloc[:, :4]
-    order.columns = ["gene", "chr", "start", "stop"]
-    if order.iloc[0]["start"] in ("start",):
-        order = order.iloc[1:]
-    meta = pd.read_csv(inputs["cell_meta.tsv.gz"], sep="\t", dtype=str)
-    for column in ("cell", "source_file", "barcode"):
-        if column not in meta:
-            raise ValueError(f"{inputs['cell_meta.tsv.gz']}: no {column} column")
-
-    counts, genes, cells = read_counts(inputs["counts.tsv.gz"])
+    if args.unit_h5ad is not None:
+        unit = args.unit_h5ad
+        inputs = {"unit.h5ad": unit}
+        if not unit.exists():
+            sys.exit(f"{unit} is missing")
+        source = ad.read_h5ad(unit)
+        for column in ("group", "source_file", "barcode"):
+            if column not in source.obs:
+                raise ValueError(f"{unit}: obs has no {column} column")
+        for column in ("chr", "start", "stop"):
+            if column not in source.var:
+                raise ValueError(f"{unit}: var has no {column} column")
+        counts = source.X.tocsr() if sp.issparse(source.X) else sp.csr_matrix(source.X)
+        counts = counts.astype(np.float32)
+        if counts.nnz and not np.allclose(counts.data, np.round(counts.data)):
+            raise ValueError(f"{unit}: X is not integer counts")
+        cells = [str(c) for c in source.obs_names]
+        genes = [str(g) for g in source.var_names]
+        annotations = pd.DataFrame({"cell": cells, "group": source.obs["group"].astype(str).to_numpy()})
+        meta = pd.DataFrame({"cell": cells, "source_file": source.obs["source_file"].astype(str).to_numpy(),
+                             "barcode": source.obs["barcode"].astype(str).to_numpy()})
+        order = pd.DataFrame({"gene": genes, "chr": source.var["chr"].astype(str).to_numpy(),
+                              "start": source.var["start"].to_numpy(), "stop": source.var["stop"].to_numpy()})
+        del source
+    else:
+        unit = args.unit
+        inputs = {name: unit / name for name in ("counts.tsv.gz", "annotations.tsv", "gene_order.tsv",
+                                                 "cell_meta.tsv.gz")}
+        for name, path in inputs.items():
+            if not path.exists():
+                sys.exit(f"{unit}: {name} is missing")
+        annotations = pd.read_csv(inputs["annotations.tsv"], sep="\t", header=None, names=["cell", "group"], dtype=str)
+        order = pd.read_csv(inputs["gene_order.tsv"], sep="\t", header=None, dtype=str)
+        if order.shape[1] < 4:
+            raise ValueError(f"{inputs['gene_order.tsv']}: expected gene, chr, start, stop")
+        order = order.iloc[:, :4]
+        order.columns = ["gene", "chr", "start", "stop"]
+        if order.iloc[0]["start"] in ("start",):
+            order = order.iloc[1:]
+        meta = pd.read_csv(inputs["cell_meta.tsv.gz"], sep="\t", dtype=str)
+        for column in ("cell", "source_file", "barcode"):
+            if column not in meta:
+                raise ValueError(f"{inputs['cell_meta.tsv.gz']}: no {column} column")
+        counts, genes, cells = read_counts(inputs["counts.tsv.gz"])
     print(f"{args.dataset}/{args.patient}: {len(cells)} cells x {len(genes)} genes read", flush=True)
     if set(cells) != set(annotations["cell"]):
         raise ValueError("counts.tsv.gz and annotations.tsv name different cells")
