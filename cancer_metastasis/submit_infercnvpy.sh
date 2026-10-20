@@ -93,11 +93,11 @@ root = pathlib.Path('$out'); rows = []
 for line in open(root / 'units.tsv'):
     d, p, u = line.rstrip('\\n').split('\\t'); f = root / d / p / 'diagnostics.json'
     if f.exists():
-        j = json.loads(f.read_text()); rows.append([d, p, 'done', j['cells'], j['reference_cells'], j['observation_cells'], j['windows'], round(j['signal_median']['reference'], 4), round(j['signal_median']['observation'], 4), round(j['signal_auroc_observation_vs_reference'], 3), round(j['observation_above_reference_p95'], 3)])
+        j = json.loads(f.read_text()); rows.append([d, p, 'done', j['cells'], j['reference_cells'], j['observation_cells'], j['windows'], round(j['signal_median']['reference'], 4), round(j['signal_median']['observation'], 4)])
     else:
-        rows.append([d, p, 'missing'] + [''] * 8)
+        rows.append([d, p, 'missing'] + [''] * 6)
 w = csv.writer(open(root / 'summary.tsv', 'w', newline=''), delimiter='\\t')
-w.writerow(['dataset', 'patient', 'status', 'cells', 'reference', 'observation', 'windows', 'signal_ref', 'signal_obs', 'auroc', 'obs_above_ref_p95'])
+w.writerow(['dataset', 'patient', 'status', 'cells', 'reference', 'observation', 'windows', 'signal_ref', 'signal_obs'])
 w.writerows(rows); print(sum(r[2] == 'done' for r in rows), 'of', len(rows), 'units done')"
 sbatch --parsable -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J icnvpy_sum --dependency=afterany:$array \
     -o "$logs/summary_%j.out" --wrap "$activate && python -c \"$summary\"" > /dev/null

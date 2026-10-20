@@ -9,10 +9,11 @@ or a prostate pilot unit): counts.tsv.gz (raw counts, genes x cells), annotation
 start, stop) and cell_meta.tsv.gz (cell, source_file, barcode). The cells, the reference
 and the genes are those of the R run; only the method changes.
 
-Method: counts normalised to 10,000 per cell and log1p, then infercnvpy.tl.infercnv at
-its defaults (window 100 genes, step 10, lfc_clip 3, dynamic_threshold 1.5, chrX and chrY
-excluded), the reference being the unit's ref_ groups, all cells of the unit in one chunk
-(infercnvpy's noise threshold is per chunk).
+Method: counts normalised to 10,000 per cell and log1p, then infercnvpy.tl.infercnv with
+every setting at the package default (window 100 genes, step 10, lfc_clip 3,
+dynamic_threshold 1.5, chrX and chrY excluded, chunksize 5000), the reference being the
+unit's ref_ groups. The CNV matrix is kept exactly as infercnvpy returns it; nothing is
+thresholded or filtered afterwards.
 
 Written to CNV_ROOT/<dataset>/<patient>/:
   cnv_matrix.npz        the full CNV matrix, every cell of the unit (reference included),
@@ -24,8 +25,8 @@ Written to CNV_ROOT/<dataset>/<patient>/:
                         02_run_pair.py --cnv-root reads it unchanged: float32 cells x windows,
                         value + 1 so that 1 is copy-neutral; a barcode naming two observation
                         cells is left out, as in 44_
-  diagnostics.json      per-cell signal (mean |CNV|) for reference and observation cells,
-                        overall and within total-count quintiles
+  diagnostics.json      descriptive only: cell counts and the median per-cell mean |CNV| of
+                        reference and observation cells, overall and within total-count quintiles
   provenance.json, SUCCESS
 Refuses to overwrite a unit that has SUCCESS.
 """
@@ -133,6 +134,13 @@ def main() -> None:
     if meta["barcode"].isna().any():
         raise ValueError(f"{int(meta['barcode'].isna().sum())} cells are missing from cell_meta.tsv.gz")
     order = order.drop_duplicates("gene").set_index("gene")
+    # Positions can be written as floats ("5239802.0"); read them as numbers, then whole bases.
+    for column in ("start", "stop"):
+        values = pd.to_numeric(order[column], errors="coerce")
+        if values.isna().any() or not np.allclose(values, np.round(values)):
+            raise ValueError(f"gene_order.tsv: {column} is not a whole number for "
+                             f"{int(values.isna().sum())} genes")
+        order[column] = np.round(values).astype(np.int64)
     missing = [g for g in genes if g not in order.index]
     if missing:
         raise ValueError(f"{len(missing)} genes have no position, first {missing[:3]}")
@@ -141,8 +149,8 @@ def main() -> None:
 
     data = ad.AnnData(X=counts, obs=pd.DataFrame({"group": annotations["group"].to_numpy()}, index=cells),
                       var=pd.DataFrame({"chromosome": chrom.to_numpy(),
-                                        "start": order.loc[genes, "start"].astype(int).to_numpy(),
-                                        "end": order.loc[genes, "stop"].astype(int).to_numpy()}, index=genes))
+                                        "start": order.loc[genes, "start"].to_numpy(),
+                                        "end": order.loc[genes, "stop"].to_numpy()}, index=genes))
     data.obs["total_counts"] = np.asarray(counts.sum(axis=1)).ravel()
     reference_groups = sorted(g for g in data.obs["group"].unique() if str(g).startswith("ref_"))
     if not reference_groups:
@@ -152,11 +160,7 @@ def main() -> None:
     sc.pp.log1p(data)
     params = {"reference_key": "group", "reference_cat": reference_groups, "window_size": 100, "step": 10,
               "lfc_clip": 3, "dynamic_threshold": 1.5, "exclude_chromosomes": ("chrX", "chrY")}
-    # One chunk for the whole unit: infercnvpy sets its noise threshold (dynamic_threshold x SD)
-    # per chunk of cells, so with its default 5,000-cell chunks a cell's values would depend on
-    # which cells share its chunk. One chunk gives one threshold for the unit, as in inferCNV.
-    params["chunksize"] = int(data.n_obs)
-    cnv.tl.infercnv(data, n_jobs=1, **params)
+    cnv.tl.infercnv(data, n_jobs=args.threads, **params)
     matrix = data.obsm["X_cnv"]
     matrix = matrix.tocsr() if sp.issparse(matrix) else sp.csr_matrix(matrix)
     chr_pos = {str(k): int(v) for k, v in data.uns["cnv"]["chr_pos"].items()}
@@ -197,16 +201,12 @@ def main() -> None:
                             "observation_median": float(np.median(signal[inside & ~reference])) if (inside & ~reference).any() else None,
                             "reference_median": float(np.median(signal[inside & reference])) if (inside & reference).any() else None,
                             "observation_n": int((inside & ~reference).sum()), "reference_n": int((inside & reference).sum())})
-    from scipy.stats import mannwhitneyu
-    auc = float(mannwhitneyu(signal[~reference], signal[reference]).statistic / ((~reference).sum() * reference.sum()))
     diagnostics = {"cells": int(len(rows)), "reference_cells": int(reference.sum()),
                    "observation_cells": int((~reference).sum()), "observation_exported": int(len(keep)),
                    "observation_left_out_shared_barcode": int(shared.sum()),
                    "windows": int(matrix.shape[1]), "reference_groups": reference_groups,
                    "signal_median": {"reference": float(np.median(signal[reference])),
                                      "observation": float(np.median(signal[~reference]))},
-                   "signal_auroc_observation_vs_reference": auc,
-                   "observation_above_reference_p95": float((signal[~reference] > np.quantile(signal[reference], 0.95)).mean()),
                    "by_total_count_quintile": by_quintile}
     (out / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
     rows[["cell", "is_reference", "total_counts", "signal"]].to_csv(out / "cnv_signal.tsv.gz", sep="\t", index=False,
@@ -220,7 +220,7 @@ def main() -> None:
                   "seconds": round(time.time() - started, 1)}
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2), encoding="utf-8")
     (out / "SUCCESS").write_text("done\n", encoding="utf-8")
-    print(json.dumps(diagnostics["signal_median"]), "AUROC", round(auc, 3), flush=True)
+    print(json.dumps(diagnostics["signal_median"]), flush=True)
 
 
 if __name__ == "__main__":
