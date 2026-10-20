@@ -13,13 +13,13 @@
 # exists: it refuses to start when its output folder already holds SUCCESS, and
 # it writes nowhere else.
 #
-#   CONFIDENCEOT_BENCH_ROOT     benchmark root (conditions/, conditions_ds/, runs*/)
+#   CONFIDENCEOT_BENCH_ROOT     benchmark root (conditions/, runs*/)
 #   CONFIDENCEOT_SCORE_RUNS     runs directory under the root, e.g. runs_acceptance_0.99
 #   CONFIDENCEOT_SCORE_ARMS     preprocessing labels to score, joined by + (or spaces)
 #   CONFIDENCEOT_SCORE_OUT      output folder (must not hold SUCCESS)
 #
-# A label containing _ds reads the equalised conditions_ds/ manifests, as the
-# runs did; every other label reads conditions/.
+# Every label, _ds ones included, is scored against conditions/<...>/manifest.csv,
+# as metrics.slurm does.
 #
 # No set -u, as everywhere in this repo.
 set -eo pipefail
@@ -52,9 +52,11 @@ score_one() {
 
 for arm in $arms; do
     test -d "$root/$runs_dir/$arm" || { echo "no runs for $arm under $root/$runs_dir" >&2; exit 2; }
-    tree=conditions
-    [[ "$arm" == *_ds* ]] && tree=conditions_ds
-    for manifest in "$root/$tree"/*/*/*/manifest.csv; do
+    # Every arm, _ds ones included, against conditions/<...>/manifest.csv, as
+    # metrics.slurm scored the 32-arm grid: the pairs, cells and truth are the same,
+    # and conditions_ds/ holds pair_manifest_downsampled.csv, which lacks the
+    # condition columns (n_cells, technical_level, biological_case) the scorer reports.
+    for manifest in "$root/conditions"/*/*/*/manifest.csv; do
         level_dir=$(dirname "$manifest")
         replicate_dir=$(dirname "$level_dir")
         tag=$(basename "$(dirname "$replicate_dir")")_$(basename "$replicate_dir")_$(basename "$level_dir")
