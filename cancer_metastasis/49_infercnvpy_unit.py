@@ -102,6 +102,9 @@ def main() -> None:
     parser.add_argument("--patient", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--threads", type=int, default=16)
+    parser.add_argument("--no-reference", action="store_true",
+                        help="For a unit with no normal cells: no reference is given, so infercnvpy uses its "
+                             "default, the mean of all cells; every cell is an observation cell")
     args = parser.parse_args()
 
     import anndata as ad
@@ -184,12 +187,17 @@ def main() -> None:
                                         "end": order.loc[genes, "stop"].to_numpy()}, index=genes))
     data.obs["total_counts"] = np.asarray(counts.sum(axis=1)).ravel()
     reference_groups = sorted(g for g in data.obs["group"].unique() if str(g).startswith("ref_"))
-    if not reference_groups:
+    if args.no_reference:
+        if reference_groups:
+            raise ValueError(f"--no-reference, but the unit has reference groups {reference_groups}")
+    elif not reference_groups:
         raise ValueError("annotations.tsv has no ref_ group")
     data.obs["is_reference"] = data.obs["group"].isin(reference_groups)
     sc.pp.normalize_total(data, target_sum=1e4)
     sc.pp.log1p(data)
-    params = {"reference_key": "group", "reference_cat": reference_groups, "window_size": 100, "step": 10,
+    # With --no-reference, infercnvpy's own default: the mean of all cells is the reference.
+    params = {"reference_key": None if args.no_reference else "group",
+              "reference_cat": None if args.no_reference else reference_groups, "window_size": 100, "step": 10,
               "lfc_clip": 3, "dynamic_threshold": 1.5, "exclude_chromosomes": ("chrX", "chrY")}
     cnv.tl.infercnv(data, n_jobs=args.threads, **params)
     matrix = data.obsm["X_cnv"]
@@ -236,7 +244,7 @@ def main() -> None:
                    "observation_cells": int((~reference).sum()), "observation_exported": int(len(keep)),
                    "observation_left_out_shared_barcode": int(shared.sum()),
                    "windows": int(matrix.shape[1]), "reference_groups": reference_groups,
-                   "signal_median": {"reference": float(np.median(signal[reference])),
+                   "signal_median": {"reference": float(np.median(signal[reference])) if reference.any() else None,
                                      "observation": float(np.median(signal[~reference]))},
                    "by_total_count_quintile": by_quintile}
     (out / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
