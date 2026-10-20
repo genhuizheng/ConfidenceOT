@@ -66,6 +66,10 @@ def main() -> None:
         meta.index = meta.index.astype(str)
         obs = meta.reindex(barcodes)
         obs.index = pd.Index(barcodes, name=None)
+        # A cell without a meta row has missing values; as categories they stay missing (not
+        # "" or "nan"), and h5py can write them, which it cannot for strings mixed with NaN.
+        for column in obs.columns:
+            obs[column] = obs[column].astype("category")
         var = pd.DataFrame({"gene_id": genes[0].to_numpy(),
                             "gene_symbol": (genes[1] if genes.shape[1] > 1 else genes[0]).to_numpy()})
         var.index = pd.Index(var["gene_symbol"].to_numpy())
