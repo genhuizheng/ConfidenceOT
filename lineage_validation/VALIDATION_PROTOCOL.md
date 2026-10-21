@@ -1,6 +1,6 @@
 # Lineage ground-truth validation of ConfidenceOT: KP-Tracer and Quinn 2021 (protocol)
 
-Status: **DRAFT, to be frozen.** Freezing is a commit that changes only this line to `FROZEN <date> <commit of this text>`. After that, any change is a new dated section at the end, marked post hoc. Nothing in it rewrites a definition above it.
+Status: **FROZEN 2026-10-21 508609f** (this freeze commit changes only this line). Any later change is a new dated section at the end, marked post hoc. Nothing in it rewrites a definition above it.
 
 ## 0. Provenance
 
