@@ -17,7 +17,9 @@ Can ConfidenceOT, fitted on RNA and/or CNV only, recover lineage-related matches
 - **clone / family**;
 - **cell**: where a metastatic cell's coupling mass goes.
 
-**Leakage rule:** lineage information never enters an OT fit, representation, QC, gate or calibration. This covers MetFamily, LineageGroup, trees, character matrices and the authors' metastatic scores. The OT input files carry only expression, the site (`sample_id`, the tumour or tissue name) and the malignant flag. Lineage labels are joined to OT outputs only after every run has finished.
+**Leakage rule:** lineage information never enters an OT fit, representation, QC, gate or calibration. This covers MetFamily, LineageGroup, trees, character matrices and the authors' metastatic scores. - **What OT reads.** `02_run_pair.py` reads only the expression, `sample_id` (the side), the malignant flag and, for its output tables only, `cell_type`. The pooled files written for this validation carry nothing else from the lineage.
+- **One exception, stated.** A single KP-Tracer tumour side reuses the equalised file of the 104-pair runs; its obs also holds `met_family`, which `02_run_pair.py` never reads.
+- **When labels join.** Lineage labels are joined to OT outputs only after every run has finished.
 
 ## 1. Units and cells
 

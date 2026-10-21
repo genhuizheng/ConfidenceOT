@@ -40,7 +40,9 @@ log=$out/STRATEGIES_${block}.log
 mkdir -p "$out"
 echo "== $(date -Iseconds) job ${SLURM_JOB_ID:-local} stage $stage acceptance $acceptance block $block commit $(git -C "$repo" rev-parse --short HEAD)" >> "$log"
 
-common="--within-side-acceptance-minimum $acceptance --save-coupling"
+# STRAT_EXTRA_ARGS (optional, empty by default) adds 02_run_pair.py options to every strategy,
+# e.g. --save-pairing-edges for the lineage validation; unset, the call is unchanged.
+common="--within-side-acceptance-minimum $acceptance --save-coupling ${STRAT_EXTRA_ARGS:-}"
 status=0
 
 run_strategy() {  # $1 = strategy, $2 = 02_run_pair.py extra arguments
