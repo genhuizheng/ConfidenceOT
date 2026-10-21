@@ -3,10 +3,14 @@
 #
 #   bash cancer_metastasis/submit_infercnvpy.sh --dry-run
 #   bash cancer_metastasis/submit_infercnvpy.sh
+#   bash cancer_metastasis/submit_infercnvpy.sh --all-uniform   # every patient of the uniform manifest
 #
 # Units, read only:
 #   ovarian GSE180661 and colorectal GSE225857: every (dataset, patient) of the uniform
 #     manifest, unit <base>/infercnv_r/runs_patient/<dataset>/<patient>/
+#   --all-uniform: every (dataset, patient) of the uniform manifest, whatever the dataset
+#     (added 2026-10-21: the uniform block's other 8 datasets, 17 patients, had no profile,
+#     so 21 of its 110 pairs could not run the CNV strategies). Same units, same method.
 #   prostate GSE271675: /scratch/10119/ghzheng/checks/prostate/pilot/Patient{1,2,4,5}/
 # Each unit's own counts, reference groups and gene order are used
 # (49_infercnvpy_unit.py); only the method changes. The R inferCNV outputs and the
@@ -24,10 +28,12 @@ set -eo pipefail
 
 dry_run=0
 tasks=8
+all_uniform=0
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
         --tasks) tasks=$2; shift 2 ;;
+        --all-uniform) all_uniform=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -52,13 +58,13 @@ list=$(mktemp)
 for p in Patient1 Patient2 Patient4 Patient5; do
     printf 'GSE271675\t%s\t%s\n' "$p" "$prostate_pilot/$p" >> "$list"
 done
-python3 - "$uniform_manifest" "$base/infercnv_r/runs_patient" >> "$list" <<'PY'
+python3 - "$uniform_manifest" "$base/infercnv_r/runs_patient" "$all_uniform" >> "$list" <<'PY'
 import csv, sys
 seen = []
 with open(sys.argv[1], newline="") as handle:
     for row in csv.DictReader(handle):
         key = (row["dataset_id"], row["patient_id"])
-        if key[0] in ("GSE180661", "GSE225857") and key not in seen:
+        if (sys.argv[3] == "1" or key[0] in ("GSE180661", "GSE225857")) and key not in seen:
             seen.append(key)
 for d, p in seen:
     print(f"{d}\t{p}\t{sys.argv[2]}/{d}/{p}")
