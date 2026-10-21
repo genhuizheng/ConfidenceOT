@@ -8,7 +8,9 @@
 #    an eligible pair, all its tumour H5ADs from prepared/h5ad, reference = the authors'
 #    normal cells, gene positions from GENCODE vM23 (GRCm38/mm10).
 # 2. An array runs cancer_metastasis/49_infercnvpy_unit.py --unit-h5ad on every unit,
-#    infercnvpy at its package defaults; a unit with SUCCESS is skipped.
+#    infercnvpy 0.6.1 with its infercnv parameters at their defaults, the reference being the
+#    unit's ref_normal cells (not the package default, the mean of all cells), input
+#    normalize_total(1e4) + log1p; a unit with SUCCESS is skipped.
 # 3. A summary job writes summary.tsv over all mice.
 # Output: <root>/cnv_profiles/infercnvpy_mouse/KPTracer/<mouse>/, the same files as for the
 # human units (full CNV matrix of every cell, the 02_run_pair.py export, diagnostics).

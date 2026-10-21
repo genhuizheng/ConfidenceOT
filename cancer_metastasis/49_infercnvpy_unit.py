@@ -9,11 +9,12 @@ or a prostate pilot unit): counts.tsv.gz (raw counts, genes x cells), annotation
 start, stop) and cell_meta.tsv.gz (cell, source_file, barcode). The cells, the reference
 and the genes are those of the R run; only the method changes.
 
-Method: counts normalised to 10,000 per cell and log1p, then infercnvpy.tl.infercnv with
-every setting at the package default (window 100 genes, step 10, lfc_clip 3,
-dynamic_threshold 1.5, chrX and chrY excluded, chunksize 5000), the reference being the
-unit's ref_ groups. The CNV matrix is kept exactly as infercnvpy returns it; nothing is
-thresholded or filtered afterwards.
+Method: infercnvpy 0.6.1; infercnv parameters at their defaults (window_size 100, step 10,
+lfc_clip 3, dynamic_threshold 1.5, exclude_chromosomes chrX/chrY, chunksize 5000 -- checked
+against the 0.6.1 source of tl.infercnv); reference = the unit's ref_ (non-malignant)
+groups, which is not the package default (the default is the mean of all cells; only Quinn
+uses --no-reference); input normalize_total(1e4) + log1p. The CNV matrix is kept exactly as
+infercnvpy returns it; nothing is thresholded or filtered afterwards.
 
 Written to CNV_ROOT/<dataset>/<patient>/:
   cnv_matrix.npz        the full CNV matrix, every cell of the unit (reference included),

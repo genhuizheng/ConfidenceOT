@@ -7,8 +7,9 @@
 # 1. One job builds the units (quinn2021/02_build_infercnvpy_units.py) from the converted
 #    H5ADs, gene positions from GENCODE v28 (GRCh38) or v19 (GRCh37) by each matrix's reference.
 # 2. An array runs cancer_metastasis/49_infercnvpy_unit.py --unit-h5ad --no-reference:
-#    infercnvpy at its package defaults, the reference being its default, the mean of all
-#    cells (every cell is an A549 tumour cell). A unit with SUCCESS is skipped.
+#    infercnvpy 0.6.1 with its infercnv parameters at their defaults and no reference passed,
+#    so the reference is the package default, the mean of all cells (every cell is an A549
+#    tumour cell); input normalize_total(1e4) + log1p. A unit with SUCCESS is skipped.
 # 3. A summary job writes summary.tsv.
 # Output: <root>/cnv_profiles/infercnvpy_experiment/Quinn2021/<experiment>/, the same files
 # as the other datasets (full CNV matrix of every cell, the 02_run_pair.py export).
