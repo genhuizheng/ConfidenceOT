@@ -66,14 +66,15 @@ def main() -> None:
         meta.index = meta.index.astype(str)
         join_rule = "barcode as written in both files"
         if not meta.index.isin(barcodes).any() and "sampleID" in meta:
-            # 10k: the matrix names a cell "<tissue>.<16 nt>-1", the meta table "<16 nt>-<library>"
-            # with the tissue in sampleID. Rebuild the matrix name from the meta row; used only
-            # when no barcode matches as written, and only if it is one-to-one.
-            core = meta.index.str.extract(r"^([ACGTN]{16})-\d+$")[0]
-            rebuilt = meta["sampleID"].astype(str).to_numpy() + "." + core.to_numpy() + "-1"
+            # 10k: the matrix names a cell "<tissue>.<16 nt>-<library>", the meta table
+            # "<16 nt>-<library>" with the tissue in sampleID (each tissue has its own library
+            # number in both files). Rebuild the matrix name from the meta row; used only when no
+            # barcode matches as written, and only if it is one-to-one.
+            core = meta.index.str.extract(r"^([ACGTN]{16}-\d+)$")[0]
+            rebuilt = meta["sampleID"].astype(str).to_numpy() + "." + core.to_numpy()
             if core.notna().all() and not pd.Index(rebuilt).duplicated().any():
                 meta.index = pd.Index(rebuilt)
-                join_rule = "<sampleID>.<16 nt barcode>-1 rebuilt from the meta row"
+                join_rule = "<sampleID>.<meta barcode as written> rebuilt from the meta row"
         obs = meta.reindex(barcodes)
         obs.index = pd.Index(barcodes, name=None)
         # A cell without a meta row has missing values; as categories they stay missing (not
