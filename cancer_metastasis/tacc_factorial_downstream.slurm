@@ -136,6 +136,11 @@ echo "parallel   $workers pseudobulk workers x $threads_per_worker threads on $c
 # The compartment the pseudobulk uses must be the one the gate used, or a
 # patient's pseudobulk mixes two definitions of malignant.
 extra=(--metastasis-size-csv "$size_csv")
+# Contrasts for 21_, space separated (e.g. metastasis_rejected_vs_metastasis_retained).
+# Unset: 21_'s default, primary_rejected_vs_primary_retained alone, as every earlier run.
+for contrast in ${CONFIDENCEOT_DOWNSTREAM_CONTRASTS:-}; do
+    extra+=(--contrast "$contrast")
+done
 if [[ -n "${CONFIDENCEOT_MALIGNANT_COLUMN:-}" && -n "${CONFIDENCEOT_MALIGNANT_ANNOTATIONS:-}" ]]; then
     echo "set CONFIDENCEOT_MALIGNANT_COLUMN or CONFIDENCEOT_MALIGNANT_ANNOTATIONS, not both" >&2
     exit 2
