@@ -36,7 +36,7 @@ The reference arms at 0.99 and 0.95 were scored in the same jobs with the same s
 
 At 0.90, `logcpm_noscale_cos` gives 0.742.
 
-**False asserted mass** is the cross-population mass between cells kept on both sides; the ideal is 0.
+**False asserted mass** is the cross-population mass between cells kept on both sides, in the plan's units (not a share); the ideal is 0.
 
 | Acceptance | Case | log1p_noscale_pcc | ds_cos | noscale_cos | raw |
 |---|---|---|---|---|---|
@@ -61,7 +61,10 @@ At 0.90, log1p_noscale_pcc rejects about 10% of cells at L0, matched or not (all
 ## Reading
 
 - **The gate does not separate matched from unmatched cells.** Under this geometry it rejects at about the same low rate either way, at every acceptance. Lowering the acceptance raises the rate a little without making it discriminate.
-- **The coupling mixes populations.** About 45% of the mass between kept cells crosses populations in `all_shared`, against 2–4% for the ranknm256 arms. So the geometry itself fails to pair cells, independently of the gate.
+- **The coupling mixes populations.** In `all_shared`, the cross-population mass between kept cells is 0.44–0.47, against 0.02–0.04 for the ranknm256 arms.
+  - This is false asserted mass, an absolute mass in the plan's units (the plan's total is about 0.7), not a share.
+  - The share of kept-to-kept mass that crosses populations is 1 − `asserted_same_population_fraction` in `pooled_<arm>.csv`, not yet read.
+  - Correction 2026-10-20: an earlier draft called 0.47 "about 45% of the mass".
 - **Unverified explanation.** Splatter's groups share one gene-mean backbone and differ only in a minority of DE genes. Pearson correlation over all 10,000 unscaled genes is then dominated by the shared backbone, so within-group and between-group correlations are nearly equal. HVG selection would concentrate on the DE genes.
 - **How to check it without rerunning OT:** compare the 1 − r distributions of same-group and different-group cell pairs on a few conditions.
 - **Scope.** This is one simulator. Splatter's DE structure decides how much signal sits outside the shared backbone, so the result is not a statement about real tissue.
