@@ -1,5 +1,5 @@
 #!/bin/bash
-# OT runs of the lineage validation (VALIDATION_DESIGN.md §2), through the existing pipeline.
+# OT runs of the lineage validation (VALIDATION_PROTOCOL.md §4), through the existing pipeline.
 #
 #   bash lineage_validation/submit_runs.sh --dry-run
 #   bash lineage_validation/submit_runs.sh

@@ -1,4 +1,4 @@
-"""Build the OT inputs of the lineage validation: pooled sides and manifests (VALIDATION_DESIGN.md §2).
+"""Build the OT inputs of the lineage validation: pooled sides and manifests (VALIDATION_PROTOCOL.md §4).
 
     python lineage_validation/01_build_inputs.py --out INPUTS_DIR
 
