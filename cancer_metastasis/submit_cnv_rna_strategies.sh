@@ -21,6 +21,9 @@
 # under. A pair whose step 1 did not complete, or left under 4 cells on a side, fails
 # with that reason in its log and is reported, never dropped silently.
 #
+# Cell cycle: arm A of the cycling x CNV factorial only. Cycling (non-G1) cells and the 97
+# cell-cycle genes are kept (user, 2026-10-20): no --cell-filter, no --exclude-genes.
+#
 # Output: <result>/cnv_rna_strategies_infercnvpy/acc<a>/<strategy>/arm_A/<block>/<label>/
 # The arm_A level keeps the tree the cycling x CNV factorial used, so 43_/47_ layouts and
 # 48_'s configuration glob (<root>/*/arm_*/*/*) find these runs.
