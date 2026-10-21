@@ -10,7 +10,14 @@
 set -eo pipefail
 
 dry_run=0
-[[ "${1:-}" == --dry-run ]] && dry_run=1
+replace=0
+for a in "$@"; do
+    case "$a" in
+        --dry-run) dry_run=1 ;;
+        --replace) replace=1 ;;   # keep the earlier conversion as converted_<time>, then convert again
+        *) echo "unknown option: $a" >&2; exit 2 ;;
+    esac
+done
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 data=${QUINN_DATA:-/scratch/10119/ghzheng/OT_project/data/quinn2021_GSE161363}
 env_path=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
@@ -19,7 +26,11 @@ out=$data/converted
 
 n=$(ls $raw/GSM*_matrix.*.mtx.gz 2> /dev/null | wc -l)
 (( n > 0 )) || { echo "no GSM*_matrix.*.mtx.gz in $raw" >&2; exit 1; }
-[[ -f "$out/conversion_report.json" ]] && { echo "$out/conversion_report.json exists; not rewritten" >&2; exit 2; }
+if [[ -f "$out/conversion_report.json" ]]; then
+    if (( ! replace )); then echo "$out/conversion_report.json exists; not rewritten (--replace keeps it aside and converts again)" >&2; exit 2; fi
+    kept=${out}_$(date +%Y%m%d_%H%M%S)
+    if (( dry_run )); then echo "DRY RUN  would move $out to $kept" >&2; else mv "$out" "$kept" && echo "earlier conversion kept as $kept" >&2; fi
+fi
 echo "$n experiments in $raw" >&2
 cmd="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; python quinn2021/01_convert_geo.py --raw $raw --out $out"
 if (( dry_run )); then echo "DRY RUN  $cmd"; exit 0; fi

@@ -64,6 +64,16 @@ def main() -> None:
         integer = bool(matrix.nnz == 0 or np.allclose(matrix.data, np.round(matrix.data)))
         meta = pd.read_csv(paths["meta"], sep="\t", index_col=0, dtype=str)
         meta.index = meta.index.astype(str)
+        join_rule = "barcode as written in both files"
+        if not meta.index.isin(barcodes).any() and "sampleID" in meta:
+            # 10k: the matrix names a cell "<tissue>.<16 nt>-1", the meta table "<16 nt>-<library>"
+            # with the tissue in sampleID. Rebuild the matrix name from the meta row; used only
+            # when no barcode matches as written, and only if it is one-to-one.
+            core = meta.index.str.extract(r"^([ACGTN]{16})-\d+$")[0]
+            rebuilt = meta["sampleID"].astype(str).to_numpy() + "." + core.to_numpy() + "-1"
+            if core.notna().all() and not pd.Index(rebuilt).duplicated().any():
+                meta.index = pd.Index(rebuilt)
+                join_rule = "<sampleID>.<16 nt barcode>-1 rebuilt from the meta row"
         obs = meta.reindex(barcodes)
         obs.index = pd.Index(barcodes, name=None)
         # A cell without a meta row has missing values; as categories they stay missing (not
@@ -106,6 +116,7 @@ def main() -> None:
             "files": {k: v.name for k, v in paths.items()}, "lineage_files": copied,
             "cells": int(data.n_obs), "genes": int(data.n_vars), "nonzero": int(matrix.nnz),
             "integer_counts": integer, "max_value": float(matrix.max()) if matrix.nnz else 0.0,
+            "join_rule": join_rule,
             "cells_with_meta": int(meta.index.isin(barcodes).sum()),
             "cells_without_meta": int(len(barcodes) - meta.index.isin(barcodes).sum()),
             "meta_rows_without_cell": int((~meta.index.isin(barcodes)).sum()),
