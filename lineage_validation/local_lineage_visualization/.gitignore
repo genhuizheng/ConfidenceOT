@@ -1,0 +1,5 @@
+data/
+figures/
+annotations/
+figures_index.tsv
+__pycache__/
