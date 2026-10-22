@@ -1,0 +1,33 @@
+PASS  run_pairwise index 0 exits 0
+PASS  run_pairwise index 1 exits 0
+PASS  KP: source = the 330 equalised cells (raw-only cells left out), target 120
+PASS  A_logcpm_BOT: BOT marginals exact  (row 1.3e-10, col 2.7e-15)
+PASS  A_logcpm_BOT: group masses sum to the column mass and match the saved plan
+PASS  A_logcpm_BOT: source groups 240 / 60 / 30 unlabelled / 0 other
+PASS  B_ranknm256dscos_UOT: UOT keeps every cell, mass not fixed  (total mass 0.646, row dev max 0.42)
+PASS  B_ranknm256dscos_UOT: group masses sum to the column mass and match the saved plan
+PASS  B_ranknm256dscos_UOT: source groups 240 / 60 / 30 unlabelled / 0 other
+PASS  AxUOT_logcpm_UOT: UOT keeps every cell, mass not fixed  (total mass 0.626, row dev max 0.47)
+PASS  AxUOT_logcpm_UOT: group masses sum to the column mass and match the saved plan
+PASS  AxUOT_logcpm_UOT: source groups 240 / 60 / 30 unlabelled / 0 other
+PASS  BxBOT_ranknm256dscos_BOT: BOT marginals exact  (row 2.8e-10, col 2.9e-15)
+PASS  BxBOT_ranknm256dscos_BOT: group masses sum to the column mass and match the saved plan
+PASS  BxBOT_ranknm256dscos_BOT: source groups 240 / 60 / 30 unlabelled / 0 other
+PASS  Quinn: target restricted to site M1 by the raw file's site (80 cells)
+PASS  Quinn: the other clone's 50 LL cells are 'other'
+PASS  score_pairwise exits 0
+PASS  KP: 100 family targets scored, 20 foreign not
+PASS  identity: under BOT the mean of S_B over all target cells is B's source cell share (60/330)  (0.181818 vs 0.181818)
+PASS  planted rare subclone L1.2 (20%) recovered by the enrichment rule in every arm (> 0.8; chance 0.5)  (                     arm  balanced_accuracy_enrichment
+            A_logcpm_BOT                          0.93
+        AxUOT_logcpm_UOT                          0.96
+    B_ranknm256dscos_UOT                          0.90
+BxBOT_ranknm256dscos_BOT                          0.84
+            A_logcpm_BOT                          1.00
+        AxUOT_logcpm_UOT                          1.00
+    B_ranknm256dscos_UOT                          1.00
+BxBOT_ranknm256dscos_BOT                          1.00)
+PASS  own-subclone log2 enrichment > 0 in every arm  (0.23 0.27 0.26 0.23 0.54 0.56 0.58 0.55)
+PASS  KP BOT: pi of L1.2 = cell share within the family (60/330)
+
+23 passed, 0 failed
