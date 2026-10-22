@@ -11,17 +11,23 @@ Runs anywhere the package is (a laptop after download, or TACC): it reads only t
    same coordinates and axis limits. Colours: retain #2b8cbe, reject #d7301f, exclude (step 1
    rejected) #8c8c8c, not run / not gated #e3e3e3; the pair's other cells in light grey behind.
 2. rejected_fraction_acc<a>.png (+ .tsv): pairs x (strategy, side), one quantity: the share of
-   the side's cells not retained (1 - retain), so a two-step column counts step 1 exclusions and
-   step 2 rejections together; not run is blank.
+   the side's gated cells not retained (1 - retain), so a two-step column counts step 1
+   exclusions and step 2 rejections together. Gated = retain + reject + exclude: not_gated
+   reference cells are not counted, and a two-step pair whose step 2 did not run is blank, as is
+   not run.
+5. state_rates_acc<a>.png (+ .tsv): stacked bars per dataset, retain / reject / exclude as the
+   mean over pairs of each pair's gated-cell shares, n pairs per bar; the .tsv adds the pooled
+   cell shares.
 3. gsea/<accession>_acc<a>.png: rows = strategy x side, columns = the 50 hallmark sets in
    47_gsea_dotplot.py's categories; NES blue-white-orange at +/-2, size = -log10 FDR in 47_'s bins,
    black outline = FDR < 0.05. A row with fewer than --min-patients paired patients is drawn
    without outlines and labelled "no significance (n < 3)"; a row with no result is labelled
    with the reason (FAILED, not run).
 4. deg/<accession>_<side>_acc<a>.png: genes x strategies, log2 fold change (RdBu_r, symmetric),
-   black dot = DESeq2 FDR < 0.05; genes are the union of each strategy's 10 strongest significant
-   genes (by |Wald statistic|). A strategy with no DEG table keeps its column, grey, labelled
-   with the reason.
+   black dot = DESeq2 FDR < 0.05; genes are the union of each strategy's 10 largest |Wald
+   statistic|, the same rule whether or not any gene is significant (a comparison with none is
+   drawn and says so). A strategy with no DEG table keeps its column, grey, labelled with the
+   reason; a comparison with no table at all is listed in figures_index.tsv with the reason.
 figures_index.tsv lists every figure with its inputs and flags.
 """
 
@@ -97,14 +103,77 @@ def umap_figure(cells: pd.DataFrame, acc: str, path: Path) -> None:
     plt.close(fig)
 
 
+KEY = ["pair_id", "dataset_id", "strategy", "side"]
+
+
+def gated_fractions(counts: pd.DataFrame, acc: str) -> pd.DataFrame:
+    """Per pair x strategy x side: retain / reject / exclude as shares of the cells the gates
+    scored. Denominator = retain + reject + exclude: not_gated cells (reference cells no gate
+    scored, the same in every strategy) are not counted as rejected. A two-step pair whose step 2
+    did not run has no final state, so it is left out of that strategy (not counted as excluded)."""
+    part = counts[counts["acceptance"].astype(str) == acc]
+    unfinished = part.loc[part["state"].astype(str).str.startswith("step2_"), ["pair_id", "strategy"]].drop_duplicates()
+    part = part.merge(unfinished.assign(unfinished=True), on=["pair_id", "strategy"], how="left")
+    part = part[part["unfinished"].isna() & part["state"].isin(list(COLOURS))]
+    wide = part.pivot_table(index=KEY, columns="state", values="cells", aggfunc="sum", fill_value=0)
+    wide = wide.reindex(columns=list(COLOURS), fill_value=0)
+    gated = wide.sum(axis=1)
+    shares = wide.div(gated, axis=0)[gated > 0]
+    shares["gated_cells"] = gated[gated > 0]
+    return shares.reset_index()
+
+
+def state_rates(counts: pd.DataFrame, acc: str, out: Path) -> Path:
+    """Stacked bars per dataset: mean over pairs of each pair's retain / reject / exclude share
+    (each pair weighs the same; datasets are never pooled). The .tsv also has the pooled cell
+    shares and the number of pairs behind each bar."""
+    shares = gated_fractions(counts, acc)
+    mean = shares.groupby(["dataset_id", "strategy", "side"])[list(COLOURS)].mean()
+    pooled = shares.assign(**{k: shares[k] * shares["gated_cells"] for k in COLOURS}).groupby(
+        ["dataset_id", "strategy", "side"])[list(COLOURS) + ["gated_cells"]].sum()
+    pooled[list(COLOURS)] = pooled[list(COLOURS)].div(pooled["gated_cells"], axis=0)
+    pairs = shares.groupby(["dataset_id", "strategy", "side"]).size().rename("pairs")
+    table = mean.add_prefix("mean_").join(pooled.add_prefix("pooled_")).join(pairs).reset_index()
+    table.to_csv(out / f"state_rates_acc{acc}.tsv", sep="\t", index=False)
+    datasets = sorted(table["dataset_id"].unique())
+    rows = [(s, side) for s, _ in ROWS for side in ("primary", "metastasis")]
+    fig, axes = plt.subplots(1, len(datasets), figsize=(4.6 * len(datasets), 0.36 * len(rows) + 1.6),
+                             sharey=True, squeeze=False)
+    for ax, dataset in zip(axes[0], datasets):
+        here = table[table["dataset_id"] == dataset].set_index(["strategy", "side"])
+        for i, key in enumerate(rows):
+            if key not in here.index:
+                ax.text(0.01, i, "not run", va="center", fontsize=7, color="#636363")
+                continue
+            left = 0.0
+            for state, colour in COLOURS.items():
+                value = float(here.loc[key, f"mean_{state}"])
+                ax.barh(i, value, left=left, height=0.72, color=colour, edgecolor="white", linewidth=1)
+                if value >= 0.06:
+                    ax.text(left + value / 2, i, f"{value:.0%}", ha="center", va="center", fontsize=6.5, color="white")
+                left += value
+            ax.text(1.01, i, f"n={int(here.loc[key, 'pairs'])}", va="center", fontsize=6.5, color="#636363")
+        ax.set_xlim(0, 1); ax.set_ylim(len(rows) - 0.5, -0.5)
+        ax.set_title(dataset, fontsize=9)
+        ax.set_xlabel("mean share of the pair's gated cells", fontsize=8)
+        ax.tick_params(axis="x", labelsize=7)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+    axes[0][0].set_yticks(range(len(rows)))
+    axes[0][0].set_yticklabels([f"{dict(ROWS)[s]}, {side}" for s, side in rows], fontsize=7.5)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c, label=k) for k, c in COLOURS.items()]
+    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, fontsize=8)
+    fig.suptitle(f"Gate states at acceptance {acc}: mean over pairs (n = pairs behind each bar)", fontsize=9)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.97))
+    path = out / f"state_rates_acc{acc}.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def rejected_fraction(counts: pd.DataFrame, acc: str, out: Path) -> Path:
-    part = counts[counts["acceptance"].astype(str) == acc].copy()
-    valid = part[part["state"].isin(["retain", "reject", "exclude"])]
-    totals = part.groupby(["pair_id", "dataset_id", "strategy", "side"])["cells"].sum()
-    retain = valid[valid["state"] == "retain"].groupby(["pair_id", "dataset_id", "strategy", "side"])["cells"].sum()
-    ran = valid.groupby(["pair_id", "dataset_id", "strategy", "side"])["cells"].sum()
-    value = (1 - retain.reindex(ran.index, fill_value=0) / totals.reindex(ran.index)).rename("not_retained")
-    table = value.reset_index()
+    shares = gated_fractions(counts, acc)
+    table = shares.assign(not_retained=1 - shares["retain"])[KEY + ["not_retained"]]
     columns = [(s, side) for s, _ in ROWS for side in ("primary", "metastasis")]
     wide = table.pivot_table(index=["dataset_id", "pair_id"], columns=["strategy", "side"], values="not_retained")
     wide = wide.reindex(columns=pd.MultiIndex.from_tuples(columns)).sort_index()
@@ -210,7 +279,8 @@ def gsea_figure(export: Path, accession: str, acc: str, min_patients: int, path:
     return {"rows": flags}
 
 
-def deg_figure(export: Path, accession: str, side: str, contrast: str, acc: str, path: Path) -> bool:
+def deg_figure(export: Path, accession: str, side: str, contrast: str, acc: str, path: Path) -> str:
+    """Draws the figure; returns "" when drawn, otherwise why not."""
     tables, missing = {}, {}
     for strategy, title in STRATEGIES:
         unit = unit_dir(export, acc, side, strategy, accession)
@@ -221,14 +291,17 @@ def deg_figure(export: Path, accession: str, side: str, contrast: str, acc: str,
         else:
             missing[title] = status if status != "done" else "no DEG table"
     if not tables:
-        return False
+        return "no DEG table: " + "; ".join(f"{t} {s}" for t, s in missing.items())
+    # the same rule in every figure, significant or not: each strategy's 10 largest |Wald|;
+    # significance is the dot, so a comparison with no FDR < 0.05 gene is still drawn
     genes = []
     for table in tables.values():
-        hits = table[table["fdr"] < 0.05]
-        genes += list(hits.reindex(hits["wald_statistic"].abs().sort_values(ascending=False).index).index[:10])
+        strongest = table["wald_statistic"].abs().dropna().sort_values(ascending=False)
+        genes += list(strongest.index[:10])
     genes = list(dict.fromkeys(genes))
     if not genes:
-        return False
+        return "no gene has a Wald statistic"
+    significant = sum(int((tab["fdr"] < 0.05).sum()) for tab in tables.values())
     # every strategy keeps its column; one without a table is left empty and says why
     columns = [t if t in tables else f"{t}\n[{missing[t][:40]}]" for _, t in STRATEGIES]
     lfc = pd.DataFrame({c: tables[t]["log2_fold_change"].reindex(genes) if t in tables else np.nan
@@ -245,12 +318,14 @@ def deg_figure(export: Path, accession: str, side: str, contrast: str, acc: str,
     ax.set_xticks(np.arange(lfc.shape[1]) + 0.5); ax.set_xticklabels(lfc.columns, rotation=60, ha="right", fontsize=7)
     ax.set_yticks(np.arange(len(genes)) + 0.5); ax.set_yticklabels(genes, fontsize=6)
     fig.colorbar(mesh, ax=ax, fraction=0.05, label="log2 fold change\nrejected vs retained")
-    ax.set_title(f"{accession}, {side}, acceptance {acc}; dot = FDR < 0.05", fontsize=8)
+    note = "" if significant else "\nno gene at FDR < 0.05 in any strategy"
+    ax.set_title(f"{accession}, {side}, acceptance {acc}; each strategy's 10 largest |Wald|, "
+                 f"dot = FDR < 0.05{note}", fontsize=8)
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    return True
+    return ""
 
 
 def main() -> None:
@@ -270,6 +345,8 @@ def main() -> None:
     for acc in args.acceptances:
         index.append({"figure": str(rejected_fraction(counts[counts["dataset_id"].isin(datasets)], acc, args.figures)),
                       "kind": "rejected_fraction", "acceptance": acc})
+        index.append({"figure": str(state_rates(counts[counts["dataset_id"].isin(datasets)], acc, args.figures)),
+                      "kind": "state_rates", "acceptance": acc})
         if not args.skip_umap:
             for path in sorted((args.export / "cells").glob("*/*.csv.gz")):
                 dataset, pair = path.parent.name, path.name[:-len(".csv.gz")]
@@ -289,10 +366,14 @@ def main() -> None:
                           "note": json.dumps(info["rows"])})
             for side, contrast in SIDES:
                 target = args.figures / "deg" / f"{accession}_{side}_acc{acc}.png"
-                drawn = deg_figure(args.export, accession, side, contrast, acc, target)
-                index.append({"figure": str(target) if drawn else "", "kind": "deg", "acceptance": acc,
-                              "dataset": accession, "side": side, "note": "" if drawn else "no DEG table or no significant gene"})
-    pd.DataFrame(index).to_csv(args.figures / "figures_index.tsv", sep="\t", index=False)
+                why = deg_figure(args.export, accession, side, contrast, acc, target)
+                index.append({"figure": "" if why else str(target), "kind": "deg", "acceptance": acc,
+                              "dataset": accession, "side": side, "note": why})
+    previous = args.figures / "figures_index.tsv"
+    if args.skip_umap and previous.exists():  # keep the UMAP rows of the run that drew them
+        old = pd.read_csv(previous, sep="\t", dtype=str)
+        index = old[old["kind"] == "umap"].to_dict("records") + index
+    pd.DataFrame(index).to_csv(previous, sep="\t", index=False)
     print(f"{sum(1 for r in index if r['figure'])} figures written to {args.figures}")
 
 
