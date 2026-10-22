@@ -48,14 +48,16 @@ safe = reference48.safe
 
 
 def sample_sources(paths: list[Path]) -> dict:
-    """(dataset, sample) -> h5ads_json, from both sides of every manifest row; a sample that two
-    rows give different files for is an error, never a guess."""
+    """(dataset, patient, sample) -> h5ads_json, from both sides of every manifest row; a sample
+    that two rows give different files for is an error, never a guess. The patient is part of the
+    key because sample names repeat between patients (GSE180661 names samples by site)."""
     found: dict = {}
     for path in paths:
         table = pd.read_csv(path)
         for side in ("source", "target"):
-            for dataset, sample, files in table[["dataset_id", f"{side}_sample", f"{side}_h5ads_json"]].itertuples(index=False):
-                key = (str(dataset), str(sample))
+            for dataset, patient, sample, files in table[["dataset_id", "patient_id", f"{side}_sample",
+                                                          f"{side}_h5ads_json"]].itertuples(index=False):
+                key = (str(dataset), str(patient), str(sample))
                 if key in found and found[key] != str(files):
                     raise SystemExit(f"{key}: two manifests name different h5ad files")
                 found[key] = str(files)
@@ -84,10 +86,10 @@ def patient_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     import scanpy as sc
 
     pieces = []
-    for (dataset, sample), part in cells.groupby(["dataset_id", "sample"], sort=True):
-        if (dataset, sample) not in sources:
-            raise KeyError(f"{dataset} {sample}: no manifest row names this sample's h5ad")
-        data = load_exact_side(json.loads(sources[(dataset, sample)]), sample)
+    for (dataset, patient, sample), part in cells.groupby(["dataset_id", "patient_id", "sample"], sort=True):
+        if (dataset, patient, sample) not in sources:
+            raise KeyError(f"{dataset} {patient} {sample}: no manifest row names this sample's h5ad")
+        data = load_exact_side(json.loads(sources[(dataset, patient, sample)]), sample)
         data.obs_names = data.obs_names.astype(str)
         wanted = part["observation_id"].tolist()
         missing = sorted(set(wanted) - set(data.obs_names))
