@@ -49,8 +49,9 @@ CONSISTENCY = [("always", "retained by every gated pair (f = 1)", "#0072B2"),
                ("sometimes", "retained by some (0 < f < 1)", "#BFBFBF"),
                ("never", "retained by none (f = 0)", "#D55E00")]
 CONTEXT = "#F0F0F0"
-SAMPLE_COLOURS = ["#762A83", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442",
-                  "#999999", "#000000"]
+# samples: never the retained-fraction poles (#D55E00, #0072B2) or its grey midpoint
+SAMPLE_COLOURS = ["#762A83", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#F0E442", "#8C510A", "#01665E",
+                  "#000000", "#C51B7D"]
 plt.rcParams.update({"font.family": "DejaVu Sans", "pdf.fonttype": 42})
 
 
@@ -144,7 +145,9 @@ def umap_figure(coords: pd.DataFrame, fractions: pd.DataFrame, sides: list[str],
     bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=FRACTION), cax=cax, orientation="horizontal")
     bar.set_label("retained fraction f = pairs that retained the cell / pairs that gated it", fontsize=8)
     bar.ax.tick_params(labelsize=7)
-    fig.suptitle(f"{title}  -  {n_pairs} pair(s), acceptance {acc}", fontsize=9.5)
+    per_cell = fractions.loc[fractions["side"].isin(sides) & (fractions["gated_pairs"] > 0), "gated_pairs"]
+    fig.suptitle(f"{title}  -  {n_pairs} pair(s); a cell is gated by {per_cell.median():g} (median, "
+                 f"range {per_cell.min()}-{per_cell.max()}); acceptance {acc}", fontsize=9.5)
     fig.tight_layout(rect=(0, 0.035, 1, 0.985))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
