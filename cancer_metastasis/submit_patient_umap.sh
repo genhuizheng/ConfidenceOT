@@ -3,7 +3,12 @@
 # five CNV / RNA strategies, then a small tarball of the coordinates for download.
 #
 #   bash cancer_metastasis/submit_patient_umap.sh --dry-run
-#   bash cancer_metastasis/submit_patient_umap.sh [--export export_20261021b] [--tasks 8]
+#   bash cancer_metastasis/submit_patient_umap.sh [--export export_20261021b] [--tasks 8] [--space raw|gate]
+#
+# --space raw (default): 48_'s recipe on the original counts -> patient_umap_<export>.
+# --space gate: the gates' own ranknm256_noscale_ds_cos on the depth-equalised counts the strategy
+#   OT read (the same manifests submit_cnv_rna_strategies.sh passes as --manifest-ds)
+#   -> patient_umap_gate_<export>.
 #
 # Cells: every reference cell of every pair of the patient in the strategy export package
 # (<export>/cells), the union by cell_uid. Counts: the original h5ads named by the manifests
@@ -23,17 +28,25 @@ uniform_manifest=$result/manifest/pancancer_20260924/pair_manifest_eligible.csv
 prostate_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
 export_name=export_20261021b
 tasks=8
+space=raw
 dry_run=0
 while (( $# )); do
     case "$1" in
         --export) export_name=$2; shift 2 ;;
         --tasks) tasks=$2; shift 2 ;;
+        --space) space=$2; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+[[ "$space" == raw || "$space" == gate ]] || { echo "--space raw or gate" >&2; exit 2; }
 cells=$result/cnv_rna_strategies_export/$export_name/cells
 out=$result/patient_umap_$export_name
+if [[ "$space" == gate ]]; then
+    uniform_manifest=$result/manifest/factorial_20260929/uniform_ds.csv
+    prostate_manifest=$result/downsampled_GSE271675_20260916/pair_manifest_downsampled.csv
+    out=$result/patient_umap_gate_$export_name
+fi
 logs=$out/logs
 
 problems=0
@@ -56,12 +69,12 @@ submit() {
 }
 (( dry_run )) || mkdir -p "$logs"
 
-array=$(submit -p gg -N 1 -n 1 -c 16 -t 04:00:00 -A MCB26031 -J pu_umap --array=0-$((tasks - 1)) \
+array=$(submit -p gg -N 1 -n 1 -c 16 -t 04:00:00 -A MCB26031 -J pu_$space --array=0-$((tasks - 1)) \
     -o "$logs/umap_%A_%a.out" -e "$logs/umap_%A_%a.err" \
-    --wrap "$activate && python cancer_metastasis/53_patient_umap.py --cells $cells --manifest $uniform_manifest --manifest $prostate_manifest --out $out --task-index \$SLURM_ARRAY_TASK_ID --task-count $tasks")
+    --wrap "$activate && python cancer_metastasis/53_patient_umap.py --cells $cells --manifest $uniform_manifest --manifest $prostate_manifest --out $out --space $space --task-index \$SLURM_ARRAY_TASK_ID --task-count $tasks")
 echo "patient UMAPs: $array ($tasks tasks) -> $out/patients" >&2
 pack="cd $out && echo \"DONE \$(ls patients/*/*/DONE | wc -l), FAILED \$(ls patients/*/*/FAILED 2> /dev/null | wc -l)\" && (ls patients/*/*/FAILED 2> /dev/null || true) && tar -czf $out.tar.gz.partial patients && mv $out.tar.gz.partial $out.tar.gz && md5sum $out.tar.gz > $out.tar.gz.md5 && cat $out.tar.gz.md5 && du -h $out.tar.gz"
 id=$(submit --dependency=afterany:$array -p gg -N 1 -n 1 -c 4 -t 01:00:00 -A MCB26031 -J pu_pack \
     -o "$logs/pack_%j.out" -e "$logs/pack_%j.err" --wrap "$pack")
 echo "pack: $id -> $out.tar.gz" >&2
-echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown); cells $cells"
+echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown); space $space; manifests $uniform_manifest $prostate_manifest; cells $cells"

@@ -25,11 +25,15 @@ Writes to FIGURES_DIR:
                         per strategy coloured by retained_fraction (vermillion 0, grey 0.5, blue 1)
   consistency_acc<a>_<dataset>.png   one row per patient, one column per strategy: stacked shares
                         of cells with f = 1 / 0 < f < 1 / f = 0, n pairs per patient
+  overview_acc<a>_<dataset>_<side>.png   every patient of the dataset in one figure: one row per
+                        patient on its own UMAP, columns samples + each strategy's retained fraction
+Titles say which coordinates were drawn (53_ --space raw or gate), read from reference.json.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import matplotlib
@@ -85,8 +89,16 @@ def consistency(fraction: pd.Series) -> dict:
             "never": float((f == 0).mean())}
 
 
+def space_label(folder: Path) -> str:
+    """What the coordinates were computed from, as 53_ recorded it."""
+    record = folder / "reference.json"
+    space = json.loads(record.read_text()).get("space", "raw") if record.exists() else "raw"
+    return ("UMAP in the gate space (ranknm256_noscale_ds_cos, equalised counts)" if space == "gate"
+            else "UMAP on raw counts (log-normalised, 48_ recipe)")
+
+
 def umap_figure(coords: pd.DataFrame, fractions: pd.DataFrame, sides: list[str], acc: str, n_pairs: int,
-                title: str, path: Path) -> None:
+                title: str, path: Path, space: str = "") -> None:
     x, y = coords["umap_1"].to_numpy(float), coords["umap_2"].to_numpy(float)
     pad_x, pad_y = (np.nanmax(x) - np.nanmin(x)) * 0.04, (np.nanmax(y) - np.nanmin(y)) * 0.04
     limits = ((np.nanmin(x) - pad_x, np.nanmax(x) + pad_x), (np.nanmin(y) - pad_y, np.nanmax(y) + pad_y))
@@ -147,10 +159,62 @@ def umap_figure(coords: pd.DataFrame, fractions: pd.DataFrame, sides: list[str],
     bar.ax.tick_params(labelsize=7)
     per_cell = fractions.loc[fractions["side"].isin(sides) & (fractions["gated_pairs"] > 0), "gated_pairs"]
     fig.suptitle(f"{title}  -  {n_pairs} pair(s); a cell is gated by {per_cell.median():g} (median, "
-                 f"range {per_cell.min()}-{per_cell.max()}); acceptance {acc}", fontsize=9.5)
+                 f"range {per_cell.min()}-{per_cell.max()}); acceptance {acc}\n{space}", fontsize=9.5)
     fig.tight_layout(rect=(0, 0.035, 1, 0.985))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def overview_figure(items: list, dataset: str, side: str, acc: str, space: str, path: Path) -> None:
+    """Every patient of a dataset in one figure: one row per patient (its own UMAP), columns =
+    samples, then each strategy's retained fraction; the same colours as the per-patient figures."""
+    n = len(items)
+    columns = ["samples"] + [label for _, label in STRATEGIES]
+    fig, axes = plt.subplots(n, len(columns), figsize=(1.75 * len(columns) + 1.6, 1.75 * n + 1.2), squeeze=False)
+    norm = Normalize(0, 1)
+    for r, (patient, coords, fractions, n_pairs) in enumerate(items):
+        x, y = coords["umap_1"].to_numpy(float), coords["umap_2"].to_numpy(float)
+        mine = coords["side"].to_numpy() == side
+        size = float(np.clip(2500 / max(mine.sum(), 1), 0.3, 6))
+        position = pd.Series(np.arange(len(coords)), index=coords["cell_uid"].to_numpy())
+        order = np.random.default_rng(0).permutation(len(coords))
+        draw = order[mine[order]]
+        for c in range(len(columns)):
+            ax = axes[r, c]
+            ax.scatter(x[~mine], y[~mine], s=size * 0.4, c=CONTEXT, linewidths=0, rasterized=True)
+            if c == 0:
+                samples = sorted(coords.loc[mine, "sample"].astype(str).unique())
+                colour = {s: SAMPLE_COLOURS[k % len(SAMPLE_COLOURS)] for k, s in enumerate(samples)}
+                ax.scatter(x[draw], y[draw], s=size, c=[colour[s] for s in coords["sample"].astype(str).to_numpy()[draw]],
+                           linewidths=0, rasterized=True)
+                ax.set_ylabel(f"{patient}\n{n_pairs} pair(s), {len(samples)} sample(s)", fontsize=6.5)
+            else:
+                strategy = STRATEGIES[c - 1][0]
+                part = fractions[(fractions["strategy"] == strategy) & (fractions["side"] == side)]
+                value = np.full(len(coords), np.nan)
+                value[position.loc[part["cell_uid"]].to_numpy()] = part["retained_fraction"].to_numpy(float)
+                scored = draw[np.isfinite(value[draw])]
+                ax.scatter(x[scored], y[scored], s=size, c=value[scored], cmap=FRACTION, norm=norm, linewidths=0,
+                           rasterized=True)
+                share = consistency(part["retained_fraction"])
+                if np.isfinite(share["always"]):
+                    ax.text(0.02, 0.02, f"{share['always']:.0%} / {share['sometimes']:.0%} / {share['never']:.0%}",
+                            transform=ax.transAxes, fontsize=5.5, color="#333333")
+            ax.set_xticks([]); ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_color("#d0d0d0")
+            if r == 0:
+                ax.set_title(columns[c], fontsize=8)
+    cax = fig.add_axes([0.3, 0.006, 0.4, 0.004])
+    bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=FRACTION), cax=cax, orientation="horizontal")
+    bar.set_label("retained fraction f (corner: share of cells f=1 / 0<f<1 / f=0)", fontsize=7)
+    bar.ax.tick_params(labelsize=6)
+    fig.suptitle(f"{dataset}  -  {side.upper()}, acceptance {acc}: every patient on its own joint UMAP\n{space}",
+                 fontsize=9, color=SIDE_COLOURS[side])
+    fig.tight_layout(rect=(0, 0.012, 1, 0.99))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -211,8 +275,10 @@ def main() -> None:
     if args.datasets:
         index = index[index["dataset_id"].isin(args.datasets)]
     summary_rows, missing = [], []
+    overview_space = ""
     for acc in args.acceptances:
         all_cells = []
+        overview: dict = {}
         for (dataset, patient), part in index.groupby(["dataset_id", "patient_id"], sort=True):
             fractions = patient_fractions([Path(p) for p in part["path"]], acc)
             fractions.insert(0, "patient_id", patient)
@@ -232,8 +298,14 @@ def main() -> None:
                 missing.append(f"{dataset} {patient}")
                 continue
             coords = pd.read_csv(umap_file)
+            overview_space = space_label(umap_file.parent)
             umap_figure(coords, fractions, sides, acc, len(part), f"{dataset}  {patient}",
-                        args.figures / "umap" / f"acc{acc}" / dataset / f"{patient}.png")
+                        args.figures / "umap" / f"acc{acc}" / dataset / f"{patient}.png", overview_space)
+            overview.setdefault(dataset, []).append((patient, coords, fractions, len(part)))
+        for dataset, items in overview.items():
+            for side in sides:
+                overview_figure(items, dataset, side, acc, overview_space,
+                                args.figures / f"overview_acc{acc}_{dataset}_{side}.png")
         pd.concat(all_cells, ignore_index=True).to_csv(args.figures / f"cell_retained_fraction_acc{acc}.csv.gz",
                                                        index=False, compression="gzip")
     summary = pd.DataFrame(summary_rows)

@@ -10,11 +10,21 @@ the 51_strategy_export.py package (cells/<dataset>/<pair>.csv.gz), keyed by cell
 several pairs therefore enters once; where pairs subsampled a large side differently, the union
 holds every cell any pair used.
 
-**Coordinates.** 48_reference_umap.py's recipe, unchanged (its constants are imported): original
-counts of each sample's h5ad (the manifests' *_h5ads_json), normalize_total 1e4, log1p, 2,000
-Seurat HVGs, scale (max 10), PCA 40 (arpack), 20 neighbours, UMAP, seed 20260904; both sides
-stacked. Coordinates compare only within one patient and are never recomputed: a patient with
-DONE is skipped.
+**Coordinates, --space raw (default).** 48_reference_umap.py's recipe, unchanged (its constants are
+imported): original counts of each sample's h5ad (the manifests' *_h5ads_json), normalize_total
+1e4, log1p, 2,000 Seurat HVGs, scale (max 10), PCA 40 (arpack), 20 neighbours, UMAP, seed
+20260904; both sides stacked.
+
+**Coordinates, --space gate.** The geometry the gates see: give the depth-equalised manifests
+(27_downsample_counts.py's copies, the ones the strategy OT read) and the coordinates are
+ranknm256_noscale_ds_cos built by the gate's own code (common.prepare_joint_representation with
+Preprocessing.from_label, primary as source and metastasis as target; 2,000 HVGs and 30 PCs, the
+02_run_pair.py defaults the strategy runs used), L2-normalised as the cosine cost does, then 20
+neighbours and UMAP with the same seed. The recipe is the gate's; it is fitted on the patient's
+pooled cells, so it is not any single pair's geometry.
+
+Coordinates compare only within one patient and are never recomputed: a patient with DONE is
+skipped.
 
 Writes OUT/patients/<dataset>/<patient>/: patient_umap.csv.gz (cell_uid, dataset_id, patient_id,
 side, sample, observation_id, umap_1, umap_2, total_counts, detected_genes, pairs = the pairs the
@@ -38,7 +48,10 @@ from scipy import sparse
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from common import expression_matrix, load_exact_side  # noqa: E402
+from common import expression_matrix, load_exact_side, prepare_joint_representation  # noqa: E402
+
+GATE_LABEL = "ranknm256_noscale_ds_cos"
+GATE_N_HVG, GATE_N_PCS = 2000, 30  # 02_run_pair.py's --n-hvg / --n-pcs defaults; the strategy runs pass neither
 
 _spec = importlib.util.spec_from_file_location("reference48", HERE / "48_reference_umap.py")
 reference48 = importlib.util.module_from_spec(_spec)
@@ -136,6 +149,79 @@ def patient_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     return record
 
 
+def load_side(cells: pd.DataFrame, sources: dict):
+    """One side's cells as one AnnData over all its samples, obs_names = cell_uid."""
+    import anndata as ad
+
+    pieces = []
+    for (dataset, patient, sample), part in cells.groupby(["dataset_id", "patient_id", "sample"], sort=True):
+        if (dataset, patient, sample) not in sources:
+            raise KeyError(f"{dataset} {patient} {sample}: no manifest row names this sample's h5ad")
+        data = load_exact_side(json.loads(sources[(dataset, patient, sample)]), sample)
+        data.obs_names = data.obs_names.astype(str)
+        wanted = part["observation_id"].tolist()
+        missing = sorted(set(wanted) - set(data.obs_names))
+        if missing:
+            raise KeyError(f"{sample}: {len(missing)} reference cells are absent from the h5ad, e.g. {missing[:3]}")
+        data = data[wanted].copy()
+        data.obs_names = part["cell_uid"].tolist()
+        pieces.append(data)
+    if len(pieces) == 1:
+        return pieces[0]
+    return ad.concat(pieces, join="inner", merge="same", uns_merge="same", index_unique=None)
+
+
+def gate_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
+    import anndata as ad
+    import scanpy as sc
+
+    from confidenceot.preprocessing import Preprocessing
+
+    configuration = Preprocessing.from_label(GATE_LABEL)
+    primary = load_side(cells[cells["side"] == "primary"], sources)
+    metastasis = load_side(cells[cells["side"] == "metastasis"], sources)
+    source, target, genes, provenance = prepare_joint_representation(
+        primary, metastasis, n_hvg=GATE_N_HVG, n_pcs=GATE_N_PCS, seed=SEED,
+        representation=configuration.normalisation, rank_top_n=configuration.rank_top_n,
+        minimum_detection_rate=configuration.minimum_detection_rate, cost=configuration.cost,
+        equalise_depth=configuration.equalise_depth, scale_genes=configuration.scale_genes,
+        label_stem=configuration.label_stem)
+    if provenance.get("label") != GATE_LABEL:
+        raise SystemExit(f"built {provenance.get('label')!r}, not {GATE_LABEL!r}")
+    names = list(primary.obs_names) + list(metastasis.obs_names)
+    data = ad.AnnData(X=np.zeros((len(names), 1), dtype=np.float32))
+    data.obs_names = names
+    data.obsm["X_gate"] = np.vstack([np.asarray(source), np.asarray(target)]).astype(np.float32)
+    sc.pp.neighbors(data, n_neighbors=N_NEIGHBORS, use_rep="X_gate", random_state=SEED)
+    sc.tl.umap(data, random_state=SEED)
+    depth = {}
+    for side, side_data in (("primary", primary), ("metastasis", metastasis)):
+        matrix = sparse.csr_matrix(expression_matrix(side_data))
+        depth[side] = (np.asarray(matrix.sum(axis=1)).ravel(), np.asarray((matrix > 0).sum(axis=1)).ravel())
+    table = cells.set_index("cell_uid").loc[names].rename_axis("cell_uid").reset_index()
+    table["umap_1"], table["umap_2"] = data.obsm["X_umap"][:, 0], data.obsm["X_umap"][:, 1]
+    table["total_counts"] = np.concatenate([depth["primary"][0], depth["metastasis"][0]])
+    table["detected_genes"] = np.concatenate([depth["primary"][1], depth["metastasis"][1]])
+    out.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out / "patient_umap.csv.gz", index=False, compression="gzip")
+    counts = table["total_counts"].to_numpy(float)
+    record = {"space": "gate", "label": GATE_LABEL, "dataset_id": str(cells["dataset_id"].iloc[0]),
+              "patient_id": str(cells["patient_id"].iloc[0]),
+              "cells": {side: int((table["side"] == side).sum()) for side in ("primary", "metastasis")},
+              "samples": {side: sorted(table.loc[table["side"] == side, "sample"].unique().tolist())
+                          for side in ("primary", "metastasis")},
+              "pairs": sorted(set(";".join(table["pairs"]).split(";"))),
+              "n_hvg": GATE_N_HVG, "n_pcs": GATE_N_PCS, "n_neighbors": N_NEIGHBORS, "seed": SEED,
+              # equalised input reads as a near-constant total; recorded so a raw manifest shows
+              "total_counts_quantiles": {q: float(np.quantile(counts, q)) for q in (0.05, 0.5, 0.95)},
+              "genes_md5": hashlib.md5("\n".join(map(str, genes)).encode()).hexdigest(),
+              "provenance": {k: v for k, v in provenance.items() if isinstance(v, (str, int, float, bool))},
+              "scanpy": sc.__version__}
+    (out / "reference.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    (out / "hvg.txt").write_text("\n".join(map(str, genes)) + "\n", encoding="utf-8")
+    return record
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cells", type=Path, required=True, help="the export package's cells/ directory")
@@ -144,6 +230,9 @@ def main() -> None:
     parser.add_argument("--datasets", nargs="+")
     parser.add_argument("--task-index", type=int, default=0)
     parser.add_argument("--task-count", type=int, default=1)
+    parser.add_argument("--space", choices=["raw", "gate"], default="raw",
+                        help="raw: 48_'s recipe on original counts; gate: ranknm256_noscale_ds_cos on the "
+                             "equalised counts (give the depth-equalised manifests)")
     args = parser.parse_args()
     sources = sample_sources(args.manifest)
     cells = patient_cells(args.cells, args.datasets)
@@ -158,7 +247,7 @@ def main() -> None:
             continue
         try:
             part = cells[(cells["dataset_id"] == dataset) & (cells["patient_id"] == patient)]
-            record = patient_umap(part, sources, out)
+            record = (gate_umap if args.space == "gate" else patient_umap)(part, sources, out)
             (out / "DONE").write_text("done\n", encoding="utf-8")
             (out / "FAILED").unlink(missing_ok=True)
             print(f"{dataset} {patient}: {record['cells']} cells, {len(record['pairs'])} pairs", flush=True)
