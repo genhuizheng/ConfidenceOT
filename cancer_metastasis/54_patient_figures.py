@@ -1,0 +1,249 @@
+"""Patient-by-patient figures for the five CNV / RNA gate strategies, from the 51_ export package
+and the 53_ patient UMAPs. No OT is rerun: the pair gates are combined per cell.
+
+    python cancer_metastasis/54_patient_figures.py EXPORT_DIR PATIENT_UMAP_DIR FIGURES_DIR
+        [--acceptances 0.99 0.95 0.90] [--datasets ...] [--sides primary] [--skip-umap]
+
+**Per cell (rule c, no threshold).** A cell of a patient is a reference cell of one or more of
+that patient's pairs (a primary sample is paired with each metastasis of the patient, and the
+reverse). For each strategy and acceptance:
+  gated pairs     the pairs whose gate scored the cell (single gates: retain or reject; a two-step
+                  gate: its final state, retain / step 2 reject / step 1 reject). A two-step pair
+                  whose step 2 did not run has no final state and is left out for that strategy.
+  retained pairs  the gated pairs that (finally) retained the cell
+  retained_fraction = retained pairs / gated pairs, NaN when no pair gated the cell.
+The same cell can be retained against one metastasis and rejected against another; the fraction
+says how often. A patient with one pair has fractions 0 or 1 only.
+
+Writes to FIGURES_DIR:
+  cell_retained_fraction_acc<a>.csv.gz  one row per cell x strategy: gated / retained pairs, fraction
+  patient_summary.tsv   patient x strategy x side x acceptance: cells, pairs, the median number of
+                        pairs that gated a cell (a primary sample meets only its own metastases), mean fraction, and the
+                        shares of cells retained by every gated pair (f = 1), by some (0 < f < 1)
+                        and by none (f = 0)
+  umap/acc<a>/<dataset>/<patient>.png   the patient's joint UMAP: row 0 the samples, then one row
+                        per strategy coloured by retained_fraction (vermillion 0, grey 0.5, blue 1)
+  consistency_acc<a>_<dataset>.png   one row per patient, one column per strategy: stacked shares
+                        of cells with f = 1 / 0 < f < 1 / f = 0, n pairs per patient
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
+
+STRATEGIES = [("rna", "RNA only"), ("cnv", "CNV only"), ("rna_cnv", "CNV + RNA"),
+              ("cnv_then_rna", "CNV -> RNA, final"), ("rna_then_cnv", "RNA -> CNV, final")]
+SCORED = {"retain", "reject", "exclude"}  # exclude only occurs in the two-step final columns
+SIDE_COLOURS = {"primary": "#762A83", "metastasis": "#1B7837"}
+# diverging, Okabe-Ito poles as in 52_: never retained vermillion, always retained blue, grey midpoint
+FRACTION = LinearSegmentedColormap.from_list("retained_fraction", ["#D55E00", "#BFBFBF", "#0072B2"])
+CONSISTENCY = [("always", "retained by every gated pair (f = 1)", "#0072B2"),
+               ("sometimes", "retained by some (0 < f < 1)", "#BFBFBF"),
+               ("never", "retained by none (f = 0)", "#D55E00")]
+CONTEXT = "#F0F0F0"
+SAMPLE_COLOURS = ["#762A83", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442",
+                  "#999999", "#000000"]
+plt.rcParams.update({"font.family": "DejaVu Sans", "pdf.fonttype": 42})
+
+
+def patient_fractions(files: list[Path], acc: str) -> pd.DataFrame:
+    """One row per cell x strategy: gated_pairs, retained_pairs, retained_fraction."""
+    rows = []
+    for path in files:
+        columns = ["cell_uid", "pair_id", "side"] + [f"{s}__acc{acc}" for s, _ in STRATEGIES]
+        cells = pd.read_csv(path, usecols=lambda c: c in set(columns))
+        for strategy, _ in STRATEGIES:
+            states = cells[f"{strategy}__acc{acc}"].astype(str)
+            if states.str.startswith("step2_").any():  # step 2 did not run: no final state in this pair
+                continue
+            scored = states.isin(SCORED)
+            rows.append(pd.DataFrame({"cell_uid": cells["cell_uid"], "side": cells["side"], "strategy": strategy,
+                                      "gated": scored.astype(int), "retained": (states == "retain").astype(int)}))
+    if not rows:
+        return pd.DataFrame(columns=["cell_uid", "side", "strategy", "gated_pairs", "retained_pairs", "retained_fraction"])
+    long = pd.concat(rows, ignore_index=True)
+    table = long.groupby(["cell_uid", "side", "strategy"], as_index=False).agg(
+        gated_pairs=("gated", "sum"), retained_pairs=("retained", "sum"))
+    table["retained_fraction"] = table["retained_pairs"] / table["gated_pairs"].where(table["gated_pairs"] > 0)
+    return table
+
+
+def consistency(fraction: pd.Series) -> dict:
+    f = fraction.dropna()
+    if f.empty:
+        return {"always": np.nan, "sometimes": np.nan, "never": np.nan}
+    return {"always": float((f == 1).mean()), "sometimes": float(((f > 0) & (f < 1)).mean()),
+            "never": float((f == 0).mean())}
+
+
+def umap_figure(coords: pd.DataFrame, fractions: pd.DataFrame, sides: list[str], acc: str, n_pairs: int,
+                title: str, path: Path) -> None:
+    x, y = coords["umap_1"].to_numpy(float), coords["umap_2"].to_numpy(float)
+    pad_x, pad_y = (np.nanmax(x) - np.nanmin(x)) * 0.04, (np.nanmax(y) - np.nanmin(y)) * 0.04
+    limits = ((np.nanmin(x) - pad_x, np.nanmax(x) + pad_x), (np.nanmin(y) - pad_y, np.nanmax(y) + pad_y))
+    position = pd.Series(np.arange(len(coords)), index=coords["cell_uid"].to_numpy())
+    order = np.random.default_rng(0).permutation(len(coords))
+    side_of = coords["side"].to_numpy()
+    fig, axes = plt.subplots(len(STRATEGIES) + 1, len(sides),
+                             figsize=(4.4 * len(sides) + (0.9 if len(sides) == 1 else 0), 3.1 * (len(STRATEGIES) + 1)),
+                             squeeze=False)
+    norm = Normalize(0, 1)
+
+    def frame(ax):
+        ax.set_xlim(*limits[0]); ax.set_ylim(*limits[1])
+        ax.set_xticks([]); ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_color("#bdbdbd")
+
+    for j, side in enumerate(sides):
+        mine = side_of == side
+        size = float(np.clip(9000 / max(mine.sum(), 1), 1.0, 14))
+        ax = axes[0, j]
+        ax.scatter(x[~mine], y[~mine], s=size * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
+        samples = sorted(coords.loc[mine, "sample"].astype(str).unique())
+        for k, sample in enumerate(samples):
+            hit = mine & (coords["sample"].astype(str).to_numpy() == sample)
+            ax.scatter(x[hit], y[hit], s=size, c=SAMPLE_COLOURS[k % len(SAMPLE_COLOURS)], linewidths=0,
+                       rasterized=True, label=f"{sample} ({int(hit.sum())})")
+        ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=6.5, frameon=False, markerscale=2.5,
+                  title="sample (cells)", title_fontsize=7)
+        ax.set_title(f"{side.upper()}: {int(mine.sum())} cells, {len(samples)} sample(s)", fontsize=9,
+                     color=SIDE_COLOURS[side], fontweight="bold")
+        frame(ax)
+        for i, (strategy, label) in enumerate(STRATEGIES, start=1):
+            ax = axes[i, j]
+            ax.scatter(x[~mine], y[~mine], s=size * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
+            part = fractions[(fractions["strategy"] == strategy) & (fractions["side"] == side)]
+            value = np.full(len(coords), np.nan)
+            value[position.loc[part["cell_uid"]].to_numpy()] = part["retained_fraction"].to_numpy(float)
+            draw = order[mine[order]]
+            scored = draw[np.isfinite(value[draw])]
+            unscored = draw[~np.isfinite(value[draw])]
+            ax.scatter(x[unscored], y[unscored], s=size * 0.4, c="black", linewidths=0, rasterized=True)
+            ax.scatter(x[scored], y[scored], s=size, c=value[scored], cmap=FRACTION, norm=norm, linewidths=0,
+                       rasterized=True)
+            share = consistency(part["retained_fraction"])
+            text = (f"f=1 {share['always']:.0%}   0<f<1 {share['sometimes']:.0%}   f=0 {share['never']:.0%}"
+                    if np.isfinite(share["always"]) else "not run")
+            if len(unscored):
+                text += f"\nno gated pair {len(unscored)} (black)"
+            ax.set_title(text, fontsize=7.5)
+            frame(ax)
+            if j == 0:
+                ax.set_ylabel(label, fontsize=9)
+    axes[0, 0].set_ylabel("samples", fontsize=9)
+    cax = fig.add_axes([0.25, 0.012, 0.5, 0.008])
+    bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=FRACTION), cax=cax, orientation="horizontal")
+    bar.set_label("retained fraction f = pairs that retained the cell / pairs that gated it", fontsize=8)
+    bar.ax.tick_params(labelsize=7)
+    fig.suptitle(f"{title}  -  {n_pairs} pair(s), acceptance {acc}", fontsize=9.5)
+    fig.tight_layout(rect=(0, 0.035, 1, 0.985))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def consistency_figure(summary: pd.DataFrame, dataset: str, side: str, acc: str, path: Path) -> None:
+    part = summary[(summary["dataset_id"] == dataset) & (summary["side"] == side) & (summary["acceptance"] == acc)]
+    patients = sorted(part["patient_id"].unique())
+    fig, axes = plt.subplots(1, len(STRATEGIES), figsize=(2.9 * len(STRATEGIES) + 1.6, 0.32 * len(patients) + 1.8),
+                             sharey=True, squeeze=False)
+    pairs = part.groupby("patient_id")["pairs"].max()
+    per_cell = part.groupby("patient_id")["median_gated_pairs_per_cell"].median()
+    for ax, (strategy, label) in zip(axes[0], STRATEGIES):
+        here = part[part["strategy"] == strategy].set_index("patient_id")
+        for i, patient in enumerate(patients):
+            if patient not in here.index or not np.isfinite(here.loc[patient, "always"]):
+                ax.text(0.01, i, "not run", va="center", fontsize=6.5, color="#636363")
+                continue
+            left = 0.0
+            for key, _, colour in CONSISTENCY:
+                value = float(here.loc[patient, key])
+                ax.barh(i, value, left=left, height=0.75, color=colour, edgecolor="white", linewidth=0.6)
+                if value >= 0.12:
+                    ax.text(left + value / 2, i, f"{value:.0%}", ha="center", va="center", fontsize=6,
+                            color="black" if colour == "#BFBFBF" else "white")
+                left += value
+        ax.set_xlim(0, 1); ax.set_ylim(len(patients) - 0.5, -0.5)
+        ax.set_title(label, fontsize=8.5)
+        ax.tick_params(axis="x", labelsize=7)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+    axes[0][0].set_yticks(range(len(patients)))
+    axes[0][0].set_yticklabels([f"{p} ({int(pairs[p])} pair{'s' if pairs[p] > 1 else ''}; "
+                                f"{per_cell[p]:g} per cell)" for p in patients], fontsize=7)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c, label=t) for _, t, c in CONSISTENCY]
+    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, fontsize=8)
+    fig.suptitle(f"{dataset}  -  {side.upper()}, acceptance {acc}: share of each patient's cells by retained fraction",
+                 fontsize=9.5, color=SIDE_COLOURS[side])
+    fig.tight_layout(rect=(0, 0.06, 1, 0.96))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("export", type=Path)
+    parser.add_argument("patient_umap", type=Path, help="53_patient_umap.py output (holds patients/)")
+    parser.add_argument("figures", type=Path)
+    parser.add_argument("--acceptances", nargs="+", default=["0.99", "0.95", "0.90"])
+    parser.add_argument("--datasets", nargs="+")
+    parser.add_argument("--sides", nargs="+", choices=["primary", "metastasis"], default=["primary", "metastasis"])
+    parser.add_argument("--skip-umap", action="store_true")
+    args = parser.parse_args()
+    sides = [s for s in ("primary", "metastasis") if s in args.sides]
+    args.figures.mkdir(parents=True, exist_ok=True)
+    files = sorted((args.export / "cells").glob("*/*.csv.gz"))
+    index = pd.concat([pd.read_csv(f, usecols=["dataset_id", "patient_id", "pair_id"], nrows=1).assign(path=str(f))
+                       for f in files], ignore_index=True)
+    if args.datasets:
+        index = index[index["dataset_id"].isin(args.datasets)]
+    summary_rows, missing = [], []
+    for acc in args.acceptances:
+        all_cells = []
+        for (dataset, patient), part in index.groupby(["dataset_id", "patient_id"], sort=True):
+            fractions = patient_fractions([Path(p) for p in part["path"]], acc)
+            fractions.insert(0, "patient_id", patient)
+            fractions.insert(0, "dataset_id", dataset)
+            all_cells.append(fractions)
+            for (strategy, side), group in fractions.groupby(["strategy", "side"]):
+                summary_rows.append({"dataset_id": dataset, "patient_id": patient, "acceptance": acc,
+                                     "strategy": strategy, "side": side, "pairs": len(part),
+                                     "cells": int(group["retained_fraction"].notna().sum()),
+                                     "median_gated_pairs_per_cell": float(group.loc[group["gated_pairs"] > 0, "gated_pairs"].median()),
+                                     "mean_retained_fraction": float(group["retained_fraction"].mean()),
+                                     **consistency(group["retained_fraction"])})
+            if args.skip_umap:
+                continue
+            umap_file = args.patient_umap / "patients" / dataset / str(patient) / "patient_umap.csv.gz"
+            if not umap_file.exists():
+                missing.append(f"{dataset} {patient}")
+                continue
+            coords = pd.read_csv(umap_file)
+            umap_figure(coords, fractions, sides, acc, len(part), f"{dataset}  {patient}",
+                        args.figures / "umap" / f"acc{acc}" / dataset / f"{patient}.png")
+        pd.concat(all_cells, ignore_index=True).to_csv(args.figures / f"cell_retained_fraction_acc{acc}.csv.gz",
+                                                       index=False, compression="gzip")
+    summary = pd.DataFrame(summary_rows)
+    summary.to_csv(args.figures / "patient_summary.tsv", sep="\t", index=False)
+    for acc in args.acceptances:
+        for dataset in sorted(summary["dataset_id"].unique()):
+            for side in sides:
+                consistency_figure(summary, dataset, side, acc,
+                                   args.figures / f"consistency_acc{acc}_{dataset}_{side}.png")
+    if missing:
+        print(f"no patient UMAP for {len(sorted(set(missing)))} patient(s): {sorted(set(missing))[:10]}")
+    print(f"done: {args.figures}")
+
+
+if __name__ == "__main__":
+    main()
