@@ -5,19 +5,24 @@
 
 Runs anywhere the package is (a laptop after download, or TACC): it reads only the package.
 
-1. umap/acc<a>/<dataset>/<pair>.png: one figure per pair and acceptance. Rows: rna, cnv,
-   rna_cnv, cnv_then_rna step 1, cnv_then_rna final, rna_then_cnv step 1, rna_then_cnv final;
-   columns: primary, metastasis. One frozen joint UMAP per pair, so every panel of a pair has the
-   same coordinates and axis limits. Colours: retain #2b8cbe, reject #d7301f, exclude (step 1
-   rejected) #8c8c8c, not run / not gated #e3e3e3; the pair's other cells in light grey behind.
+1. umap/acc<a>/<dataset>/<pair>.png: one figure per pair and acceptance. Columns: primary,
+   metastasis, headed with the side's sample and cell count. Row 0 shows where each side sits
+   (primary #762A83, metastasis #1B7837); then rna, cnv, rna_cnv, cnv_then_rna step 1,
+   cnv_then_rna final, rna_then_cnv step 1, rna_then_cnv final, each panel titled with counts
+   and % of the side's gated cells. One frozen joint UMAP per pair, so every panel of a pair has
+   the same coordinates and axis limits. Okabe-Ito, the bar plot's colours and names: single
+   gates retain #0072B2 / reject #D55E00; two-step final rows step 1+2 retain #56B4E9 / step 2
+   reject #E69F00 / step 1 reject #CC79A7; no state #b3b3b3; drawn in random order, the other
+   side's cells #ececec behind.
 2. rejected_fraction_acc<a>.png (+ .tsv): pairs x (strategy, side), one quantity: the share of
    the side's gated cells not retained (1 - retain), so a two-step column counts step 1
    exclusions and step 2 rejections together. Gated = retain + reject + exclude: not_gated
    reference cells are not counted, and a two-step pair whose step 2 did not run is blank, as is
    not run.
-5. state_rates_acc<a>.png (+ .tsv): stacked bars per dataset, retain / reject / exclude as the
-   mean over pairs of each pair's gated-cell shares, n pairs per bar; the .tsv adds the pooled
-   cell shares.
+5. state_rates_acc<a>.png (+ .tsv): primary panels above, metastasis below, one column per
+   dataset, one bar per strategy: single gates retain / reject, two-step gates step 1 retain +
+   step 2 retain / step 1 retain + step 2 reject / step 1 reject; each the mean over pairs of the
+   pair's gated-cell share, n pairs per bar; the .tsv adds the pooled cell shares.
 3. gsea/<accession>_acc<a>.png: rows = strategy x side, columns = the 50 hallmark sets in
    47_gsea_dotplot.py's categories; NES blue-white-orange at +/-2, size = -log10 FDR in 47_'s bins,
    black outline = FDR < 0.05. A row with fewer than --min-patients paired patients is drawn
@@ -59,45 +64,90 @@ ROWS = [("rna", "RNA only"), ("cnv", "CNV only"), ("rna_cnv", "CNV + RNA"),
         ("rna_then_cnv_step1", "RNA -> CNV, step 1 (RNA)"), ("rna_then_cnv", "RNA -> CNV, final")]
 STRATEGIES = [("rna", "RNA only"), ("cnv", "CNV only"), ("rna_cnv", "CNV + RNA"),
               ("cnv_then_rna", "CNV -> RNA, step 2"), ("rna_then_cnv", "RNA -> CNV, step 2")]
+SHOW = ["primary", "metastasis"]  # the sides drawn (--sides); the tables always keep both
+OPPOSITE = {"primary": "metastasis", "metastasis": "primary"}
 SIDES = [("primary", "primary_rejected_vs_primary_retained"),
          ("metastasis", "metastasis_rejected_vs_metastasis_retained")]
-COLOURS = {"retain": "#2b8cbe", "reject": "#d7301f", "exclude": "#8c8c8c"}
-OTHER = "#e3e3e3"
+# Okabe-Ito: blue / vermillion / black stay apart under every common colour-vision deficiency
+COLOURS = {"retain": "#0072B2", "reject": "#D55E00", "exclude": "#000000"}
+OTHER = "#b3b3b3"          # this side's cells with no state (not gated, not run)
+CONTEXT = "#ececec"        # the other side's cells, behind
+SIDE_COLOURS = {"primary": "#762A83", "metastasis": "#1B7837"}
+# bar plot, Okabe-Ito: blues = retained at the end, oranges = rejected by the last gate, purple =
+# rejected at step 1; single-gate and two-step states keep their own names and colours
+BAR_COLOURS = {"retain": "#0072B2", "reject": "#D55E00", "both_retain": "#56B4E9",
+               "step2_reject": "#E69F00", "step1_reject": "#CC79A7"}
+LIGHT_FILLS = {"#56B4E9", "#E69F00"}
+TWO_STEP_NAMES = {"cnv_then_rna", "rna_then_cnv"}
 BLOCKS = {"GSE271675": "prostate"}
 plt.rcParams.update({"font.family": "DejaVu Sans", "pdf.fonttype": 42})
 
 
 def umap_figure(cells: pd.DataFrame, acc: str, path: Path) -> None:
+    """Row 0: where each side sits on the pair's joint UMAP. Rows 1-7: one gate view each; the
+    column's side in state colours (drawn in random order, so no state hides another), the
+    other side pale grey behind. Same coordinates and limits in every panel."""
     x, y = cells["umap_1"].to_numpy(float), cells["umap_2"].to_numpy(float)
     pad_x, pad_y = (np.nanmax(x) - np.nanmin(x)) * 0.04, (np.nanmax(y) - np.nanmin(y)) * 0.04
     limits = ((np.nanmin(x) - pad_x, np.nanmax(x) + pad_x), (np.nanmin(y) - pad_y, np.nanmax(y) + pad_y))
-    size = max(0.5, min(6.0, 6000 / max(len(cells), 1)))
-    fig, axes = plt.subplots(len(ROWS), 2, figsize=(7.2, 2.55 * len(ROWS)), squeeze=False)
-    for i, (column, title) in enumerate(ROWS):
-        states = cells[f"{column}__acc{acc}"].astype(str)
-        for j, side in enumerate(("primary", "metastasis")):
+    sides = ("primary", "metastasis")
+    mask = {side: cells["side"].eq(side).to_numpy() for side in sides}
+    sample = {side: ", ".join(sorted(cells.loc[mask[side], "sample"].astype(str).unique())) for side in sides}
+    size = {side: float(np.clip(9000 / max(mask[side].sum(), 1), 1.5, 14)) for side in sides}
+    order = np.random.default_rng(0).permutation(len(cells))
+    fig, axes = plt.subplots(len(ROWS) + 1, len(SHOW), figsize=(4.2 * len(SHOW) + (0.8 if len(SHOW) == 1 else 0),
+                                                              3.0 * (len(ROWS) + 1)), squeeze=False)
+
+    def frame(ax):
+        ax.set_xlim(*limits[0]); ax.set_ylim(*limits[1])
+        ax.set_xticks([]); ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_color("#bdbdbd")
+
+    for j, side in enumerate(SHOW):
+        ax = axes[0, j]
+        other = mask[OPPOSITE[side]]
+        ax.scatter(x[other], y[other], s=size[side] * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
+        ax.scatter(x[mask[side]], y[mask[side]], s=size[side], c=SIDE_COLOURS[side], linewidths=0, rasterized=True)
+        ax.set_title(f"{side.upper()}: {sample[side]}\n{int(mask[side].sum())} cells "
+                     f"(grey: the {OPPOSITE[side]} cells)", fontsize=9, color=SIDE_COLOURS[side], fontweight="bold")
+        frame(ax)
+    axes[0, 0].set_ylabel("sample", fontsize=9)
+    # a two-step final row names each state by what each step did, in the bar plot's colours
+    single_view = {"retain": ("retain", BAR_COLOURS["retain"]), "reject": ("reject", BAR_COLOURS["reject"])}
+    final_view = {"retain": ("step 1+2 retain", BAR_COLOURS["both_retain"]),
+                  "reject": ("step 2 reject", BAR_COLOURS["step2_reject"]),
+                  "exclude": ("step 1 reject", BAR_COLOURS["step1_reject"])}
+    for i, (column, title) in enumerate(ROWS, start=1):
+        view = final_view if column in TWO_STEP_NAMES else single_view
+        states = cells[f"{column}__acc{acc}"].astype(str).to_numpy()
+        for j, side in enumerate(SHOW):
             ax = axes[i, j]
-            ax.scatter(x, y, s=size * 0.6, c="#f2f2f2", linewidths=0, rasterized=True)
-            mine = cells["side"].eq(side).to_numpy()
-            state = states[mine].to_numpy()
-            other = ~np.isin(state, list(COLOURS))
-            ax.scatter(x[mine][other], y[mine][other], s=size, c=OTHER, linewidths=0, rasterized=True)
-            for name, colour in COLOURS.items():
-                hit = state == name
-                ax.scatter(x[mine][hit], y[mine][hit], s=size, c=colour, linewidths=0, rasterized=True)
-            tally = pd.Series(state).value_counts()
-            text = "  ".join(f"{k} {int(tally.get(k, 0))}" for k in ("retain", "reject", "exclude") if k in tally)
-            if other.any():
-                text += f"  other {int(other.sum())}"
-            ax.set_title(f"{title} - {side}\n{text}", fontsize=8)
-            ax.set_xlim(*limits[0]); ax.set_ylim(*limits[1])
-            ax.set_xticks([]); ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_color("#bdbdbd")
-    handles = [plt.Line2D([], [], marker="o", ls="", color=c, label=k) for k, c in COLOURS.items()]
-    handles.append(plt.Line2D([], [], marker="o", ls="", color=OTHER, label="not run / not gated"))
-    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=8)
-    fig.tight_layout(rect=(0, 0.02, 1, 1))
+            other = mask[OPPOSITE[side]]
+            ax.scatter(x[other], y[other], s=size[side] * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
+            mine = order[mask[side][order]]
+            colours = [view[s][1] if s in view else OTHER for s in states[mine]]
+            ax.scatter(x[mine], y[mine], s=size[side], c=colours, linewidths=0, rasterized=True)
+            tally = pd.Series(states[mask[side]]).value_counts()
+            scored = sum(int(tally.get(k, 0)) for k in view)
+            parts = [f"{view[k][0]} {int(tally[k])} ({tally[k] / scored:.0%})" for k in view if k in tally and scored]
+            rest = int(mask[side].sum()) - scored
+            if rest:
+                parts.append(f"no state {rest}")
+            text = "  ".join(parts)
+            if len(text) > 48:  # two lines, so neighbouring panels' titles never touch
+                text = "  ".join(parts[:2]) + "\n" + "  ".join(parts[2:])
+            ax.set_title(text, fontsize=7.5)
+            frame(ax)
+        axes[i, 0].set_ylabel(title, fontsize=9)
+    handles = [plt.Line2D([], [], marker="o", ls="", ms=7, color=c, label=k)
+               for k, c in list(single_view.values()) + list(final_view.values())]
+    handles += [plt.Line2D([], [], marker="o", ls="", ms=7, color=OTHER, label="this side, no state"),
+                plt.Line2D([], [], marker="o", ls="", ms=7, color=CONTEXT, label="the other side")]
+    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=8.5)
+    fig.suptitle(f"{cells['dataset_id'].iloc[0]}  {cells['pair_id'].iloc[0]}  -  acceptance {acc}; "
+                 f"% of the side's gated cells", fontsize=9.5)
+    fig.tight_layout(rect=(0, 0.015, 1, 0.985))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -136,35 +186,49 @@ def state_rates(counts: pd.DataFrame, acc: str, out: Path) -> Path:
     table = mean.add_prefix("mean_").join(pooled.add_prefix("pooled_")).join(pairs).reset_index()
     table.to_csv(out / f"state_rates_acc{acc}.tsv", sep="\t", index=False)
     datasets = sorted(table["dataset_id"].unique())
-    rows = [(s, side) for s, _ in ROWS for side in ("primary", "metastasis")]
-    fig, axes = plt.subplots(1, len(datasets), figsize=(4.6 * len(datasets), 0.36 * len(rows) + 1.6),
+    # one bar per strategy; a two-step bar is split by what each step did to the cell
+    bars = [("rna", "RNA only"), ("cnv", "CNV only"), ("rna_cnv", "CNV + RNA"),
+            ("cnv_then_rna", "CNV -> RNA (step 1 CNV, step 2 RNA)"),
+            ("rna_then_cnv", "RNA -> CNV (step 1 RNA, step 2 CNV)")]
+    single = [("retain", "retain", BAR_COLOURS["retain"]), ("reject", "reject", BAR_COLOURS["reject"])]
+    two_step = [("retain", "step 1 retain + step 2 retain", BAR_COLOURS["both_retain"]),
+                ("reject", "step 1 retain + step 2 reject", BAR_COLOURS["step2_reject"]),
+                ("exclude", "step 1 reject", BAR_COLOURS["step1_reject"])]
+    fig, axes = plt.subplots(len(SHOW), len(datasets), figsize=(4.8 * len(datasets),
+                                                               len(SHOW) * (0.5 * len(bars) + 0.9) + 1.2),
                              sharey=True, squeeze=False)
-    for ax, dataset in zip(axes[0], datasets):
-        here = table[table["dataset_id"] == dataset].set_index(["strategy", "side"])
-        for i, key in enumerate(rows):
-            if key not in here.index:
-                ax.text(0.01, i, "not run", va="center", fontsize=7, color="#636363")
-                continue
-            left = 0.0
-            for state, colour in COLOURS.items():
-                value = float(here.loc[key, f"mean_{state}"])
-                ax.barh(i, value, left=left, height=0.72, color=colour, edgecolor="white", linewidth=1)
-                if value >= 0.06:
-                    ax.text(left + value / 2, i, f"{value:.0%}", ha="center", va="center", fontsize=6.5, color="white")
-                left += value
-            ax.text(1.01, i, f"n={int(here.loc[key, 'pairs'])}", va="center", fontsize=6.5, color="#636363")
-        ax.set_xlim(0, 1); ax.set_ylim(len(rows) - 0.5, -0.5)
-        ax.set_title(dataset, fontsize=9)
-        ax.set_xlabel("mean share of the pair's gated cells", fontsize=8)
-        ax.tick_params(axis="x", labelsize=7)
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-    axes[0][0].set_yticks(range(len(rows)))
-    axes[0][0].set_yticklabels([f"{dict(ROWS)[s]}, {side}" for s, side in rows], fontsize=7.5)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=c, label=k) for k, c in COLOURS.items()]
-    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, fontsize=8)
-    fig.suptitle(f"Gate states at acceptance {acc}: mean over pairs (n = pairs behind each bar)", fontsize=9)
-    fig.tight_layout(rect=(0, 0.05, 1, 0.97))
+    for r, side in enumerate(SHOW):
+        for ax, dataset in zip(axes[r], datasets):
+            here = table[table["dataset_id"] == dataset].set_index(["strategy", "side"])
+            for i, (strategy, _) in enumerate(bars):
+                key = (strategy, side)
+                if key not in here.index:
+                    ax.text(0.01, i, "not run", va="center", fontsize=7, color="#636363")
+                    continue
+                left = 0.0
+                for state, _, colour in (two_step if strategy in TWO_STEP_NAMES else single):
+                    value = float(here.loc[key, f"mean_{state}"])
+                    ax.barh(i, value, left=left, height=0.7, color=colour, edgecolor="white", linewidth=1)
+                    if value >= 0.06:
+                        ink = "black" if colour in LIGHT_FILLS else "white"
+                        ax.text(left + value / 2, i, f"{value:.0%}", ha="center", va="center", fontsize=7, color=ink)
+                    left += value
+                ax.text(1.01, i, f"n={int(here.loc[key, 'pairs'])}", va="center", fontsize=7, color="#636363")
+            ax.axhline(2.5, color="#bdbdbd", lw=0.8, ls=":")  # single gates above, two-step below
+            ax.set_xlim(0, 1); ax.set_ylim(len(bars) - 0.5, -0.5)
+            ax.set_title(f"{dataset}  -  {side.upper()}", fontsize=9.5, color=SIDE_COLOURS[side], fontweight="bold")
+            ax.tick_params(axis="x", labelsize=7)
+            for spine in ("top", "right"):
+                ax.spines[spine].set_visible(False)
+            if r == len(SHOW) - 1:
+                ax.set_xlabel("mean share of the pair's gated cells", fontsize=8)
+        axes[r][0].set_yticks(range(len(bars)))
+        axes[r][0].set_yticklabels([label for _, label in bars], fontsize=8)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c, label=label) for _, label, c in single + two_step]
+    fig.legend(handles=handles, loc="lower center", ncol=5, frameon=False, fontsize=8)
+    fig.suptitle(f"Gate states at acceptance {acc}: mean over pairs of each pair's share (n = pairs behind each bar)",
+                 fontsize=9.5)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.97), h_pad=2.0)
     path = out / f"state_rates_acc{acc}.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -174,7 +238,7 @@ def state_rates(counts: pd.DataFrame, acc: str, out: Path) -> Path:
 def rejected_fraction(counts: pd.DataFrame, acc: str, out: Path) -> Path:
     shares = gated_fractions(counts, acc)
     table = shares.assign(not_retained=1 - shares["retain"])[KEY + ["not_retained"]]
-    columns = [(s, side) for s, _ in ROWS for side in ("primary", "metastasis")]
+    columns = [(s, side) for s, _ in ROWS for side in SHOW]
     wide = table.pivot_table(index=["dataset_id", "pair_id"], columns=["strategy", "side"], values="not_retained")
     wide = wide.reindex(columns=pd.MultiIndex.from_tuples(columns)).sort_index()
     wide.to_csv(out / f"rejected_fraction_acc{acc}.tsv", sep="\t")
@@ -221,7 +285,7 @@ def unit_status(unit: Path) -> str:
 def gsea_figure(export: Path, accession: str, acc: str, min_patients: int, path: Path) -> dict:
     pathways = dotplot.PATHWAYS
     rows, labels, flags = [], [], []
-    for side, contrast in SIDES:
+    for side, contrast in [s for s in SIDES if s[0] in SHOW]:
         for strategy, title in STRATEGIES:
             unit = unit_dir(export, acc, side, strategy, accession)
             status = unit_status(unit)
@@ -263,7 +327,8 @@ def gsea_figure(export: Path, accession: str, acc: str, min_patients: int, path:
                    c=np.clip(nes[ok & ~called], -limit, limit), cmap=cmap, norm=norm, linewidths=0)
         ax.scatter(xs[ok & called], np.full((ok & called).sum(), i), s=sizes[ok & called],
                    c=np.clip(nes[ok & called], -limit, limit), cmap=cmap, norm=norm, edgecolors="black", linewidths=0.8)
-    ax.axhline(len(STRATEGIES) - 0.5, color="black", lw=0.8)
+    if len(SHOW) == 2:
+        ax.axhline(len(STRATEGIES) - 0.5, color="black", lw=0.8)
     ax.set_xlim(-0.6, len(pathways) - 0.4); ax.set_ylim(len(rows) - 0.5, -0.5)
     ax.set_xticks(range(len(pathways)))
     ax.set_xticklabels([dotplot.heatmap43.display_name("HALLMARK_" + p) for p in pathways], rotation=60,
@@ -337,7 +402,10 @@ def main() -> None:
     parser.add_argument("--pairs", nargs="+", default=None)
     parser.add_argument("--min-patients", type=int, default=3)
     parser.add_argument("--skip-umap", action="store_true")
+    parser.add_argument("--sides", nargs="+", choices=["primary", "metastasis"], default=["primary", "metastasis"],
+                        help="sides to draw; every .tsv still carries both")
     args = parser.parse_args()
+    SHOW[:] = [s for s in ("primary", "metastasis") if s in args.sides]
     args.figures.mkdir(parents=True, exist_ok=True)
     counts = pd.read_csv(args.export / "state_counts.tsv", sep="\t", dtype={"acceptance": str})
     datasets = args.datasets or sorted(counts["dataset_id"].astype(str).unique())
@@ -364,7 +432,7 @@ def main() -> None:
             info = gsea_figure(args.export, accession, acc, args.min_patients, target)
             index.append({"figure": str(target), "kind": "gsea", "acceptance": acc, "dataset": accession,
                           "note": json.dumps(info["rows"])})
-            for side, contrast in SIDES:
+            for side, contrast in [s for s in SIDES if s[0] in SHOW]:
                 target = args.figures / "deg" / f"{accession}_{side}_acc{acc}.png"
                 why = deg_figure(args.export, accession, side, contrast, acc, target)
                 index.append({"figure": "" if why else str(target), "kind": "deg", "acceptance": acc,
