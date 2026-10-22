@@ -149,8 +149,13 @@ def patient_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     return record
 
 
-def load_side(cells: pd.DataFrame, sources: dict):
-    """One side's cells as one AnnData over all its samples, obs_names = cell_uid."""
+def load_side(cells: pd.DataFrame, sources: dict, missing_rows: list):
+    """One side's cells as one AnnData over all its samples, obs_names = cell_uid.
+
+    The equalised h5ads hold the cells 27_ kept for the ds analysis. The export's reference cells
+    are the cycling reference UMAP's, which also counted the raw-count arms, so a few reference
+    cells are not in the equalised files. No strategy gate (all ds) could see them; they are left
+    out of this embedding and listed in missing_rows, never filled in."""
     import anndata as ad
 
     pieces = []
@@ -159,11 +164,10 @@ def load_side(cells: pd.DataFrame, sources: dict):
             raise KeyError(f"{dataset} {patient} {sample}: no manifest row names this sample's h5ad")
         data = load_exact_side(json.loads(sources[(dataset, patient, sample)]), sample)
         data.obs_names = data.obs_names.astype(str)
-        wanted = part["observation_id"].tolist()
-        missing = sorted(set(wanted) - set(data.obs_names))
-        if missing:
-            raise KeyError(f"{sample}: {len(missing)} reference cells are absent from the h5ad, e.g. {missing[:3]}")
-        data = data[wanted].copy()
+        present = part["observation_id"].isin(set(data.obs_names))
+        missing_rows.extend(part.loc[~present, ["cell_uid", "side", "sample", "observation_id"]].to_dict("records"))
+        part = part[present]
+        data = data[part["observation_id"].tolist()].copy()
         data.obs_names = part["cell_uid"].tolist()
         pieces.append(data)
     if len(pieces) == 1:
@@ -178,8 +182,12 @@ def gate_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     from confidenceot.preprocessing import Preprocessing
 
     configuration = Preprocessing.from_label(GATE_LABEL)
-    primary = load_side(cells[cells["side"] == "primary"], sources)
-    metastasis = load_side(cells[cells["side"] == "metastasis"], sources)
+    missing_rows: list = []
+    primary = load_side(cells[cells["side"] == "primary"], sources, missing_rows)
+    metastasis = load_side(cells[cells["side"] == "metastasis"], sources, missing_rows)
+    out.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(missing_rows, columns=["cell_uid", "side", "sample", "observation_id"]).to_csv(
+        out / "missing_from_equalised.tsv", sep="\t", index=False)
     source, target, genes, provenance = prepare_joint_representation(
         primary, metastasis, n_hvg=GATE_N_HVG, n_pcs=GATE_N_PCS, seed=SEED,
         representation=configuration.normalisation, rank_top_n=configuration.rank_top_n,
@@ -211,6 +219,8 @@ def gate_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
               "samples": {side: sorted(table.loc[table["side"] == side, "sample"].unique().tolist())
                           for side in ("primary", "metastasis")},
               "pairs": sorted(set(";".join(table["pairs"]).split(";"))),
+              "reference_cells_not_in_equalised_files": {
+                  side: sum(r["side"] == side for r in missing_rows) for side in ("primary", "metastasis")},
               "n_hvg": GATE_N_HVG, "n_pcs": GATE_N_PCS, "n_neighbors": N_NEIGHBORS, "seed": SEED,
               # equalised input reads as a near-constant total; recorded so a raw manifest shows
               "total_counts_quantiles": {q: float(np.quantile(counts, q)) for q in (0.05, 0.5, 0.95)},

@@ -300,6 +300,12 @@ def main() -> None:
                 continue
             coords = pd.read_csv(umap_file)
             overview_space = space_label(umap_file.parent)
+            placed = fractions["cell_uid"].isin(set(coords["cell_uid"]))
+            unplaced = fractions[~placed & fractions["retained_fraction"].notna()]
+            if len(unplaced):  # a gated cell must have coordinates; say so loudly if one does not
+                print(f"WARNING {dataset} {patient} acc {acc}: {unplaced['cell_uid'].nunique()} gated cells "
+                      f"have no coordinates in {umap_file}")
+            fractions = fractions[placed]
             umap_figure(coords, fractions, sides, acc, len(part), f"{dataset}  {patient}",
                         args.figures / "umap" / f"acc{acc}" / dataset / f"{patient}.png", overview_space)
             overview.setdefault(dataset, []).append((patient, coords, fractions, len(part)))

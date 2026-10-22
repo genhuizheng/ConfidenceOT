@@ -73,7 +73,7 @@ array=$(submit -p gg -N 1 -n 1 -c 16 -t 04:00:00 -A MCB26031 -J pu_$space --arra
     -o "$logs/umap_%A_%a.out" -e "$logs/umap_%A_%a.err" \
     --wrap "$activate && python cancer_metastasis/53_patient_umap.py --cells $cells --manifest $uniform_manifest --manifest $prostate_manifest --out $out --space $space --task-index \$SLURM_ARRAY_TASK_ID --task-count $tasks")
 echo "patient UMAPs: $array ($tasks tasks) -> $out/patients" >&2
-pack="cd $out && echo \"DONE \$(ls patients/*/*/DONE | wc -l), FAILED \$(ls patients/*/*/FAILED 2> /dev/null | wc -l)\" && (ls patients/*/*/FAILED 2> /dev/null || true) && tar -czf $out.tar.gz.partial patients && mv $out.tar.gz.partial $out.tar.gz && md5sum $out.tar.gz > $out.tar.gz.md5 && cat $out.tar.gz.md5 && du -h $out.tar.gz"
+pack="cd $out && echo \"DONE \$(ls patients/*/*/DONE | wc -l), FAILED \$(ls patients/*/*/FAILED 2> /dev/null | wc -l)\" && (ls patients/*/*/FAILED 2> /dev/null || true) && tar -czf $out.tar.gz.partial patients && mv $out.tar.gz.partial $out.tar.gz && { if ls patients/*/*/FAILED > /dev/null 2>&1; then echo 'some patients FAILED: no md5 written, the package is incomplete; fix and resubmit'; exit 1; fi; } && md5sum $out.tar.gz > $out.tar.gz.md5 && cat $out.tar.gz.md5 && du -h $out.tar.gz"
 id=$(submit --dependency=afterany:$array -p gg -N 1 -n 1 -c 4 -t 01:00:00 -A MCB26031 -J pu_pack \
     -o "$logs/pack_%j.out" -e "$logs/pack_%j.err" --wrap "$pack")
 echo "pack: $id -> $out.tar.gz" >&2
