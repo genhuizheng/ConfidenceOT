@@ -49,7 +49,10 @@ ds = load("define_subclones", HERE / "define_subclones.py")
 
 OUTCOME = {"correct": "#1a9850", "incorrect": "#d73027", "ambiguous": "#fdae61", "abstain": "#bdbdbd",
            "counterpart rejected": "#762a83", "unmatched_observed": "#4575b4", "no CRISPR label": "#ffffff"}
-SUB_PALETTE = list(plt.get_cmap("Set1").colors) + list(plt.get_cmap("Dark2").colors) + list(plt.get_cmap("Set3").colors)
+# Subclones: no red or green, which the outcome strip uses for incorrect / correct.
+SUB_PALETTE = ["#1f78b4", "#ff7f00", "#6a3d9a", "#b15928", "#a6cee3", "#fdbf6f", "#cab2d6", "#e6ab02", "#8dd3c7",
+               "#80b1d3", "#bc80bd", "#666666", "#ffed6f", "#d9b38c", "#5e3c99", "#f4a582", "#92c5de", "#b2abd2",
+               "#8c510a", "#35978f", "#c51b7d", "#de77ae", "#7f3b08", "#542788"]
 
 
 class DrawTree:
