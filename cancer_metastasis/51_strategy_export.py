@@ -4,7 +4,14 @@ diagnostics and the DEG/GSEA tables, small enough to download and plot anywhere.
     python cancer_metastasis/51_strategy_export.py --manifest UNIFORM.csv --manifest PROSTATE.csv \\
         --datasets GSE180661 GSE225857 GSE271675 --gates-root .../cnv_rna_strategies_infercnvpy \\
         --acceptances 0.99 0.95 0.90 --umap-root .../reference_umap_cycling_cnv_acc0.99 \\
-        [--umap-root .../strategy_umap] --downstream-root .../downstream_cnv_rna_strategies --out EXPORT
+        [--umap-root .../strategy_umap] --downstream-root .../downstream_cnv_rna_strategies --out EXPORT \\
+        [--eligible-manifest .../pancancer_20260924/pair_manifest_eligible.csv]
+
+Pairs: the --manifest files are the ones the strategy OT ran on (submit_cnv_rna_strategies.sh:
+factorial_20260929/uniform.csv and prepared_GSE271675_20260916/pair_manifest_eligible.csv), so
+every exported pair is one the gates were asked to run. An --eligible-manifest is only reported
+against: its pairs for these datasets that are not in --manifest are listed in
+pairs_outside_ot_manifest.tsv, and nothing is added to or removed from the export because of it.
 
 Strategies (gate roots <gates-root>/acc<a>/<strategy>/arm_A/<block>/ranknm256_noscale_ds_cos):
   rna, cnv, rna_cnv                 single: retain / reject
@@ -29,6 +36,7 @@ Writes to OUT:
   state_counts.tsv                pair x acceptance x strategy x side x state: cells, fraction
   pair_status.tsv                 pair x acceptance x strategy: completed, budget dir, umap_status
   pair_metrics.tsv                every completed gate's pair_metrics.csv (M4-E and M4-R)
+  pairs_outside_ot_manifest.tsv   with --eligible-manifest: its pairs the OT manifest does not list
   deg_gsea/acc<a>/<side>/<strategy>/<block>/<accession>/<label>/  the downstream files a
                                   figure needs (DONE/FAILED, reports, the all-gene DEG table,
                                   the GSEA table, pseudobulk sample metadata), copied as they are
@@ -103,12 +111,23 @@ def main() -> None:
     parser.add_argument("--acceptances", nargs="+", required=True)
     parser.add_argument("--umap-root", type=Path, action="append", required=True)
     parser.add_argument("--downstream-root", type=Path)
+    parser.add_argument("--eligible-manifest", type=Path, action="append", default=[])
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if (args.out / "MANIFEST.tsv").exists():
         sys.exit(f"{args.out}/MANIFEST.tsv exists; the export is not rewritten")
     args.out.mkdir(parents=True, exist_ok=True)
     manifest = read_manifests(args.manifest, args.datasets)
+    if args.eligible_manifest:
+        wider = read_manifests(args.eligible_manifest, args.datasets)
+        known = set(zip(manifest["dataset_id"].astype(str), manifest["pair_id"].astype(str)))
+        outside = wider[[(str(d), str(p)) not in known for d, p in zip(wider["dataset_id"], wider["pair_id"])]]
+        outside = outside[["dataset_id", "pair_id", "patient_id"]].assign(
+            reason="in " + ", ".join(map(str, args.eligible_manifest)) + "; not in the OT manifest "
+                   + ", ".join(map(str, args.manifest)))
+        outside.to_csv(args.out / "pairs_outside_ot_manifest.tsv", sep="\t", index=False)
+        print(f"{len(outside)} eligible-manifest pairs are not in the OT manifest: "
+              f"{outside.groupby('dataset_id').size().to_dict()} (pairs_outside_ot_manifest.tsv)", flush=True)
     counts_rows, status_rows, metrics = [], [], []
 
     for row in manifest.to_dict("records"):

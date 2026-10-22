@@ -21,8 +21,12 @@ set -eo pipefail
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 result=${CANCER_COT_ROOT:-/scratch/10119/ghzheng/primary_metastatic_cancer/confidenceot_results}
 env_path=${CONFIDENCEOT_ENV_EXPORT:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
-uniform_manifest=$result/manifest/pancancer_20260924/pair_manifest_eligible.csv
+# the manifests the strategy OT ran on (submit_cnv_rna_strategies.sh); the pancancer eligible
+# manifest is wider (for the three cancers it also lists 36 ovarian, 2 colorectal and a separate
+# 70-pair GSE271675 pairing, none of which any gate ran on) and is only reported against
+uniform_manifest=$result/manifest/factorial_20260929/uniform.csv
 prostate_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
+eligible_manifest=$result/manifest/pancancer_20260924/pair_manifest_eligible.csv
 gates=$result/cnv_rna_strategies_infercnvpy
 down=$result/downstream_cnv_rna_strategies
 old_umap=$result/reference_umap_cycling_cnv_acc0.99
@@ -49,7 +53,7 @@ out=$result/cnv_rna_strategies_export/$name
 logs=$result/cnv_rna_strategies_export/logs
 
 problems=0
-for path in "$uniform_manifest" "$prostate_manifest" "$gates" "$old_umap/pairs" "$repo/cancer_metastasis/51_strategy_export.py"; do
+for path in "$uniform_manifest" "$prostate_manifest" "$eligible_manifest" "$gates" "$old_umap/pairs" "$repo/cancer_metastasis/51_strategy_export.py"; do
     [[ -e "$path" ]] || { echo "missing: $path" >&2; problems=1; }
 done
 [[ -f "$out/MANIFEST.tsv" ]] && { echo "$out/MANIFEST.tsv exists; not rewritten (use --name)" >&2; problems=1; }
@@ -81,6 +85,6 @@ fi
 archive="tar -C $(dirname "$out") -czf $out.tar.gz $name && md5sum $out.tar.gz > $out.tar.gz.md5 && cat $out.tar.gz.md5 && du -h $out.tar.gz"
 id=$(submit "${wait_for[@]}" -p gg -N 1 -n 1 -c 16 -t 06:00:00 -A MCB26031 -J sx_export \
     -o "$logs/export_%j.out" -e "$logs/export_%j.err" \
-    --wrap "test ! -f $out/MANIFEST.tsv || exit 2; $activate && python cancer_metastasis/51_strategy_export.py $manifests --datasets $datasets --gates-root $gates --acceptances $acceptances $umap_roots --downstream-root $down --out $out && $archive")
+    --wrap "test ! -f $out/MANIFEST.tsv || exit 2; $activate && python cancer_metastasis/51_strategy_export.py $manifests --datasets $datasets --gates-root $gates --acceptances $acceptances $umap_roots --downstream-root $down --eligible-manifest $eligible_manifest --out $out && $archive")
 echo "export: $id -> $out (and $out.tar.gz)" >&2
 echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown); scope $scope; datasets $datasets"
