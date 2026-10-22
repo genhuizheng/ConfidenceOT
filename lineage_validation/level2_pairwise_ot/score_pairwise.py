@@ -11,7 +11,9 @@ q_ij), S~_gj = S_gj / sum over F (subclones + family unlabelled), pi_g = row mas
 with pi_g >= 0.01 and >= 5 source cells (the candidates). Scored: target cells of F whose label at the
 level is a subclone with >= 1 source cell. Rules: enrichment argmax (primary) and raw-mass argmax over
 the candidates. References: chance 1 / candidates, size rule (largest pi among candidates).
-Writes OUT/: diagnostics.tsv, summary.tsv, per_subclone.tsv, confusion.tsv, cells.tsv.gz.
+single_true_class flags a family / level whose scored target cells all carry one subclone: then, under BOT,
+the mean own enrichment is 1 by construction (PLAN.md, identity), whatever the representation.
+Writes OUT/: diagnostics.tsv, summary.tsv, per_subclone.tsv, per_site.tsv, confusion.tsv, cells.tsv.gz.
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ def score_one(tm: pd.DataFrame, src: pd.DataFrame, labels: pd.Series, subclones:
     has_source = {g: n[k] > 0 for k, g in enumerate(subclones)}
     scored = np.array([isinstance(x, str) and x in has_source and has_source[x] for x in lab]) & np.isfinite(St).all(1)
     unmatched = np.array([isinstance(x, str) and x in has_source and not has_source[x] for x in lab])
-    cells = pd.DataFrame({"cell": tm["cell"], "true": lab, "scored": scored})
+    cells = pd.DataFrame({"cell": tm["cell"], "site": tm["site"] if "site" in tm else "", "true": lab, "scored": scored})
     if cand.any():
         cells["pred_enrichment"] = names[cand][np.argmax(np.where(np.isfinite(E[:, cand]), E[:, cand], -np.inf), 1)]
         cells["pred_raw"] = names[cand][np.argmax(np.nan_to_num(St[:, cand], nan=-np.inf), 1)]
@@ -75,7 +77,7 @@ def score_one(tm: pd.DataFrame, src: pd.DataFrame, labels: pd.Series, subclones:
     per = pd.DataFrame(per)
     present = per[per["target_cells_scored"] > 0]
     summ = {"target_cells": len(tm), "target_family_cells": int(in_family.sum()), "scored": int(scored.sum()),
-            "unmatched_observed": int(unmatched.sum()), "true_classes": len(present), "candidates": int(cand.sum()),
+            "unmatched_observed": int(unmatched.sum()), "true_classes": len(present), "single_true_class": len(present) == 1, "candidates": int(cand.sum()),
             "candidates_list": ";".join(names[cand]),
             "true_not_candidate_cells": int(sc["true"].map(lambda t: not cand[gi[t]]).sum()) if len(sc) else 0,
             "accuracy_enrichment": sc["pred_enrichment"].eq(sc["true"]).mean() if len(sc) else np.nan,
@@ -99,7 +101,7 @@ def main() -> None:
     pairs = pd.read_csv(args.inputs / "pilot_pairs.tsv", sep="\t", dtype=str)
     fam_cells = pd.read_csv(args.inputs / "family_cells.tsv.gz", sep="\t", dtype=str, keep_default_na=False)
     subs = pd.read_csv(args.inputs / "subclones.tsv", sep="\t", dtype={"level": int})
-    diag, summ, per, conf, cells = [], [], [], [], []
+    diag, summ, per, conf, cells, sites = [], [], [], [], [], []
     for _, pair in pairs.iterrows():
         root = args.runs / pair["pair_id"]
         if not (root / "SUCCESS").exists():
@@ -126,11 +128,15 @@ def main() -> None:
                     per.append(p.assign(**key))
                     conf.append(c.assign(**key))
                     cells.append(cl[cl["true"].notna()].assign(**key))
+                    for (site, true), g in cl[cl["scored"]].groupby(["site", "true"]):
+                        sites.append({**key, "site": site, "true": true, "cells": len(g), "mean_own_log2E": g["own_log2E"].mean(),
+                                      "recall_enrichment": g["pred_enrichment"].eq(true).mean(), "recall_raw": g["pred_raw"].eq(true).mean()})
     args.out.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(diag).to_csv(args.out / "diagnostics.tsv", sep="\t", index=False)
     pd.DataFrame(summ).to_csv(args.out / "summary.tsv", sep="\t", index=False)
     pd.concat(per).to_csv(args.out / "per_subclone.tsv", sep="\t", index=False)
     pd.concat(conf).to_csv(args.out / "confusion.tsv", sep="\t", index=False)
+    pd.DataFrame(sites).to_csv(args.out / "per_site.tsv", sep="\t", index=False)
     pd.concat(cells).to_csv(args.out / "cells.tsv.gz", sep="\t", index=False, compression="gzip")
     pd.set_option("display.width", 250)
     print(pd.DataFrame(summ)[["pair_id", "arm", "family", "level", "scored", "candidates", "balanced_accuracy_enrichment",

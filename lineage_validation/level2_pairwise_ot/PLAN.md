@@ -101,3 +101,23 @@ Found while testing the pipeline on synthetic counts (`test_pipeline.py`, `test_
 Quinn 10k M2 is mixed (LG2 73 L1.1 / 19 L1.2).
 
 On those KP pairs arm A (BOT) is at its null by construction. A − B would measure the solver's marginal relaxation, not the preprocessing. The design is not run until the user decides how to proceed.
+
+## 2026-10-22, decision (user, before any real coupling): one plan from the primary to all its family's metastases
+
+Chosen by the user after the identity above ("Pool the family's metastases").
+
+- **Source.** All eligible malignant cells of the family's primary.
+- **Target.** All eligible metastatic sites of the family, in one plan; still no rejection, the same four runs.
+  - KP-Tracer: every metastatic site with ≥ 20 reliable family cells carrying a level-1 subclone label.
+  - Quinn: the lineage-validation metastases side (every tissue with ≥ 20 cells), because every tissue holds cells of every clone.
+  - The rule reads CRISPR composition only (`make_inputs.py`).
+- **Why it helps.** The sites now compete for each source cell's mass, so a site can differ from the primary's composition even under BOT. The identity still fixes the mean over *all* target cells, but no longer that of one site.
+- **Level 3.** A primary → site block is a column slice of the plan; `cells.tsv.gz` keeps the order.
+- **Pilot** (replaces the six pairs above):
+  - KP 3457 T1 → {K1, N2};
+  - 3515 T1 → {K1, K2, K3, L1, L2, N1};
+  - 3724 T1 → {L1, L2, L3, S1};
+  - Quinn 10k LL → all tissues, clones LG2, LG3, LG5.
+  - No site was left out by the ≥ 20 rule.
+- **3457 is known in advance to be uninformative.** Its scored metastatic cells are one subclone at both levels: L1.1 at L1, L1.1.2 at L2 in K1 and N2. The scorer flags such a family / level (`single_true_class`) and it is reported as not evaluable, not as a result.
+- **Scoring additions.** A per-site table (`per_site.tsv`): recall and own log-enrichment per site and true subclone.

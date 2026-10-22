@@ -1,10 +1,11 @@
-"""Level 2 pair-wise OT without rejection: four runs on one primary -> metastasis pair (PLAN.md).
+"""Level 2 OT without rejection: four runs from one primary to its family's metastases (PLAN.md).
 
     python lineage_validation/level2_pairwise_ot/run_pairwise.py --index I --out OUT_ROOT
 
-Pair I of inputs/pilot_pairs.tsv. Cells: the malignant cells of the source and target site in the
-depth-equalised files (KP-Tracer: the per-tumour files of the 104-pair runs; Quinn: 27_'s output for the
-lineage-validation sides, target restricted to the site), and the same cell ids in the raw files.
+Row I of inputs/pilot_pairs.tsv. Cells: the malignant cells of the primary and of the target sites in the
+depth-equalised files (KP-Tracer: the per-tumour files of the 104-pair runs, the target sites concatenated;
+Quinn: 27_'s output for the lineage-validation LL and metastases sides), and the same cell ids in the raw
+files. One plan covers every target site; a primary -> site block is a column slice of it (Level 3).
 Two representations, built by cancer_metastasis/common.py:prepare_joint_representation exactly as
 02_run_pair.py builds them (seed 20260831 + I, 2,000 HVGs, 30 PCs, cost scale median_pair_scale with
 seed 20260831 + I * 104729):
@@ -16,11 +17,12 @@ Two solvers on each cost, epsilon 0.1:
 Arms: A = logcpm_noscale + BOT, B = ranknm256_noscale_ds_cos + UOT; AxUOT and BxBOT are the decomposition.
 
 Writes OUT_ROOT/<pair_id>/:
-  cells.tsv.gz                     side, cell id, site, total counts raw and equalised
+  sites.json                       target sites used (cells) and left out (no equalised file, < 20 cells)
+  cells.tsv.gz                     side, cell id, site, total counts raw and equalised (plan row/column order)
   coordinates_<label>.npz          source/target coordinates, cost scale, HVGs
   <arm>/coupling.npz               the full plan (float32), for Level 3
   <arm>/source_groups.tsv          per family and level: group, cells, row mass of the plan
-  <arm>/target_mass_<family>_L<k>.tsv.gz  per target cell: column mass and plan mass from each source group
+  <arm>/target_mass_<family>_L<k>.tsv.gz  per target cell: site, column mass, plan mass from each source group
   <arm>/diagnostics.json           convergence, total mass, marginal deviations, seconds
   SUCCESS
 CRISPR labels (inputs/family_cells.tsv.gz) are read only after every coupling is computed, to sum it by
@@ -64,46 +66,65 @@ def side_paths(row: pd.Series, side: str) -> list[str]:
 
 
 def files_for(pair: pd.Series) -> dict:
-    """(paths, sample, site) of each side, raw and equalised."""
-    src, tgt = pair["source_site"], pair["target_site"]
+    """Per side, the parts to load: (equalised paths, sample), (raw paths, sample), site (None = whole file)."""
+    src, tgt = pair["source_site"], pair["target_sites"]
     if pair["dataset"] == "KPTracer":
         ds = pd.read_csv(KP / "downsampled" / "pair_manifest_downsampled.csv", dtype=str)
         ds_path = {}
         for side in ("source", "target"):
             for _, r in ds.iterrows():
                 ds_path.setdefault(r[f"{side}_sample"], side_paths(r, side))
-        return {side: {"ds": (ds_path[t], t, None), "raw": ([str(KP / "prepared" / "h5ad" / f"{t}.h5ad")], t, None)}
-                for side, t in (("source", src), ("target", tgt))}
+        part = lambda t: {"ds": (ds_path[t], t), "raw": ([str(KP / "prepared" / "h5ad" / f"{t}.h5ad")], t), "site": t}
+        # A site without an equalised file did not pass the 104-pair eligibility (>= 20 malignant cells).
+        missing = {t: "no equalised file" for t in tgt.split(";") if t not in ds_path}
+        return {"source": [part(src)], "target": [part(t) for t in tgt.split(";") if t in ds_path], "left_out": missing}
     raw = pd.read_csv(LV / "inputs" / "manifests" / "quinn_D_B_raw.csv", dtype=str)
     ds = pd.read_csv(LV / "inputs" / "h5ad" / "Quinn2021" / "ds" / "pair_manifest_downsampled.csv", dtype=str)
-    out = {"source": {}, "target": {}}
+    rows = {}
     for kind, manifest in (("raw", raw), ("ds", ds)):
         r = manifest[manifest["patient_id"].astype(str).eq(pair["mouse"])]
         if len(r) != 1:
             raise ValueError(f"Quinn {pair['mouse']}: {len(r)} rows in the {kind} manifest")
-        r = r.iloc[0]
-        out["source"][kind] = (side_paths(r, "source"), r["source_sample"], src)
-        out["target"][kind] = (side_paths(r, "target"), r["target_sample"], tgt)
-    return out
+        rows[kind] = r.iloc[0]
+    spec = lambda side, site: [{k: (side_paths(rows[k], side), rows[k][f"{side}_sample"]) for k in ("ds", "raw")} | {"site": site}]
+    return {"source": spec("source", src), "target": spec("target", None if tgt == "ALL" else tgt), "left_out": {}}
 
 
-def load_side(spec: dict, side: str):
-    ds_paths, ds_sample, site = spec["ds"]
-    raw_paths, raw_sample, _ = spec["raw"]
-    ds, raw = load_exact_side(ds_paths, ds_sample), load_exact_side(raw_paths, raw_sample)
+def load_part(part: dict, side: str):
+    ds, raw = load_exact_side(*part["ds"]), load_exact_side(*part["raw"])
     if "malignant" in ds.obs:
         ds = ds[ds.obs["malignant"].astype(str).eq("malignant").to_numpy()].copy()
-    if site is not None:  # Quinn: one tissue of the pooled side; the site is read off the raw file's obs
-        site_of = raw.obs["site"].astype(str)
-        if not ds.obs_names.isin(site_of.index).all():
-            raise ValueError(f"{side}: equalised cells missing from the raw file")
-        ds = ds[site_of.loc[ds.obs_names].eq(site).to_numpy()].copy()
     if not ds.obs_names.isin(raw.obs_names).all():
         raise ValueError(f"{side}: {int((~ds.obs_names.isin(raw.obs_names)).sum())} equalised cells missing from the raw file")
     raw = raw[ds.obs_names].copy()
-    if ds.n_obs < 20:
-        raise ValueError(f"{side}: {ds.n_obs} cells")
-    return raw, ds
+    # The site of each cell is read off the raw file (Quinn's equalised files need not carry it).
+    site = raw.obs["site"].astype(str).to_numpy() if "site" in raw.obs else np.repeat(part["site"], raw.n_obs)
+    if part["site"] is not None:
+        keep = site == part["site"]
+        ds, raw, site = ds[keep].copy(), raw[keep].copy(), site[keep]
+    return raw, ds, site
+
+
+def load_side(parts: list, side: str, left_out: dict):
+    loaded = []
+    for p in parts:
+        raw, ds, site = load_part(p, side)
+        if ds.n_obs >= 20:
+            loaded.append((raw, ds, site))
+        elif side == "target" and p["site"] is not None:
+            left_out[p["site"]] = f"{ds.n_obs} malignant cells (< 20)"
+        else:
+            raise ValueError(f"{side} {p['site']}: {ds.n_obs} cells")
+    if not loaded:
+        raise ValueError(f"{side}: no site with >= 20 cells")
+    if len(loaded) == 1:
+        return loaded[0]
+    import anndata as ad
+    join = lambda xs: ad.concat(xs, join="inner", index_unique=None)
+    raw, ds = join([x[0] for x in loaded]), join([x[1] for x in loaded])
+    if ds.obs_names.duplicated().any():
+        raise ValueError(f"{side}: a cell id repeats across sites")
+    return raw, ds, np.concatenate([x[2] for x in loaded])
 
 
 def solve(cost: np.ndarray, solver: str):
@@ -172,11 +193,15 @@ def main() -> None:
         sys.exit(f"{out}/SUCCESS exists")
     out.mkdir(parents=True, exist_ok=True)
     spec = files_for(pair)
-    (s_raw, s_ds), (t_raw, t_ds) = load_side(spec["source"], "source"), load_side(spec["target"], "target")
-    print(f"{pair['pair_id']}: source {s_ds.n_obs}, target {t_ds.n_obs} cells", flush=True)
+    left_out = dict(spec["left_out"])
+    (s_raw, s_ds, s_site), (t_raw, t_ds, t_site) = load_side(spec["source"], "source", left_out), load_side(spec["target"], "target", left_out)
+    used = {str(k): int(v) for k, v in pd.Series(t_site).value_counts().items()}
+    (out / "sites.json").write_text(json.dumps({"source": pair["source_site"], "source_cells": int(s_ds.n_obs),
+                                                "target_sites_used": used, "target_sites_left_out": left_out}, indent=1), encoding="utf-8")
+    print(f"{pair['pair_id']}: source {s_ds.n_obs}, target {t_ds.n_obs} cells ({used}); left out {left_out}", flush=True)
     total = lambda a: np.asarray(a.X.sum(1)).ravel()
-    pd.concat([pd.DataFrame({"side": side, "cell": d.obs_names, "total_counts_raw": total(r), "total_counts_ds": total(d)})
-               for side, r, d in (("source", s_raw, s_ds), ("target", t_raw, t_ds))]).to_csv(
+    pd.concat([pd.DataFrame({"side": side, "cell": d.obs_names, "site": s, "total_counts_raw": total(r), "total_counts_ds": total(d)})
+               for side, r, d, s in (("source", s_raw, s_ds, s_site), ("target", t_raw, t_ds, t_site))]).to_csv(
         out / "cells.tsv.gz", sep="\t", index=False, compression="gzip")
     costs = {}
     for label, kind in LABELS.items():
@@ -215,6 +240,7 @@ def main() -> None:
             mass = P.T @ onehot
             table = pd.DataFrame(mass, columns=[f"mass__{x}" for x in names])
             table.insert(0, "column_mass", cols)
+            table.insert(0, "site", t_site)
             table.insert(0, "cell", list(t_ds.obs_names))
             table.to_csv(out / arm / f"target_mass_{fam}_L{level}.tsv.gz", sep="\t", index=False, compression="gzip")
             for k, x in enumerate(names):

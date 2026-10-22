@@ -2,12 +2,13 @@
 
     python lineage_validation/level2_pairwise_ot/test_pipeline.py
 
-Builds a KP-Tracer-shaped pair (per-tumour raw + equalised files) and a Quinn-shaped pair (pooled sides,
-target restricted to one site) in a temporary folder. Source subclones A (80%) and B (20%) carry different
-expression programmes; the KP target is 100 B cells of the family and 20 of another family, the Quinn
-target 40 A + 40 B. Checks: BOT marginals exact, UOT keeps every
-cell, group masses sum to the column mass, the planted rare subclone B is recovered by the enrichment rule,
-the Quinn cells of another clone go to "other", and the cell ids line up between raw and equalised files.
+Builds a KP-Tracer-shaped case (per-tumour raw + equalised files; target = two metastases K1 and K2 in one
+plan) and a Quinn-shaped case (pooled LL and metastases sides, sites read off the raw file) in a temporary
+folder. Source subclones A (80%) and B (20%) carry different expression programmes; K1 is 100 B cells of
+the family and 20 of another family, K2 60 A, the Quinn M1 40 A + 40 B. Checks: BOT marginals exact, UOT
+keeps every cell, group masses sum to the column mass, the BOT identity (mean S_g = source cell share),
+the planted rare subclone B is recovered by the enrichment rule, the Quinn cells of another clone go to
+"other", the per-site table, and the cell ids line up between raw and equalised files.
 Prints PASS / FAIL; exit 1 on any failure.
 """
 
@@ -73,8 +74,13 @@ def main():
         adata(thin(Xt), tid, "M_K1", "M_K1").write_h5ad(kp / "downsampled" / "M_K1.h5ad")
         adata(np.vstack([Xs, counts(rng, [prog["A"]] * 10, 10)]), sid + [f"x{i}" for i in range(10)], "M_T1", "M_T1").write_h5ad(kp / "prepared" / "h5ad" / "M_T1.h5ad")
         adata(Xt, tid, "M_K1", "M_K1").write_h5ad(kp / "prepared" / "h5ad" / "M_K1.h5ad")
-        pd.DataFrame([{"source_sample": "M_T1", "target_sample": "M_K1", "source_h5ad": str(kp / "downsampled" / "M_T1.h5ad"),
-                       "target_h5ad": str(kp / "downsampled" / "M_K1.h5ad")}]).to_csv(kp / "downsampled" / "pair_manifest_downsampled.csv", index=False)
+        # a second metastasis of the family, K2 = 60 A cells: the plan covers K1 and K2 together
+        Xk2, k2id = counts(rng, [prog["A"]] * 60, 60), [f"k{j}" for j in range(60)]
+        adata(thin(Xk2), k2id, "M_K2", "M_K2").write_h5ad(kp / "downsampled" / "M_K2.h5ad")
+        adata(Xk2, k2id, "M_K2", "M_K2").write_h5ad(kp / "prepared" / "h5ad" / "M_K2.h5ad")
+        pd.DataFrame([{"source_sample": "M_T1", "target_sample": t, "source_h5ad": str(kp / "downsampled" / "M_T1.h5ad"),
+                       "target_h5ad": str(kp / "downsampled" / f"{t}.h5ad")} for t in ("M_K1", "M_K2")]).to_csv(
+            kp / "downsampled" / "pair_manifest_downsampled.csv", index=False)
         # Quinn-shaped: LL (clone LG1: 160 A + 40 B; clone LG9: 50) and a pooled metastases side with sites M1
         # (LG1, 40 A + 40 B: a mixed metastasis) and M2
         q_src = ["A"] * 160 + ["B"] * 40 + ["LG9"] * 50
@@ -94,15 +100,16 @@ def main():
             manifest = pd.DataFrame([{"patient_id": "Z", "source_sample": "Z_LL", "target_sample": "Z_metastases",
                                       "source_h5ad": str(folder / "Z_LL.h5ad"), "target_h5ad": str(folder / "Z_metastases.h5ad")}])
             manifest.to_csv(lv / "inputs" / "manifests" / "quinn_D_B_raw.csv" if kind == "raw" else folder / "pair_manifest_downsampled.csv", index=False)
-        pd.DataFrame([{"index": 0, "pair_id": "KPTracer_M__M_T1__M_K1", "dataset": "KPTracer", "mouse": "M", "source_site": "M_T1",
-                       "target_site": "M_K1", "families": "KPTracer_M_M_T1"},
-                      {"index": 1, "pair_id": "Quinn2021_Z__LL__M1", "dataset": "Quinn2021", "mouse": "Z", "source_site": "LL",
-                       "target_site": "M1", "families": "Quinn2021_Z_LG1"}]).to_csv(inputs / "pilot_pairs.tsv", sep="\t", index=False)
+        pd.DataFrame([{"index": 0, "pair_id": "KPTracer_M__M_T1__family_metastases", "dataset": "KPTracer", "mouse": "M", "source_site": "M_T1",
+                       "target_sites": "M_K1;M_K2", "families": "KPTracer_M_M_T1"},
+                      {"index": 1, "pair_id": "Quinn2021_Z__LL__metastases", "dataset": "Quinn2021", "mouse": "Z", "source_site": "LL",
+                       "target_sites": "ALL", "families": "Quinn2021_Z_LG1"}]).to_csv(inputs / "pilot_pairs.tsv", sep="\t", index=False)
         pd.DataFrame([("KPTracer_M_M_T1", 1, "L1.1"), ("KPTracer_M_M_T1", 1, "L1.2"), ("Quinn2021_Z_LG1", 1, "L1.1"), ("Quinn2021_Z_LG1", 1, "L1.2")],
                      columns=["name", "level", "subclone"]).to_csv(inputs / "subclones.tsv", sep="\t", index=False)
         lab = {"A": "L1.1", "B": "L1.2"}
         fc = [("KPTracer_M_M_T1", c, lab[l]) for c, l in zip(sid, src_lab) if l in lab] + \
              [("KPTracer_M_M_T1", c, "L1.2") for c, l in zip(tid, tgt_lab) if l == "B"] + \
+             [("KPTracer_M_M_T1", c, "L1.1") for c in k2id] + \
              [("Quinn2021_Z_LG1", c, lab[l]) for c, l in zip(qs, q_src) if l in lab] + \
              [("Quinn2021_Z_LG1", c, lab[l]) for c, l in zip(qt, q_tgt) if l in lab]
         pd.DataFrame([{"name": n, "dataset": n.split("_")[0], "mouse": n.split("_")[1], "cell_id": c, "site": "", "reliable": "True",
@@ -112,10 +119,11 @@ def main():
                                 str(inputs / "pilot_pairs.tsv"), "--inputs", str(inputs), "--kp-root", str(kp), "--lv-root", str(lv)],
                                capture_output=True, text=True)
             check(f"run_pairwise index {i} exits 0", r.returncode == 0, r.stderr[-800:] if r.returncode else "")
-        kp_dir = out / "KPTracer_M__M_T1__M_K1"
+        kp_dir = out / "KPTracer_M__M_T1__family_metastases"
         cells = pd.read_csv(kp_dir / "cells.tsv.gz", sep="\t")
-        check("KP: source = the 330 equalised cells (raw-only cells left out), target 120",
-              (cells["side"] == "source").sum() == 330 and (cells["side"] == "target").sum() == 120)
+        check("KP: source = the 330 equalised cells (raw-only cells left out), target 120 K1 + 60 K2",
+              (cells["side"] == "source").sum() == 330 and (cells["side"] == "target").sum() == 180
+              and (cells["site"] == "M_K2").sum() == 60)
         for arm in ("A_logcpm_BOT", "B_ranknm256dscos_UOT", "AxUOT_logcpm_UOT", "BxBOT_ranknm256dscos_BOT"):
             d = json.loads((kp_dir / arm / "diagnostics.json").read_text())
             if d["solver"] == "BOT":
@@ -131,9 +139,10 @@ def main():
             src = pd.read_csv(kp_dir / arm / "source_groups.tsv", sep="\t").set_index("group")
             check(f"{arm}: source groups 240 / 60 / 30 unlabelled / 0 other",
                   list(src.loc[["L1.1", "L1.2", "family unlabelled", "other"], "cells"]) == [240, 60, 30, 0])
-        q_dir = out / "Quinn2021_Z__LL__M1"
+        q_dir = out / "Quinn2021_Z__LL__metastases"
         qc = pd.read_csv(q_dir / "cells.tsv.gz", sep="\t")
-        check("Quinn: target restricted to site M1 by the raw file's site (80 cells)", (qc["side"] == "target").sum() == 80)
+        check("Quinn: the whole metastases side, sites read off the raw file (80 M1 + 40 M2)",
+              (qc["side"] == "target").sum() == 120 and (qc.loc[qc["side"] == "target", "site"] == "M1").sum() == 80)
         qsrc = pd.read_csv(q_dir / "A_logcpm_BOT" / "source_groups.tsv", sep="\t").set_index("group")
         check("Quinn: the other clone's 50 LL cells are 'other'", qsrc.loc["other", "cells"] == 50)
         r = subprocess.run([sys.executable, str(HERE / "score_pairwise.py"), "--runs", str(out), "--out", str(tmp / "score"),
@@ -141,7 +150,11 @@ def main():
         check("score_pairwise exits 0", r.returncode == 0, r.stderr[-800:] if r.returncode else "")
         s = pd.read_csv(tmp / "score" / "summary.tsv", sep="\t")
         k = s[s["pair_id"].str.startswith("KP")]
-        check("KP: 100 family targets scored, 20 foreign not", (k["scored"] == 100).all() and (k["target_family_cells"] == 100).all())
+        check("KP: 160 family targets scored, 20 foreign not", (k["scored"] == 160).all() and (k["target_family_cells"] == 160).all())
+        ps = pd.read_csv(tmp / "score" / "per_site.tsv", sep="\t")
+        check("per-site table: K1 holds the 100 L1.2 cells, K2 the 60 L1.1 cells",
+              set(map(tuple, ps.loc[ps["pair_id"].str.startswith("KP") & ps["arm"].eq("A_logcpm_BOT"), ["site", "true", "cells"]].values))
+              == {("M_K1", "L1.2", 100), ("M_K2", "L1.1", 60)})
         # The identity behind PLAN.md's amendment: under BOT the mean over target cells of S_g is the source
         # cell share exactly, so a metastasis made of one subclone has mean own enrichment 1 whatever the plan.
         P = np.load(kp_dir / "A_logcpm_BOT" / "coupling.npz")["coupling"].astype(float)
