@@ -1,0 +1,28 @@
+-- test_rejected_source_and_target
+PASS  rejected source mass is masked before normalising  (S_A(t0) = 0.3333, expected 1/3)
+PASS  rejected target is abstain  (abstain)
+PASS  rejected target holds zero weight in the output table  (sum of S__ = 0.000)
+PASS  rejected target has zero family weight in the output table  (family_weight = 0.000)
+-- test_zero_mass_column
+PASS  zero-mass column: abstain, no NaN  (outcome abstain, finite True)
+PASS  retained column with mass sums to 1  (1.000000)
+-- test_family_unlabelled_and_other
+PASS  within-family weights: subclones + unlabelled sum to 1, other excluded  ([0.5  0.25 0.25])
+PASS  family weight = family mass / total retained mass  (0.500)
+-- test_two_step_and_shuffle
+PASS  two-step: step-1-excluded source row has zero mass and rho 0
+PASS  two-step: step-1-excluded target column has zero mass and tau 0
+PASS  two-step: step-2 rejected cells are masked (rho / tau 0)
+PASS  cell-id shuffle: coupling re-indexed by id equals the unshuffled matrix
+PASS  cell-id shuffle: S_A(t) equals the direct computation on the id-ordered matrix (retained t0-t2)  ([0.7254 0.5689 0.5387] vs [0.7254 0.5689 0.5387])
+PASS  two-step: step-2 rejected target t3 has weight 0
+PASS  two-step: excluded target t4 is abstain  (abstain)
+-- test_overlapping_branches
+PASS  level 1: subclones are disjoint clades (no cell counted twice)  (2 subclones, 75 cells)
+PASS  level 2 inside BC: B and C, disjoint
+PASS  a duplicated cell id in a subclone table is detected  (the classifier itself has no such guard yet)
+-- test_baseline_denominator
+PASS  independent-coupling share of A includes the unlabelled family cells (0.10)  (S_A = 0.100)
+PASS  summary / heatmap source share uses the same denominator as the weights  (share used = 0.100 (retained effective mass of A / family incl. unlabelled))
+
+20 passed, 0 failed

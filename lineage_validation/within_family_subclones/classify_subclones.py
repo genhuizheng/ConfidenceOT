@@ -49,6 +49,9 @@ def load_export_run(export: Path, strategy: str, block: str, pair: str, method: 
         raise lv.RunMissing(f"{strategy} {pair}: gate or coupling not in the export")
     gate = lv.read_gate(gate_dir, method)
     src, tgt = gate[gate["side"].eq("source")], gate[gate["side"].eq("target")]
+    for side, frame in (("source", src), ("target", tgt)):  # defect C (audit 2026-10-22): ids must be unique
+        if frame["observation_id"].duplicated().any():
+            raise ValueError(f"{pair} {strategy} {method}: duplicated {side} cell ids in the gate")
     coupling = np.load(npz)["coupling"]
     if coupling.shape != (len(src), len(tgt)):
         raise ValueError("coupling shape does not match the gate")
@@ -88,11 +91,17 @@ def classify(run, src_label, tgt_label, family_groups, level, ref_counts):
     GP = lv.onehot(gs, len(groups), rho.astype(float)) @ P
     D = GP.sum(axis=0)
     fam_rows = [gindex[g] for g in family_groups] + [gindex[UNLABELLED]]
-    wF = np.where(D > 0, GP[fam_rows].sum(axis=0) / np.where(D > 0, D, 1), 0.0)
     fam_mass = GP[fam_rows].sum(axis=0)
+    # Defect A (audit 2026-10-22): a rejected / excluded target, or one with no retained-source mass, has
+    # matching weight 0 in every output column (its outcome was already abstain).
+    valid = tau & (D > 0) & (fam_mass > 0)
+    wF = np.where(tau & (D > 0), GP[fam_rows].sum(axis=0) / np.where(D > 0, D, 1), 0.0)
     Wt = np.zeros((len(fam_rows), P.shape[1]))
-    ok = fam_mass > 0
-    Wt[:, ok] = GP[fam_rows][:, ok] / fam_mass[ok]
+    Wt[:, valid] = GP[fam_rows][:, valid] / fam_mass[valid]
+    # Defect B: reference shares are retained effective transport mass (retained source x retained target),
+    # over the family's subclones and its unlabelled cells, the units of the matching weights.
+    eff = np.asarray(GP[:, tau].sum(axis=1)).ravel()
+    eff_mass = {g: float(eff[gindex[g]]) for g in list(family_groups) + [UNLABELLED]}
     analysed = {g: int((gs == gindex[g]).sum()) for g in family_groups}
     retained = {g: int(((gs == gindex[g]) & rho).sum()) for g in family_groups}
     out = pd.DataFrame({"cell_id": run["target"], "site": run["target_site"],
@@ -140,8 +149,14 @@ def classify(run, src_label, tgt_label, family_groups, level, ref_counts):
                "coverage": float(len(scored) / len(labelled_counterpart)) if len(labelled_counterpart) else np.nan,
                "size_reference_subclone": size_g,
                "size_reference_accuracy": float((scored["true"] == size_g).mean()) if len(scored) else np.nan,
-               "chance_accuracy": float(np.mean([retained[t] / total_ret for t in scored["true"]])) if len(scored) and total_ret else np.nan,
-               "source_cells": json.dumps(analysed), "source_retained": json.dumps(retained)}
+               "chance_accuracy_by_labelled_cells": float(np.mean([retained[t] / total_ret for t in scored["true"]])) if len(scored) and total_ret else np.nan,
+               "size_reference_by_mass_subclone": max(family_groups, key=lambda g: eff_mass[g]) if family_groups else "",
+               "chance_accuracy_by_mass": float(np.mean([eff_mass[t] / sum(eff_mass.values()) for t in scored["true"]]))
+               if len(scored) and sum(eff_mass.values()) > 0 else np.nan,
+               "source_cells": json.dumps(analysed), "source_retained": json.dumps(retained),
+               "source_effective_mass": json.dumps(eff_mass)}
+    summary["size_reference_by_mass_accuracy"] = (float((scored["true"] == summary["size_reference_by_mass_subclone"]).mean())
+                                                  if len(scored) else np.nan)
     conf = pd.crosstab(fam["true"], fam["predicted"].replace("", "-") + " | " + fam["outcome"]).reset_index()
     heat = []
     ret = fam[fam["state"].eq("retained") & fam["true"].isin(family_groups)]
@@ -186,6 +201,8 @@ def main() -> None:
             continue
         block, pair = run_for(row)
         cells = pd.read_csv(args.defs / "cells" / f"{name}.csv.gz", dtype=str, keep_default_na=False)
+        if cells["cell_id"].duplicated().any():  # defect C: one subclone label per cell
+            raise ValueError(f"{name}: duplicated cell ids in the subclone table")
         mine = subs[subs["name"] == name]
         if dataset == "KPTracer":
             in_family = (lambda family: lambda c: family_of.get(c, "") == family)(family)

@@ -162,9 +162,10 @@ def fig_heatmap(name, title, heat, summary, out, index):
             wide = part.pivot_table(index=["true", "cells"], columns="source", values="mean_weight")
             sources = [x for x in sorted(wide.columns) if x != "family unlabelled"] + ["family unlabelled"]
             wide = wide.reindex(columns=sources)
-            ret = json.loads(srow.iloc[0]["source_retained"])
+            # Retained effective transport mass per source group, unlabelled included: the weights' own units.
+            ret = json.loads(srow.iloc[0]["source_effective_mass"])
             total = sum(ret.values()) or 1
-            share = [ret.get(x, 0) / total if x != "family unlabelled" else np.nan for x in sources]
+            share = [ret.get(x, 0) / total for x in sources]
             grid = np.vstack([share, wide.to_numpy(float)])
             mesh = ax.imshow(grid, cmap="Purples", vmin=0, vmax=1, aspect="auto")
             ax.axhline(0.5, color="black", lw=1.2)
@@ -182,7 +183,7 @@ def fig_heatmap(name, title, heat, summary, out, index):
     if mesh is not None:
         fig.colorbar(mesh, ax=axes.ravel().tolist(), fraction=0.012, label="share of within-family matching weight")
     fig.suptitle(f"{title}: mean OT matching weight, true metastatic subclone x primary subclone (M4-E; retained metastatic cells)\n"
-                 "top row = each primary subclone's share of retained source cells, i.e. what matching by size alone would give",
+                 "top row = each primary group's share of retained effective transport mass = the independent coupling's weight",
                  fontsize=9, y=1.0)
     pl.save(fig, out, f"{name}_3_heatmap", index, name=name, panel="subclone matching heatmap")
 

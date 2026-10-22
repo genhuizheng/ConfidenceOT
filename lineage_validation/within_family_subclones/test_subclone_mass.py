@@ -127,9 +127,11 @@ def test_two_step_and_shuffle():
         labels = {"s0": "A", "s1": "A", "s2": "B", "s3": "B", "s4": "B", "s5": "A"}
         out, _, _, _ = cs.classify(run, [labels[c] for c in run["source"]], ["A", "B", "A", "B", "A"], ["A", "B"], 1, None)
         Pr = expect * np.array([1, 1, 1, 1, 0, 0])[:, None]
-        direct = Pr[:2].sum(0) / Pr.sum(0)
-        check("cell-id shuffle: S_A(t) equals the direct computation on the id-ordered matrix",
-              np.allclose(out["S__A"].to_numpy()[:4], direct[:4]), f"{np.round(out['S__A'].to_numpy()[:4], 4)} vs {np.round(direct[:4], 4)}")
+        with np.errstate(invalid="ignore"):
+            direct = Pr[:2].sum(0) / Pr.sum(0)
+        check("cell-id shuffle: S_A(t) equals the direct computation on the id-ordered matrix (retained t0-t2)",
+              np.allclose(out["S__A"].to_numpy()[:3], direct[:3]), f"{np.round(out['S__A'].to_numpy()[:3], 4)} vs {np.round(direct[:3], 4)}")
+        check("two-step: step-2 rejected target t3 has weight 0", out.loc[3, "S__A"] == 0 and out.loc[3, "S__B"] == 0)
         check("two-step: excluded target t4 is abstain", out.loc[4, "outcome"] == "abstain", out.loc[4, "outcome"])
 
 
@@ -176,10 +178,10 @@ def test_baseline_denominator():
     check("independent-coupling share of A includes the unlabelled family cells (0.10)",
           abs(out.loc[0, "S__A"] - 0.10) < 1e-12, f"S_A = {out.loc[0, 'S__A']:.3f}")
     import json
-    ret = json.loads(summary["source_retained"])
+    ret = json.loads(summary["source_effective_mass"])
     share_used = ret["A"] / sum(ret.values())
     check("summary / heatmap source share uses the same denominator as the weights", abs(share_used - 0.10) < 1e-12,
-          f"share used = {share_used:.3f} (retained A / retained labelled subclones only)")
+          f"share used = {share_used:.3f} (retained effective mass of A / family incl. unlabelled)")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+PASS  rejected source row carries 0 effective mass
+PASS  rejected target column: q = 0
+PASS  zero-mass retained target: q = 0, not NaN, flagged
+PASS  retained target with mass: q sums to 1
+PASS  sparse and dense coupling give the same effective coupling and q
+PASS  a source cell with a label outside the exclusive group list is refused
+PASS  a duplicated cell id (one cell in two subclones) is refused
+PASS  shuffled step-2 file order: coupling re-indexed by id equals the id-ordered matrix
+PASS  two-stage: step-1-excluded cells flagged excluded, zero mass, gate 0
+PASS  two-stage: step-2 rejected cells gate 0 (not excluded)
+PASS  mass rows: excluded rows and columns hold 0; four gate blocks sum to the total
+PASS  incomplete annotation: the unannotated source cell is counted as family unlabelled
+PASS  incomplete annotation: the unannotated target is not scored  (2 scored (t0 A, t1 B retained with mass; t2 unannotated, t3 rejected, t4 excluded))
+PASS  audit and classifier give the same within-family weights
+PASS  audit and classifier give the same retained effective mass per group
+
+15 passed, 0 failed
