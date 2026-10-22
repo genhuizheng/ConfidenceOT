@@ -112,3 +112,8 @@ scripts/tacc/*
 Thumbs.db
 .idea/
 .vscode/
+
+# Rendered lineage-validation figures: the scripts that draw them are tracked and reproduce them
+lineage_validation/**/*.png
+lineage_validation/**/*.pdf
+lineage_validation/**/*.svg
