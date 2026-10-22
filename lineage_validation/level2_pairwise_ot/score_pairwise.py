@@ -2,9 +2,10 @@
 
     python lineage_validation/level2_pairwise_ot/score_pairwise.py --runs RUNS_ROOT --out OUT
 
-RUNS_ROOT holds run_pairwise.py's <pair_id>/ folders (the small files suffice: diagnostics.json,
-source_groups.tsv, target_mass_*.tsv.gz). Target labels come from inputs/family_cells.tsv.gz. A missing
-method folder is reported, never substituted.
+RUNS_ROOT holds run_pairwise.py's <case_id>/ folders (the small files suffice: diagnostics.json,
+source_groups.tsv, target_mass_*.tsv.gz, FAILED.json). Every case of inputs/cases.tsv is listed in
+run_status.tsv as ok, failed (with the recorded error) or missing; nothing is substituted or dropped. Target
+labels come from inputs/family_cells.tsv.gz.
 
 For target cell j and source group g of family F: S_gj = mass_gj / column mass_j (= sum over i in g of
 q_ij), S~_gj = S_gj / sum over F (subclones + family unlabelled), pi_g = row mass of g / row mass of F
@@ -12,10 +13,13 @@ q_ij), S~_gj = S_gj / sum over F (subclones + family unlabelled), pi_g = row mas
 with pi_g >= 0.01 and >= 5 source cells (the candidates). Scored: target cells of F whose label at the
 level is a subclone with >= 1 source cell. Rules: enrichment argmax (primary) and raw-mass argmax over
 the candidates. References: chance 1 / candidates, size rule (largest pi among candidates).
-single_true_class flags a family / level whose scored target cells all carry one subclone: then, under BOT,
-the mean own enrichment is 1 by construction (PLAN.md, identity), whatever the representation.
-Writes OUT/: diagnostics.tsv, summary.tsv, comparison.tsv (A and B side by side, B - A), per_subclone.tsv,
-per_site.tsv, confusion.tsv, cells.tsv.gz.
+evaluation_status = not_evaluable (kept, with its reason) when the scored cells hold < 2 true subclones or
+there are < 2 candidates; with one true subclone, under BOT, the mean own enrichment is 1 by construction
+(PLAN.md, identity). Coverage: coverage_scored = scored / family target cells; mean_family_mass_share =
+mean over scored cells of the share of their incoming mass that comes from their own family / clone.
+Writes OUT/: run_status.tsv, diagnostics.tsv, summary.tsv, comparison.tsv (A and B side by side, B - A),
+comparison_overview.tsv (per level and metric, over evaluable families: medians, B higher / A higher),
+per_subclone.tsv, per_site.tsv, confusion.tsv, cells.tsv.gz.
 """
 
 from __future__ import annotations
@@ -33,7 +37,8 @@ sys.path.insert(0, str(HERE))
 from methods import METHODS  # noqa: E402  (A_standard_OT, B_our_OT)
 UNLABELLED, OTHER = "family unlabelled", "other"
 MIN_PI, MIN_CELLS, RARE = 0.01, 5, 0.10
-COMPARED = ["balanced_accuracy_enrichment", "balanced_accuracy_raw", "accuracy_enrichment", "rare_recall_enrichment", "mean_own_log2E"]
+COMPARED = ["balanced_accuracy_enrichment", "balanced_accuracy_raw", "accuracy_enrichment", "rare_recall_enrichment", "mean_own_log2E",
+            "mean_family_mass_share"]
 
 
 def score_one(tm: pd.DataFrame, src: pd.DataFrame, labels: pd.Series, subclones: list[str]):
@@ -82,7 +87,15 @@ def score_one(tm: pd.DataFrame, src: pd.DataFrame, labels: pd.Series, subclones:
                     "recall_size_rule": float(size_pred == t) if len(rows) else np.nan})
     per = pd.DataFrame(per)
     present = per[per["target_cells_scored"] > 0]
-    summ = {"target_cells": len(tm), "target_family_cells": int(in_family.sum()), "scored": int(scored.sum()),
+    # Evaluable needs >= 2 true subclones among the scored cells and >= 2 candidates; otherwise the case is kept
+    # and reported as not_evaluable (under BOT a one-subclone target has mean own enrichment 1 by construction).
+    reason = ("no scored target cell" if not scored.any() else "one true subclone among the scored cells" if len(present) < 2
+              else "fewer than 2 candidate subclones" if cand.sum() < 2 else "")
+    fam_share = mass.sum(1) / np.where(col > 0, col, np.nan)
+    summ = {"evaluation_status": "not_evaluable" if reason else "evaluable", "not_evaluable_reason": reason,
+            "target_cells": len(tm), "target_family_cells": int(in_family.sum()), "scored": int(scored.sum()),
+            "coverage_scored": scored.sum() / in_family.sum() if in_family.any() else np.nan,
+            "mean_family_mass_share": float(np.nanmean(fam_share[scored])) if scored.any() else np.nan,
             "unmatched_observed": int(unmatched.sum()), "true_classes": len(present), "single_true_class": len(present) == 1, "candidates": int(cand.sum()),
             "candidates_list": ";".join(names[cand]),
             "true_not_candidate_cells": int(sc["true"].map(lambda t: not cand[gi[t]]).sum()) if len(sc) else 0,
@@ -104,22 +117,30 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, default=HERE / "inputs")
     args = parser.parse_args()
-    pairs = pd.read_csv(args.inputs / "pilot_pairs.tsv", sep="\t", dtype=str)
+    pairs = pd.read_csv(args.inputs / "cases.tsv", sep="\t", dtype=str)
     fam_cells = pd.read_csv(args.inputs / "family_cells.tsv.gz", sep="\t", dtype=str, keep_default_na=False)
     subs = pd.read_csv(args.inputs / "subclones.tsv", sep="\t", dtype={"level": int})
-    diag, summ, per, conf, cells, sites = [], [], [], [], [], []
+    status, diag, summ, per, conf, cells, sites = [], [], [], [], [], [], []
     for _, pair in pairs.iterrows():
-        root = args.runs / pair["pair_id"]
+        root = args.runs / pair["case_id"]
+        base = {"index": int(pair["index"]), "case_id": pair["case_id"], "families": pair["families"]}
         if not (root / "SUCCESS").exists():
-            print(f"MISSING {pair['pair_id']}")
+            failed = root / "FAILED.json"
+            reason = json.loads(failed.read_text(encoding="utf-8"))["error"] if failed.exists() else \
+                "no SUCCESS and no FAILED.json (not run, still running, or killed by SLURM: see the task log)"
+            for method in METHODS:
+                status.append({**base, "method": method, "status": "failed" if failed.exists() else "missing", "reason": reason})
+            print(f"NOT DONE {pair['case_id']}: {reason}")
             continue
         for method in METHODS:
             arm_dir = root / method
             if not (arm_dir / "diagnostics.json").exists():
-                print(f"MISSING {pair['pair_id']} {method}")
+                status.append({**base, "method": method, "status": "missing", "reason": "SUCCESS but no diagnostics.json"})
+                print(f"MISSING {pair['case_id']} {method}")
                 continue
             d = json.loads((arm_dir / "diagnostics.json").read_text(encoding="utf-8"))
-            diag.append({"pair_id": pair["pair_id"], **{k: v for k, v in d.items() if k != "warnings"},
+            status.append({**base, "method": method, "status": "ok", "reason": "", "converged": d.get("converged")})
+            diag.append({"case_id": pair["case_id"], **{k: v for k, v in d.items() if k != "warnings"},
                          "n_warnings": len(d.get("warnings", []))})
             src_all = pd.read_csv(arm_dir / "source_groups.tsv", sep="\t", dtype={"level": int})
             for fam in pair["families"].split(";"):
@@ -132,7 +153,7 @@ def main() -> None:
                     src = src_all[src_all["family"].eq(fam) & src_all["level"].eq(level)]
                     labels = table[f"L{level}"].replace("", "ambiguous")
                     s, p, c, cl = score_one(tm, src, labels, allowed)
-                    key = {"pair_id": pair["pair_id"], "method": method, "family": fam, "level": level}
+                    key = {"case_id": pair["case_id"], "method": method, "family": fam, "level": level}
                     summ.append({**key, **s})
                     per.append(p.assign(**key))
                     conf.append(c.assign(**key))
@@ -141,26 +162,46 @@ def main() -> None:
                         sites.append({**key, "site": site, "true": true, "cells": len(g), "mean_own_log2E": g["own_log2E"].mean(),
                                       "recall_enrichment": g["pred_enrichment"].eq(true).mean(), "recall_raw": g["pred_raw"].eq(true).mean()})
     args.out.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(status).to_csv(args.out / "run_status.tsv", sep="\t", index=False)
+    if not summ:
+        print("no completed case to score; see run_status.tsv")
+        return
     pd.DataFrame(diag).to_csv(args.out / "diagnostics.tsv", sep="\t", index=False)
     pd.DataFrame(summ).to_csv(args.out / "summary.tsv", sep="\t", index=False)
     pd.concat(per).to_csv(args.out / "per_subclone.tsv", sep="\t", index=False)
     pd.concat(conf).to_csv(args.out / "confusion.tsv", sep="\t", index=False)
     pd.DataFrame(sites).to_csv(args.out / "per_site.tsv", sep="\t", index=False)
     pd.concat(cells).to_csv(args.out / "cells.tsv.gz", sep="\t", index=False, compression="gzip")
-    # A vs B side by side, one row per test case, family and level (both methods score the same cells).
+    # A vs B side by side, one row per case, family and level (both methods score the same cells).
     s = pd.DataFrame(summ)
-    keys = ["pair_id", "family", "level"]
+    keys = ["case_id", "family", "level"]
     wide = s.set_index(keys + ["method"])[COMPARED].unstack("method")  # keeps all-NaN columns (no rare subclone)
     wide.columns = [f"{v}__{m}" for v, m in wide.columns]
     for v in COMPARED:
         if all(f"{v}__{m}" in wide for m in METHODS):
             wide[f"{v}__B_minus_A"] = wide[f"{v}__B_our_OT"] - wide[f"{v}__A_standard_OT"]
-    flags = s.groupby(keys)[["scored", "single_true_class", "chance"]].first()
+    flags = s.groupby(keys)[["evaluation_status", "not_evaluable_reason", "scored", "coverage_scored", "true_classes", "chance"]].first()
     wide = flags.join(wide).reset_index()
     wide.to_csv(args.out / "comparison.tsv", sep="\t", index=False)
+    # Overview over every family / level with both methods done: evaluable ones counted, the rest listed by
+    # status. Descriptive only (PLAN.md: no test statistic).
+    over = []
+    for level, g in wide.groupby("level"):
+        ev = g[g["evaluation_status"].eq("evaluable")]
+        for v in COMPARED:
+            a, b = f"{v}__A_standard_OT", f"{v}__B_our_OT"
+            if a not in ev or b not in ev:
+                continue
+            both = ev[[a, b]].dropna()
+            d = both[b] - both[a]
+            over.append({"level": level, "metric": v, "families_total": len(g), "not_evaluable": int((g["evaluation_status"] != "evaluable").sum()),
+                         "evaluable_with_value": len(both), "median_A": both[a].median(), "median_B": both[b].median(),
+                         "median_B_minus_A": d.median(), "B_higher": int((d > 0).sum()), "A_higher": int((d < 0).sum()), "equal": int((d == 0).sum())})
+    pd.DataFrame(over).to_csv(args.out / "comparison_overview.tsv", sep="\t", index=False)
     pd.set_option("display.width", 250)
-    print(s[["pair_id", "method", "family", "level", "scored", "single_true_class", "candidates", "balanced_accuracy_enrichment",
+    print(s[["case_id", "method", "family", "level", "evaluation_status", "scored", "candidates", "balanced_accuracy_enrichment",
              "balanced_accuracy_raw", "chance", "mean_own_log2E", "rare_recall_enrichment"]].to_string(index=False))
+    print(pd.DataFrame(over).to_string(index=False))
 
 
 if __name__ == "__main__":

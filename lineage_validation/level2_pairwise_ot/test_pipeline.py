@@ -102,25 +102,41 @@ def main():
             manifest = pd.DataFrame([{"patient_id": "Z", "source_sample": "Z_LL", "target_sample": "Z_metastases",
                                       "source_h5ad": str(folder / "Z_LL.h5ad"), "target_h5ad": str(folder / "Z_metastases.h5ad")}])
             manifest.to_csv(lv / "inputs" / "manifests" / "quinn_D_B_raw.csv" if kind == "raw" else folder / "pair_manifest_downsampled.csv", index=False)
-        pd.DataFrame([{"index": 0, "pair_id": "KPTracer_M__M_T1__family_metastases", "dataset": "KPTracer", "mouse": "M", "source_site": "M_T1",
+        # case 2 names a metastasis with no equalised file: it must fail loudly, be recorded, and not stop the rest
+        pd.DataFrame([{"index": 0, "case_id": "KPTracer_M__M_T1__family_metastases", "dataset": "KPTracer", "mouse": "M", "source_site": "M_T1",
                        "target_sites": "M_K1;M_K2", "families": "KPTracer_M_M_T1"},
-                      {"index": 1, "pair_id": "Quinn2021_Z__LL__metastases", "dataset": "Quinn2021", "mouse": "Z", "source_site": "LL",
-                       "target_sites": "ALL", "families": "Quinn2021_Z_LG1"}]).to_csv(inputs / "pilot_pairs.tsv", sep="\t", index=False)
-        pd.DataFrame([("KPTracer_M_M_T1", 1, "L1.1"), ("KPTracer_M_M_T1", 1, "L1.2"), ("Quinn2021_Z_LG1", 1, "L1.1"), ("Quinn2021_Z_LG1", 1, "L1.2")],
+                      {"index": 1, "case_id": "Quinn2021_Z__LL__metastases", "dataset": "Quinn2021", "mouse": "Z", "source_site": "LL",
+                       "target_sites": "ALL", "families": "Quinn2021_Z_LG1"},
+                      {"index": 2, "case_id": "KPTracer_M__M_T1__broken", "dataset": "KPTracer", "mouse": "M", "source_site": "M_T1",
+                       "target_sites": "M_K9", "families": "KPTracer_M_M_T1"}]).to_csv(inputs / "cases.tsv", sep="\t", index=False)
+        # Quinn level 2: LG1's B cells split 20 L1.2.1 / 20 L1.2.2 in LL, every labelled M1 cell is L1.2.1 -> not_evaluable
+        pd.DataFrame([("KPTracer_M_M_T1", 1, "L1.1"), ("KPTracer_M_M_T1", 1, "L1.2"), ("Quinn2021_Z_LG1", 1, "L1.1"), ("Quinn2021_Z_LG1", 1, "L1.2"),
+                      ("Quinn2021_Z_LG1", 2, "L1.2.1"), ("Quinn2021_Z_LG1", 2, "L1.2.2")],
                      columns=["name", "level", "subclone"]).to_csv(inputs / "subclones.tsv", sep="\t", index=False)
         lab = {"A": "L1.1", "B": "L1.2"}
+        q_l2 = {c: ("L1.2.1" if k < 20 else "L1.2.2") for k, c in enumerate(c for c, l in zip(qs, q_src) if l == "B")}
+        q_l2.update({c: "L1.2.1" for c, l in zip(qt, q_tgt) if l == "B"})
         fc = [("KPTracer_M_M_T1", c, lab[l]) for c, l in zip(sid, src_lab) if l in lab] + \
              [("KPTracer_M_M_T1", c, "L1.2") for c, l in zip(tid, tgt_lab) if l == "B"] + \
              [("KPTracer_M_M_T1", c, "L1.1") for c in k2id] + \
              [("Quinn2021_Z_LG1", c, lab[l]) for c, l in zip(qs, q_src) if l in lab] + \
              [("Quinn2021_Z_LG1", c, lab[l]) for c, l in zip(qt, q_tgt) if l in lab]
         pd.DataFrame([{"name": n, "dataset": n.split("_")[0], "mouse": n.split("_")[1], "cell_id": c, "site": "", "reliable": "True",
-                       "L1": l, "L2": ""} for n, c, l in fc]).to_csv(inputs / "family_cells.tsv.gz", sep="\t", index=False, compression="gzip")
-        for i in (0, 1):
-            r = subprocess.run([sys.executable, str(HERE / "run_pairwise.py"), "--index", str(i), "--out", str(out), "--pairs",
-                                str(inputs / "pilot_pairs.tsv"), "--inputs", str(inputs), "--kp-root", str(kp), "--lv-root", str(lv)],
+                       "L1": l, "L2": q_l2.get(c, "") if n.startswith("Quinn") else ""} for n, c, l in fc]).to_csv(
+            inputs / "family_cells.tsv.gz", sep="\t", index=False, compression="gzip")
+        codes = {}
+        for i in (0, 1, 2):
+            r = subprocess.run([sys.executable, str(HERE / "run_pairwise.py"), "--index", str(i), "--out", str(out), "--cases",
+                                str(inputs / "cases.tsv"), "--inputs", str(inputs), "--kp-root", str(kp), "--lv-root", str(lv)],
                                capture_output=True, text=True)
-            check(f"run_pairwise index {i} exits 0", r.returncode == 0, r.stderr[-800:] if r.returncode else "")
+            codes[i] = r.returncode
+            if i < 2:
+                check(f"run_pairwise index {i} exits 0", r.returncode == 0, r.stderr[-800:] if r.returncode else "")
+        broken = out / "KPTracer_M__M_T1__broken"
+        failed = json.loads((broken / "FAILED.json").read_text()) if (broken / "FAILED.json").exists() else {}
+        check("a failing case exits non-zero, writes FAILED.json with the error and traceback, and no SUCCESS",
+              codes[2] != 0 and "no site with >= 20 cells" in failed.get("error", "") and "Traceback" in failed.get("traceback", "")
+              and not (broken / "SUCCESS").exists(), failed.get("error", ""))
         kp_dir = out / "KPTracer_M__M_T1__family_metastases"
         cells = pd.read_csv(kp_dir / "cells.tsv.gz", sep="\t")
         check("KP: source = the 330 equalised cells (raw-only cells left out), target 120 K1 + 60 K2",
@@ -160,22 +176,37 @@ def main():
         qc = pd.read_csv(q_dir / "cells.tsv.gz", sep="\t")
         check("Quinn: the whole metastases side, sites read off the raw file (80 M1 + 40 M2)",
               (qc["side"] == "target").sum() == 120 and (qc.loc[qc["side"] == "target", "site"] == "M1").sum() == 80)
-        qsrc = pd.read_csv(q_dir / "A_standard_OT" / "source_groups.tsv", sep="\t").set_index("group")
+        qsrc = pd.read_csv(q_dir / "A_standard_OT" / "source_groups.tsv", sep="\t").query("level == 1").set_index("group")
         check("Quinn: the other clone's 50 LL cells are 'other'", qsrc.loc["other", "cells"] == 50)
         r = subprocess.run([sys.executable, str(HERE / "score_pairwise.py"), "--runs", str(out), "--out", str(tmp / "score"),
                             "--inputs", str(inputs)], capture_output=True, text=True)
         check("score_pairwise exits 0", r.returncode == 0, r.stderr[-800:] if r.returncode else "")
         s = pd.read_csv(tmp / "score" / "summary.tsv", sep="\t")
-        k = s[s["pair_id"].str.startswith("KP")]
+        k = s[s["case_id"].str.startswith("KP")]
         check("KP: 160 family targets scored, 20 foreign not", (k["scored"] == 160).all() and (k["target_family_cells"] == 160).all())
         ps = pd.read_csv(tmp / "score" / "per_site.tsv", sep="\t")
         check("per-site table: K1 holds the 100 L1.2 cells, K2 the 60 L1.1 cells",
-              set(map(tuple, ps.loc[ps["pair_id"].str.startswith("KP") & ps["method"].eq("A_standard_OT"), ["site", "true", "cells"]].values))
+              set(map(tuple, ps.loc[ps["case_id"].str.startswith("KP") & ps["method"].eq("A_standard_OT"), ["site", "true", "cells"]].values))
               == {("M_K1", "L1.2", 100), ("M_K2", "L1.1", 60)})
-        cmp_ = pd.read_csv(tmp / "score" / "comparison.tsv", sep="\t")
-        check("comparison.tsv: one row per test case and family / level, A and B side by side with B - A",
-              len(cmp_) == 2 and {"balanced_accuracy_enrichment__A_standard_OT", "balanced_accuracy_enrichment__B_our_OT",
-                                  "balanced_accuracy_enrichment__B_minus_A", "rare_recall_enrichment__B_minus_A"} <= set(cmp_.columns))
+        cmp_ = pd.read_csv(tmp / "score" / "comparison.tsv", sep="\t", keep_default_na=False, na_values=[""])
+        check("comparison.tsv: one row per case and family / level (KP L1, Quinn L1, Quinn L2), A and B side by side with B - A",
+              len(cmp_) == 3 and {"balanced_accuracy_enrichment__A_standard_OT", "balanced_accuracy_enrichment__B_our_OT",
+                                  "balanced_accuracy_enrichment__B_minus_A", "rare_recall_enrichment__B_minus_A",
+                                  "coverage_scored", "mean_family_mass_share__B_minus_A"} <= set(cmp_.columns))
+        q2 = cmp_[cmp_["case_id"].str.startswith("Quinn") & cmp_["level"].eq(2)]
+        check("a one-subclone family level is kept and marked not_evaluable with its reason",
+              len(q2) == 1 and q2["evaluation_status"].iloc[0] == "not_evaluable"
+              and q2["not_evaluable_reason"].iloc[0] == "one true subclone among the scored cells")
+        check("the two-subclone levels are evaluable", (cmp_.loc[cmp_["level"].eq(1), "evaluation_status"] == "evaluable").all())
+        check("coverage: every labelled family target cell is scored here (coverage 1)", np.allclose(cmp_.loc[cmp_["level"].eq(1), "coverage_scored"], 1))
+        st = pd.read_csv(tmp / "score" / "run_status.tsv", sep="\t", keep_default_na=False)
+        check("run_status.tsv: 2 cases ok for both methods, the broken one failed for both with its recorded error",
+              sorted(st.loc[st["status"].eq("ok"), "index"].unique()) == [0, 1] and (st["status"].eq("ok").sum() == 4)
+              and set(st.loc[st["index"].eq(2), "status"]) == {"failed"} and st.loc[st["index"].eq(2), "reason"].str.contains("no site").all())
+        ov = pd.read_csv(tmp / "score" / "comparison_overview.tsv", sep="\t")
+        o1 = ov[ov["level"].eq(1) & ov["metric"].eq("balanced_accuracy_enrichment")]
+        check("comparison_overview.tsv: level 1 counts 2 evaluable families", len(o1) == 1 and o1["evaluable_with_value"].iloc[0] == 2)
+        s = s[s["evaluation_status"].eq("evaluable")]
         # The identity behind PLAN.md's amendment: under BOT the mean over target cells of S_g is the source
         # cell share exactly, so a metastasis made of one subclone has mean own enrichment 1 whatever the plan.
         P = np.load(kp_dir / "A_standard_OT" / "coupling.npz")["coupling"].astype(float)
@@ -187,20 +218,30 @@ def main():
               (s["balanced_accuracy_enrichment"] > 0.8).all(), s[["method", "balanced_accuracy_enrichment"]].to_string(index=False))
         check("own-subclone log2 enrichment > 0 for both methods", (s["mean_own_log2E"] > 0).all(), " ".join(f"{v:.2f}" for v in s["mean_own_log2E"]))
         per = pd.read_csv(tmp / "score" / "per_subclone.tsv", sep="\t")
-        b = per[(per["subclone"] == "L1.2") & per["pair_id"].str.startswith("KP")].set_index("method")
+        b = per[(per["subclone"] == "L1.2") & per["case_id"].str.startswith("KP")].set_index("method")
         check("KP, A (BOT): pi of L1.2 = its cell share within the family (60/330)", np.isclose(b.loc["A_standard_OT", "pi"], 60 / 330))
         check("KP, B (UOT): pi of L1.2 is the plan's actual row-mass share, not the cell share",
               np.isclose(b.loc["B_our_OT", "count_share"], 60 / 330) and not np.isclose(b.loc["B_our_OT", "pi"], 60 / 330, atol=1e-3),
               f"pi {b.loc['B_our_OT', 'pi']:.4f}, cell share {60 / 330:.4f}")
-    # The committed dry-run manifest of the real pilot: exactly the two methods for every test case.
+    # The committed full-run inputs: every eligible family in exactly one case, exactly two methods per case.
     manifest = pd.read_csv(HERE / "inputs" / "run_manifest.tsv", sep="\t", dtype=str)
-    pilot = pd.read_csv(HERE / "inputs" / "pilot_pairs.tsv", sep="\t", dtype=str)
-    check("run_manifest.tsv: every pilot test case has exactly A_standard_OT and B_our_OT, as methods.py defines them",
-          set(manifest["index"]) == set(pilot["index"])
+    cases = pd.read_csv(HERE / "inputs" / "cases.tsv", sep="\t", dtype=str)
+    feas = pd.read_csv(HERE.parent / "within_family_subclones" / "output" / "feasibility.tsv", sep="\t", dtype=str)
+    eligible = {f"{d}_{m}_{f}" for d, m, f, e in feas[["dataset", "mouse", "family_or_clone", "subclone_structure_eligible"]].values
+                if str(e).lower() == "true"}
+    in_cases = [f for fs in cases["families"] for f in fs.split(";")]
+    check("cases.tsv: every eligible family of the systematic audit appears exactly once (none dropped)",
+          sorted(in_cases) == sorted(eligible), f"{len(in_cases)} families in {len(cases)} cases, {len(eligible)} eligible")
+    fc = pd.read_csv(HERE / "inputs" / "family_cells.tsv.gz", sep="\t", dtype=str, usecols=["name"])
+    sb = pd.read_csv(HERE / "inputs" / "subclones.tsv", sep="\t", dtype=str)
+    check("family_cells.tsv.gz and subclones.tsv cover exactly the families of cases.tsv",
+          set(fc["name"]) == set(in_cases) == set(sb["name"]), f"{fc['name'].nunique()} / {sb['name'].nunique()} / {len(set(in_cases))}")
+    check("run_manifest.tsv: every case has exactly A_standard_OT and B_our_OT, as methods.py defines them",
+          set(manifest["index"]) == set(cases["index"])
           and all(sorted(g["method"]) == ["A_standard_OT", "B_our_OT"] for _, g in manifest.groupby("index"))
           and set(manifest.loc[manifest["method"].eq("B_our_OT"), "solver"]) == {"UOT"}
           and set(manifest.loc[manifest["method"].eq("A_standard_OT"), "solver"]) == {"BOT"},
-          f"{len(manifest)} rows for {len(pilot)} test cases")
+          f"{len(manifest)} rows for {len(cases)} cases")
     print(f"\n{sum(RESULTS)} passed, {len(RESULTS) - sum(RESULTS)} failed")
     sys.exit(0 if all(RESULTS) else 1)
 

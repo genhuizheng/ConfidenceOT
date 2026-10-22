@@ -2,7 +2,7 @@
 
     python lineage_validation/level2_pairwise_ot/run_pairwise.py --index I --out OUT_ROOT
 
-Row I of inputs/pilot_pairs.tsv. Cells: the malignant cells of the primary and of the target sites in the
+Row I of inputs/cases.tsv (every eligible family; make_inputs.py). Cells: the malignant cells of the primary and of the target sites in the
 depth-equalised files (KP-Tracer: the per-tumour files of the 104-pair runs, the target sites concatenated;
 Quinn: 27_'s output for the lineage-validation LL and metastases sides), and the same cell ids in the raw
 files. One plan covers every target site; a primary -> site block is a column slice of it (Level 3).
@@ -16,25 +16,30 @@ epsilon 0.1 for both:
                  variant="exact") with source/target rejection budget 0, lambda 1/1, tolerance 1e-4: KL-relaxed
                  marginals kept, no cell gated (checked)
 
-Writes OUT_ROOT/<pair_id>/:
+Writes OUT_ROOT/<case_id>/:
   sites.json                       target sites used (cells) and left out (no equalised file, < 20 cells)
   cells.tsv.gz                     side, cell id, site, total counts raw and equalised (plan row/column order)
-  coordinates_<label>.npz          source/target coordinates, cost scale, HVGs
+  coordinates_<label>.npz          source/target coordinates and cell ids, cost scale, HVGs
+  <method>/preprocessing.json      configuration, representation record, seeds, cost scale
   <method>/coupling.npz            the full plan (float32), for Level 3
   <method>/source_groups.tsv       per family and level: group, cells, row mass of the plan
   <method>/target_mass_<family>_L<k>.tsv.gz  per target cell: site, column mass, plan mass from each source group
   <method>/diagnostics.json        convergence, total mass, marginal deviations, gate retention, seconds
   SUCCESS
 CRISPR labels (inputs/family_cells.tsv.gz) are read only after every coupling is computed, to sum it by
-source group. Refuses if SUCCESS exists.
+source group. Refuses if SUCCESS exists. On any error it writes FAILED.json (error, traceback, SLURM ids) and
+exits non-zero; nothing is skipped or re-parameterised. A retry of the same index removes FAILED.json first.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import os
 import sys
 import time
+import traceback
 import warnings
 from pathlib import Path
 
@@ -85,7 +90,7 @@ def files_for(pair: pd.Series) -> dict:
             raise ValueError(f"Quinn {pair['mouse']}: {len(r)} rows in the {kind} manifest")
         rows[kind] = r.iloc[0]
     spec = lambda side, site: [{k: (side_paths(rows[k], side), rows[k][f"{side}_sample"]) for k in ("ds", "raw")} | {"site": site}]
-    return {"source": spec("source", src), "target": spec("target", None if tgt == "ALL" else tgt), "left_out": {}}
+    return {"source": spec("source", None), "target": spec("target", None if tgt == "ALL" else tgt), "left_out": {}}
 
 
 def load_part(part: dict, side: str):
@@ -183,26 +188,43 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--index", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--pairs", type=Path, default=HERE / "inputs" / "pilot_pairs.tsv")
+    parser.add_argument("--cases", type=Path, default=HERE / "inputs" / "cases.tsv")
     parser.add_argument("--inputs", type=Path, default=HERE / "inputs", help="family_cells.tsv.gz and subclones.tsv")
     parser.add_argument("--kp-root", type=Path, default=KP)
     parser.add_argument("--lv-root", type=Path, default=LV)
     args = parser.parse_args()
     globals().update(KP=args.kp_root, LV=args.lv_root)
-    pair = pd.read_csv(args.pairs, sep="\t", dtype=str).iloc[args.index]
+    pair = pd.read_csv(args.cases, sep="\t", dtype=str).iloc[args.index]
     if int(pair["index"]) != args.index:
-        raise ValueError("pilot_pairs.tsv row order does not match its index column")
-    out = args.out / pair["pair_id"]
+        raise ValueError("cases.tsv row order does not match its index column")
+    out = args.out / pair["case_id"]
     if (out / "SUCCESS").exists():
         sys.exit(f"{out}/SUCCESS exists")
     out.mkdir(parents=True, exist_ok=True)
+    (out / "FAILED.json").unlink(missing_ok=True)  # a retry starts clean; the earlier reason stays in the log
+    started = time.perf_counter()
+    try:
+        run(args, pair, out)
+    except BaseException as error:  # recorded, never swallowed: the task still exits non-zero
+        (out / "FAILED.json").write_text(json.dumps({
+            "case_id": pair["case_id"], "index": args.index, "error": f"{type(error).__name__}: {error}",
+            "traceback": traceback.format_exc(), "seconds": time.perf_counter() - started,
+            "job": os.environ.get("SLURM_JOB_ID", ""), "array_job": os.environ.get("SLURM_ARRAY_JOB_ID", ""),
+            "array_task": os.environ.get("SLURM_ARRAY_TASK_ID", "")}, indent=1), encoding="utf-8")
+        raise
+
+
+def run(args, pair: pd.Series, out: Path) -> None:
     spec = files_for(pair)
     left_out = dict(spec["left_out"])
     (s_raw, s_ds, s_site), (t_raw, t_ds, t_site) = load_side(spec["source"], "source", left_out), load_side(spec["target"], "target", left_out)
     used = {str(k): int(v) for k, v in pd.Series(t_site).value_counts().items()}
+    src_sites = {str(k): int(v) for k, v in pd.Series(s_site).value_counts().items()}
+    if set(src_sites) != {pair["source_site"]}:
+        raise ValueError(f"source side holds sites {src_sites}, expected only {pair['source_site']}")
     (out / "sites.json").write_text(json.dumps({"source": pair["source_site"], "source_cells": int(s_ds.n_obs),
                                                 "target_sites_used": used, "target_sites_left_out": left_out}, indent=1), encoding="utf-8")
-    print(f"{pair['pair_id']}: source {s_ds.n_obs}, target {t_ds.n_obs} cells ({used}); left out {left_out}", flush=True)
+    print(f"{pair['case_id']}: source {s_ds.n_obs}, target {t_ds.n_obs} cells ({used}); left out {left_out}", flush=True)
     total = lambda a: np.asarray(a.X.sum(1)).ravel()
     pd.concat([pd.DataFrame({"side": side, "cell": d.obs_names, "site": s, "total_counts_raw": total(r), "total_counts_ds": total(d)})
                for side, r, d, s in (("source", s_raw, s_ds, s_site), ("target", t_raw, t_ds, t_site))]).to_csv(
@@ -218,15 +240,21 @@ def main() -> None:
             regress_out=cfg.regress_out, regress_on_ranks=cfg.regress_on_ranks, scale_genes=cfg.scale_genes,
             label_stem=cfg.label_stem)
         if record.get("label") != label:
-            raise SystemExit(f"{label}: the representation built {record.get('label')!r}")
+            raise RuntimeError(f"{label}: the representation built {record.get('label')!r}")
         scale = median_pair_scale(xs, xt, rng=np.random.default_rng(SEED + args.index * 104729))
         np.savez_compressed(out / f"coordinates_{label}.npz", source=xs, target=xt, scale=scale, hvg=np.asarray(hvg, dtype=str),
                             source_ids=np.asarray(src.obs_names, dtype=str), target_ids=np.asarray(tgt.obs_names, dtype=str))
+        meta = {"method": method, "preprocessing": label, "counts": kind, "configuration": dataclasses.asdict(cfg),
+                "representation_record": record, "n_hvg": N_HVG, "n_pcs": N_PCS, "representation_seed": SEED + args.index,
+                "scale_seed": SEED + args.index * 104729, "cost": "squared_euclidean / median_pair_scale", "cost_scale": float(scale),
+                "n_hvg_used": int(len(hvg)), "source_cells": int(xs.shape[0]), "target_cells": int(xt.shape[0])}
+        (out / method).mkdir(exist_ok=True)
+        (out / method / "preprocessing.json").write_text(json.dumps(meta, indent=1, default=str), encoding="utf-8")
         P, info = solve(squared_euclidean(xs, xt) / scale, solver)
         info.update(method=method, preprocessing=label, counts=kind, solver=solver, epsilon=EPSILON, cost_scale=float(scale),
-                    n_source=int(P.shape[0]), n_target=int(P.shape[1]))
+                    n_source=int(P.shape[0]), n_target=int(P.shape[1]), solver_call=METHODS[method]["solver_call"],
+                    rejection=METHODS[method]["rejection"])
         print(json.dumps(info), flush=True)
-        (out / method).mkdir(exist_ok=True)
         np.savez_compressed(out / method / "coupling.npz", coupling=P.astype(np.float32))
         (out / method / "diagnostics.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
         plans[method] = P

@@ -1,0 +1,10 @@
+index	case_id	dataset	mouse	source_site	target_sites	families	sites_left_out	estimated_entries	resource
+0	KPTracer_3454__3454_Lkb1_T1__family_metastases	KPTracer	3454	3454_Lkb1_T1	3454_Lkb1_N1	KPTracer_3454_3454_Lkb1_T1	"{""3454_Lkb1_Rib"": 10, ""3454_Lkb1_K1"": 1}"	647860	standard
+1	KPTracer_3457__3457_Apc_T1__family_metastases	KPTracer	3457	3457_Apc_T1	3457_Apc_K1;3457_Apc_N2	KPTracer_3457_3457_Apc_T1	{}	124775	standard
+2	KPTracer_3457__3457_Apc_T4__family_metastases	KPTracer	3457	3457_Apc_T4	3457_Apc_L1	KPTracer_3457_3457_Apc_T4	"{""3457_Apc_L2"": 15}"	23874	standard
+3	KPTracer_3515__3515_Lkb1_T1__family_metastases	KPTracer	3515	3515_Lkb1_T1	3515_Lkb1_K1;3515_Lkb1_K2;3515_Lkb1_K3;3515_Lkb1_L1;3515_Lkb1_L2;3515_Lkb1_N1	KPTracer_3515_3515_Lkb1_T1	{}	707155	standard
+4	KPTracer_3724__3724_NT_T1__family_metastases	KPTracer	3724	3724_NT_T1	3724_NT_L1;3724_NT_L2;3724_NT_L3;3724_NT_S1	KPTracer_3724_3724_NT_T1	{}	92462500	large
+5	Quinn2021_100k__LL__metastases	Quinn2021	100k	LL	ALL	Quinn2021_100k_LG2;Quinn2021_100k_LG3;Quinn2021_100k_LG4;Quinn2021_100k_LG5	{}	244789	standard
+6	Quinn2021_10k__LL__metastases	Quinn2021	10k	LL	ALL	Quinn2021_10k_LG2;Quinn2021_10k_LG3;Quinn2021_10k_LG5	{}	93933	standard
+7	Quinn2021_30k__LL__metastases	Quinn2021	30k	30kLL	ALL	Quinn2021_30k_LG1;Quinn2021_30k_LG2	{}	4077190	large
+8	Quinn2021_5k__LL__metastases	Quinn2021	5k	LL	ALL	Quinn2021_5k_LG1;Quinn2021_5k_LG11;Quinn2021_5k_LG12;Quinn2021_5k_LG13;Quinn2021_5k_LG15;Quinn2021_5k_LG17;Quinn2021_5k_LG2;Quinn2021_5k_LG26;Quinn2021_5k_LG4;Quinn2021_5k_LG6;Quinn2021_5k_LG8;Quinn2021_5k_LG9	{}	17452825	large
