@@ -1,9 +1,10 @@
-"""Score Level 2 pair-wise runs against the CRISPR subclones (PLAN.md, Metrics).
+"""Score Level 2 runs (Method A_standard_OT, Method B_our_OT) against the CRISPR subclones (PLAN.md, Metrics).
 
     python lineage_validation/level2_pairwise_ot/score_pairwise.py --runs RUNS_ROOT --out OUT
 
 RUNS_ROOT holds run_pairwise.py's <pair_id>/ folders (the small files suffice: diagnostics.json,
-source_groups.tsv, target_mass_*.tsv.gz). Target labels come from inputs/family_cells.tsv.gz.
+source_groups.tsv, target_mass_*.tsv.gz). Target labels come from inputs/family_cells.tsv.gz. A missing
+method folder is reported, never substituted.
 
 For target cell j and source group g of family F: S_gj = mass_gj / column mass_j (= sum over i in g of
 q_ij), S~_gj = S_gj / sum over F (subclones + family unlabelled), pi_g = row mass of g / row mass of F
@@ -13,21 +14,26 @@ level is a subclone with >= 1 source cell. Rules: enrichment argmax (primary) an
 the candidates. References: chance 1 / candidates, size rule (largest pi among candidates).
 single_true_class flags a family / level whose scored target cells all carry one subclone: then, under BOT,
 the mean own enrichment is 1 by construction (PLAN.md, identity), whatever the representation.
-Writes OUT/: diagnostics.tsv, summary.tsv, per_subclone.tsv, per_site.tsv, confusion.tsv, cells.tsv.gz.
+Writes OUT/: diagnostics.tsv, summary.tsv, comparison.tsv (A and B side by side, B - A), per_subclone.tsv,
+per_site.tsv, confusion.tsv, cells.tsv.gz.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from methods import METHODS  # noqa: E402  (A_standard_OT, B_our_OT)
 UNLABELLED, OTHER = "family unlabelled", "other"
 MIN_PI, MIN_CELLS, RARE = 0.01, 5, 0.10
+COMPARED = ["balanced_accuracy_enrichment", "balanced_accuracy_raw", "accuracy_enrichment", "rare_recall_enrichment", "mean_own_log2E"]
 
 
 def score_one(tm: pd.DataFrame, src: pd.DataFrame, labels: pd.Series, subclones: list[str]):
@@ -107,8 +113,11 @@ def main() -> None:
         if not (root / "SUCCESS").exists():
             print(f"MISSING {pair['pair_id']}")
             continue
-        for arm_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-            arm = arm_dir.name
+        for method in METHODS:
+            arm_dir = root / method
+            if not (arm_dir / "diagnostics.json").exists():
+                print(f"MISSING {pair['pair_id']} {method}")
+                continue
             d = json.loads((arm_dir / "diagnostics.json").read_text(encoding="utf-8"))
             diag.append({"pair_id": pair["pair_id"], **{k: v for k, v in d.items() if k != "warnings"},
                          "n_warnings": len(d.get("warnings", []))})
@@ -123,7 +132,7 @@ def main() -> None:
                     src = src_all[src_all["family"].eq(fam) & src_all["level"].eq(level)]
                     labels = table[f"L{level}"].replace("", "ambiguous")
                     s, p, c, cl = score_one(tm, src, labels, allowed)
-                    key = {"pair_id": pair["pair_id"], "arm": arm, "family": fam, "level": level}
+                    key = {"pair_id": pair["pair_id"], "method": method, "family": fam, "level": level}
                     summ.append({**key, **s})
                     per.append(p.assign(**key))
                     conf.append(c.assign(**key))
@@ -138,9 +147,20 @@ def main() -> None:
     pd.concat(conf).to_csv(args.out / "confusion.tsv", sep="\t", index=False)
     pd.DataFrame(sites).to_csv(args.out / "per_site.tsv", sep="\t", index=False)
     pd.concat(cells).to_csv(args.out / "cells.tsv.gz", sep="\t", index=False, compression="gzip")
+    # A vs B side by side, one row per test case, family and level (both methods score the same cells).
+    s = pd.DataFrame(summ)
+    keys = ["pair_id", "family", "level"]
+    wide = s.set_index(keys + ["method"])[COMPARED].unstack("method")  # keeps all-NaN columns (no rare subclone)
+    wide.columns = [f"{v}__{m}" for v, m in wide.columns]
+    for v in COMPARED:
+        if all(f"{v}__{m}" in wide for m in METHODS):
+            wide[f"{v}__B_minus_A"] = wide[f"{v}__B_our_OT"] - wide[f"{v}__A_standard_OT"]
+    flags = s.groupby(keys)[["scored", "single_true_class", "chance"]].first()
+    wide = flags.join(wide).reset_index()
+    wide.to_csv(args.out / "comparison.tsv", sep="\t", index=False)
     pd.set_option("display.width", 250)
-    print(pd.DataFrame(summ)[["pair_id", "arm", "family", "level", "scored", "candidates", "balanced_accuracy_enrichment",
-                              "balanced_accuracy_raw", "chance", "mean_own_log2E", "rare_recall_enrichment"]].to_string(index=False))
+    print(s[["pair_id", "method", "family", "level", "scored", "single_true_class", "candidates", "balanced_accuracy_enrichment",
+             "balanced_accuracy_raw", "chance", "mean_own_log2E", "rare_recall_enrichment"]].to_string(index=False))
 
 
 if __name__ == "__main__":

@@ -5,8 +5,10 @@
 Builds a KP-Tracer-shaped case (per-tumour raw + equalised files; target = two metastases K1 and K2 in one
 plan) and a Quinn-shaped case (pooled LL and metastases sides, sites read off the raw file) in a temporary
 folder. Source subclones A (80%) and B (20%) carry different expression programmes; K1 is 100 B cells of
-the family and 20 of another family, K2 60 A, the Quinn M1 40 A + 40 B. Checks: BOT marginals exact, UOT
-keeps every cell, group masses sum to the column mass, the BOT identity (mean S_g = source cell share),
+the family and 20 of another family, K2 60 A, the Quinn M1 40 A + 40 B. Checks: exactly two OT runs per case (A_standard_OT, B_our_OT) on the same
+cells; A is Balanced OT with exact marginals; B is our UOT with rejection budget 0 (backbone uot, bounds
+(0, 0), no cell gated, KL-relaxed marginals kept, pi = its actual row-mass share); group masses sum to the
+column mass; the A-vs-B comparison table; the BOT identity (mean S_g = source cell share);
 the planted rare subclone B is recovered by the enrichment rule, the Quinn cells of another clone go to
 "other", the per-site table, and the cell ids line up between raw and equalised files.
 Prints PASS / FAIL; exit 1 on any failure.
@@ -124,26 +126,41 @@ def main():
         check("KP: source = the 330 equalised cells (raw-only cells left out), target 120 K1 + 60 K2",
               (cells["side"] == "source").sum() == 330 and (cells["side"] == "target").sum() == 180
               and (cells["site"] == "M_K2").sum() == 60)
-        for arm in ("A_logcpm_BOT", "B_ranknm256dscos_UOT", "AxUOT_logcpm_UOT", "BxBOT_ranknm256dscos_BOT"):
-            d = json.loads((kp_dir / arm / "diagnostics.json").read_text())
-            if d["solver"] == "BOT":
-                check(f"{arm}: BOT marginals exact", d["converged"] and d["row_rel_dev_max"] < 1e-6 and d["col_rel_dev_max"] < 1e-6,
+        for case in (kp_dir, out / "Quinn2021_Z__LL__metastases"):
+            folders = sorted(p.name for p in case.iterdir() if p.is_dir())
+            check(f"{case.name}: exactly two OT runs, A_standard_OT and B_our_OT", folders == ["A_standard_OT", "B_our_OT"], str(folders))
+            ids = []
+            for x in ("logcpm_noscale", "ranknm256_noscale_ds_cos"):
+                with np.load(case / f"coordinates_{x}.npz") as z:
+                    ids.append({k: z[k] for k in ("source_ids", "target_ids")})
+            check(f"{case.name}: A and B use the same source and target cells in the same order",
+                  all((ids[0][k] == ids[1][k]).all() for k in ("source_ids", "target_ids")))
+        for method in ("A_standard_OT", "B_our_OT"):
+            d = json.loads((kp_dir / method / "diagnostics.json").read_text())
+            if method == "A_standard_OT":
+                check(f"{method}: logcpm_noscale on raw counts, Balanced OT, marginals exact",
+                      d["preprocessing"] == "logcpm_noscale" and d["counts"] == "raw" and d["solver"] == "BOT"
+                      and d["converged"] and d["row_rel_dev_max"] < 1e-6 and d["col_rel_dev_max"] < 1e-6,
                       f"row {d['row_rel_dev_max']:.1e}, col {d['col_rel_dev_max']:.1e}")
             else:
-                check(f"{arm}: UOT keeps every cell, mass not fixed", d["source_retained"] == 1 and d["target_retained"] == 1,
+                check(f"{method}: ranknm256_noscale_ds_cos on equalised counts, backbone uot, budget 0 -> bounds (0, 0)",
+                      d["preprocessing"] == "ranknm256_noscale_ds_cos" and d["counts"] == "ds" and d["backbone"] == "uot"
+                      and d["source_rejection_bounds"] == [0, 0] and d["target_rejection_bounds"] == [0, 0])
+                check(f"{method}: no cell rejected, KL-relaxed marginals kept (not Balanced OT)",
+                      d["source_retained"] == 1 and d["target_retained"] == 1 and d["row_rel_dev_max"] > 1e-2 and abs(d["total_mass"] - 1) > 1e-2,
                       f"total mass {d['total_mass']:.3f}, row dev max {d['row_rel_dev_max']:.2f}")
-            tm = pd.read_csv(kp_dir / arm / "target_mass_KPTracer_M_M_T1_L1.tsv.gz", sep="\t")
-            P = np.load(kp_dir / arm / "coupling.npz")["coupling"]
-            check(f"{arm}: group masses sum to the column mass and match the saved plan",
+            tm = pd.read_csv(kp_dir / method / "target_mass_KPTracer_M_M_T1_L1.tsv.gz", sep="\t")
+            P = np.load(kp_dir / method / "coupling.npz")["coupling"]
+            check(f"{method}: group masses sum to the column mass and match the saved plan",
                   np.allclose(tm.filter(like="mass__").sum(1), tm["column_mass"], rtol=1e-6) and np.allclose(P.sum(0), tm["column_mass"], rtol=1e-4))
-            src = pd.read_csv(kp_dir / arm / "source_groups.tsv", sep="\t").set_index("group")
-            check(f"{arm}: source groups 240 / 60 / 30 unlabelled / 0 other",
+            src = pd.read_csv(kp_dir / method / "source_groups.tsv", sep="\t").set_index("group")
+            check(f"{method}: source groups 240 / 60 / 30 unlabelled / 0 other",
                   list(src.loc[["L1.1", "L1.2", "family unlabelled", "other"], "cells"]) == [240, 60, 30, 0])
         q_dir = out / "Quinn2021_Z__LL__metastases"
         qc = pd.read_csv(q_dir / "cells.tsv.gz", sep="\t")
         check("Quinn: the whole metastases side, sites read off the raw file (80 M1 + 40 M2)",
               (qc["side"] == "target").sum() == 120 and (qc.loc[qc["side"] == "target", "site"] == "M1").sum() == 80)
-        qsrc = pd.read_csv(q_dir / "A_logcpm_BOT" / "source_groups.tsv", sep="\t").set_index("group")
+        qsrc = pd.read_csv(q_dir / "A_standard_OT" / "source_groups.tsv", sep="\t").set_index("group")
         check("Quinn: the other clone's 50 LL cells are 'other'", qsrc.loc["other", "cells"] == 50)
         r = subprocess.run([sys.executable, str(HERE / "score_pairwise.py"), "--runs", str(out), "--out", str(tmp / "score"),
                             "--inputs", str(inputs)], capture_output=True, text=True)
@@ -153,22 +170,37 @@ def main():
         check("KP: 160 family targets scored, 20 foreign not", (k["scored"] == 160).all() and (k["target_family_cells"] == 160).all())
         ps = pd.read_csv(tmp / "score" / "per_site.tsv", sep="\t")
         check("per-site table: K1 holds the 100 L1.2 cells, K2 the 60 L1.1 cells",
-              set(map(tuple, ps.loc[ps["pair_id"].str.startswith("KP") & ps["arm"].eq("A_logcpm_BOT"), ["site", "true", "cells"]].values))
+              set(map(tuple, ps.loc[ps["pair_id"].str.startswith("KP") & ps["method"].eq("A_standard_OT"), ["site", "true", "cells"]].values))
               == {("M_K1", "L1.2", 100), ("M_K2", "L1.1", 60)})
+        cmp_ = pd.read_csv(tmp / "score" / "comparison.tsv", sep="\t")
+        check("comparison.tsv: one row per test case and family / level, A and B side by side with B - A",
+              len(cmp_) == 2 and {"balanced_accuracy_enrichment__A_standard_OT", "balanced_accuracy_enrichment__B_our_OT",
+                                  "balanced_accuracy_enrichment__B_minus_A", "rare_recall_enrichment__B_minus_A"} <= set(cmp_.columns))
         # The identity behind PLAN.md's amendment: under BOT the mean over target cells of S_g is the source
         # cell share exactly, so a metastasis made of one subclone has mean own enrichment 1 whatever the plan.
-        P = np.load(kp_dir / "A_logcpm_BOT" / "coupling.npz")["coupling"].astype(float)
+        P = np.load(kp_dir / "A_standard_OT" / "coupling.npz")["coupling"].astype(float)
         g = np.array(src_lab)
         S_B = P[g == "B"].sum(0) / P.sum(0)
         check("identity: under BOT the mean of S_B over all target cells is B's source cell share (60/330)",
               abs(S_B.mean() - 60 / 330) < 1e-5, f"{S_B.mean():.6f} vs {60 / 330:.6f}")
-        check("planted rare subclone L1.2 (20%) recovered by the enrichment rule in every arm (> 0.8; chance 0.5)",
-              (s["balanced_accuracy_enrichment"] > 0.8).all(), s[["arm", "balanced_accuracy_enrichment"]].to_string(index=False))
-        check("own-subclone log2 enrichment > 0 in every arm", (s["mean_own_log2E"] > 0).all(), " ".join(f"{v:.2f}" for v in s["mean_own_log2E"]))
+        check("planted rare subclone L1.2 (20%) recovered by the enrichment rule by both methods (> 0.8; chance 0.5)",
+              (s["balanced_accuracy_enrichment"] > 0.8).all(), s[["method", "balanced_accuracy_enrichment"]].to_string(index=False))
+        check("own-subclone log2 enrichment > 0 for both methods", (s["mean_own_log2E"] > 0).all(), " ".join(f"{v:.2f}" for v in s["mean_own_log2E"]))
         per = pd.read_csv(tmp / "score" / "per_subclone.tsv", sep="\t")
-        b = per[(per["subclone"] == "L1.2") & per["pair_id"].str.startswith("KP")]
-        check("KP BOT: pi of L1.2 = cell share within the family (60/330)",
-              np.allclose(b.loc[b["arm"].str.endswith("BOT"), "pi"], 60 / 330))
+        b = per[(per["subclone"] == "L1.2") & per["pair_id"].str.startswith("KP")].set_index("method")
+        check("KP, A (BOT): pi of L1.2 = its cell share within the family (60/330)", np.isclose(b.loc["A_standard_OT", "pi"], 60 / 330))
+        check("KP, B (UOT): pi of L1.2 is the plan's actual row-mass share, not the cell share",
+              np.isclose(b.loc["B_our_OT", "count_share"], 60 / 330) and not np.isclose(b.loc["B_our_OT", "pi"], 60 / 330, atol=1e-3),
+              f"pi {b.loc['B_our_OT', 'pi']:.4f}, cell share {60 / 330:.4f}")
+    # The committed dry-run manifest of the real pilot: exactly the two methods for every test case.
+    manifest = pd.read_csv(HERE / "inputs" / "run_manifest.tsv", sep="\t", dtype=str)
+    pilot = pd.read_csv(HERE / "inputs" / "pilot_pairs.tsv", sep="\t", dtype=str)
+    check("run_manifest.tsv: every pilot test case has exactly A_standard_OT and B_our_OT, as methods.py defines them",
+          set(manifest["index"]) == set(pilot["index"])
+          and all(sorted(g["method"]) == ["A_standard_OT", "B_our_OT"] for _, g in manifest.groupby("index"))
+          and set(manifest.loc[manifest["method"].eq("B_our_OT"), "solver"]) == {"UOT"}
+          and set(manifest.loc[manifest["method"].eq("A_standard_OT"), "solver"]) == {"BOT"},
+          f"{len(manifest)} rows for {len(pilot)} test cases")
     print(f"\n{sum(RESULTS)} passed, {len(RESULTS) - sum(RESULTS)} failed")
     sys.exit(0 if all(RESULTS) else 1)
 

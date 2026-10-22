@@ -1,10 +1,13 @@
 #!/bin/bash
-# Level 2 pilot (PLAN.md): one gg job per row of inputs/pilot_pairs.tsv, run_pairwise.py (four runs each).
+# Level 2 pilot (PLAN.md): one gg job per row of inputs/pilot_pairs.tsv; run_pairwise.py makes exactly two
+# OT runs in it, A_standard_OT (logcpm_noscale + Balanced OT) and B_our_OT (ranknm256_noscale_ds_cos + our UOT,
+# rejection budget 0). inputs/run_manifest.tsv lists them; --dry-run prints it and submits nothing.
 #
 #   bash lineage_validation/level2_pairwise_ot/submit_pilot.sh --dry-run
 #   bash lineage_validation/level2_pairwise_ot/submit_pilot.sh
 #
-# Output <root>/level2_pairwise_ot/pilot/<pair_id>/. A row whose SUCCESS exists is not resubmitted.
+# Output <root>/level2_pairwise_ot/pilot/<pair_id>/{A_standard_OT,B_our_OT}. A row whose SUCCESS exists is not
+# resubmitted.
 # Reads the KP-Tracer equalised/raw files and the lineage-validation Quinn sides; writes nothing else.
 # No set -u, as everywhere in this repo.
 set -eo pipefail
@@ -24,6 +27,15 @@ for path in "$pairs" "$root/inputs/manifests/quinn_D_B_raw.csv" "$root/inputs/h5
             /scratch/10119/ghzheng/OT_project/kp_tracer_confidenceot/downsampled/pair_manifest_downsampled.csv; do
     [[ -e "$path" ]] || { echo "missing: $path" >&2; exit 1; }
 done
+manifest=$repo/lineage_validation/level2_pairwise_ot/inputs/run_manifest.tsv
+[[ -e "$manifest" ]] || { echo "missing: $manifest" >&2; exit 1; }
+# Every test case must have exactly the two methods, A_standard_OT and B_our_OT.
+bad=$(awk -F'\t' 'NR > 1 {m[$1] = m[$1] " " $3} END {for (i in m) if (m[i] != " A_standard_OT B_our_OT") print i ":" m[i]}' "$manifest")
+[[ -z "$bad" ]] || { echo "run_manifest.tsv: a test case does not have exactly A_standard_OT and B_our_OT: $bad" >&2; exit 1; }
+if (( dry_run )); then
+    echo "== run manifest ($manifest)" >&2
+    cut -f1-6,11 "$manifest" | column -t -s $'\t' >&2
+fi
 n=$(( $(wc -l < "$pairs") - 1 ))
 queued=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l) || queued=0
 if (( ! dry_run && queued + n > cap )); then echo "$queued queued; $n more would pass the cap of $cap" >&2; exit 3; fi
@@ -41,7 +53,7 @@ while IFS=$'\t' read -r index pair_id rest; do
     ids="$ids $index=$id"
 done < "$pairs"
 summary="commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown)
-level2 pilot: arms A_logcpm_BOT B_ranknm256dscos_UOT AxUOT_logcpm_UOT BxBOT_ranknm256dscos_BOT, epsilon 0.1, no rejection
+level2 pilot: A_standard_OT (logcpm_noscale + Balanced OT) and B_our_OT (ranknm256_noscale_ds_cos + UOT, rejection budget 0), epsilon 0.1
 out $out
 jobs$ids"
 echo "$summary"

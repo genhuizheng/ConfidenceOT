@@ -1,34 +1,32 @@
 PASS  run_pairwise index 0 exits 0
 PASS  run_pairwise index 1 exits 0
 PASS  KP: source = the 330 equalised cells (raw-only cells left out), target 120 K1 + 60 K2
-PASS  A_logcpm_BOT: BOT marginals exact  (row 1.3e-09, col 3.4e-15)
-PASS  A_logcpm_BOT: group masses sum to the column mass and match the saved plan
-PASS  A_logcpm_BOT: source groups 240 / 60 / 30 unlabelled / 0 other
-PASS  B_ranknm256dscos_UOT: UOT keeps every cell, mass not fixed  (total mass 0.630, row dev max 0.43)
-PASS  B_ranknm256dscos_UOT: group masses sum to the column mass and match the saved plan
-PASS  B_ranknm256dscos_UOT: source groups 240 / 60 / 30 unlabelled / 0 other
-PASS  AxUOT_logcpm_UOT: UOT keeps every cell, mass not fixed  (total mass 0.628, row dev max 0.46)
-PASS  AxUOT_logcpm_UOT: group masses sum to the column mass and match the saved plan
-PASS  AxUOT_logcpm_UOT: source groups 240 / 60 / 30 unlabelled / 0 other
-PASS  BxBOT_ranknm256dscos_BOT: BOT marginals exact  (row 1.5e-09, col 2.7e-15)
-PASS  BxBOT_ranknm256dscos_BOT: group masses sum to the column mass and match the saved plan
-PASS  BxBOT_ranknm256dscos_BOT: source groups 240 / 60 / 30 unlabelled / 0 other
+PASS  KPTracer_M__M_T1__family_metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  KPTracer_M__M_T1__family_metastases: A and B use the same source and target cells in the same order
+PASS  Quinn2021_Z__LL__metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  Quinn2021_Z__LL__metastases: A and B use the same source and target cells in the same order
+PASS  A_standard_OT: logcpm_noscale on raw counts, Balanced OT, marginals exact  (row 1.3e-09, col 3.4e-15)
+PASS  A_standard_OT: group masses sum to the column mass and match the saved plan
+PASS  A_standard_OT: source groups 240 / 60 / 30 unlabelled / 0 other
+PASS  B_our_OT: ranknm256_noscale_ds_cos on equalised counts, backbone uot, budget 0 -> bounds (0, 0)
+PASS  B_our_OT: no cell rejected, KL-relaxed marginals kept (not Balanced OT)  (total mass 0.630, row dev max 0.43)
+PASS  B_our_OT: group masses sum to the column mass and match the saved plan
+PASS  B_our_OT: source groups 240 / 60 / 30 unlabelled / 0 other
 PASS  Quinn: the whole metastases side, sites read off the raw file (80 M1 + 40 M2)
 PASS  Quinn: the other clone's 50 LL cells are 'other'
 PASS  score_pairwise exits 0
 PASS  KP: 160 family targets scored, 20 foreign not
 PASS  per-site table: K1 holds the 100 L1.2 cells, K2 the 60 L1.1 cells
+PASS  comparison.tsv: one row per test case and family / level, A and B side by side with B - A
 PASS  identity: under BOT the mean of S_B over all target cells is B's source cell share (60/330)  (0.181818 vs 0.181818)
-PASS  planted rare subclone L1.2 (20%) recovered by the enrichment rule in every arm (> 0.8; chance 0.5)  (                     arm  balanced_accuracy_enrichment
-            A_logcpm_BOT                        1.0000
-        AxUOT_logcpm_UOT                        1.0000
-    B_ranknm256dscos_UOT                        1.0000
-BxBOT_ranknm256dscos_BOT                        1.0000
-            A_logcpm_BOT                        1.0000
-        AxUOT_logcpm_UOT                        1.0000
-    B_ranknm256dscos_UOT                        1.0000
-BxBOT_ranknm256dscos_BOT                        0.9875)
-PASS  own-subclone log2 enrichment > 0 in every arm  (0.53 0.57 0.69 0.60 0.38 0.42 0.43 0.39)
-PASS  KP BOT: pi of L1.2 = cell share within the family (60/330)
+PASS  planted rare subclone L1.2 (20%) recovered by the enrichment rule by both methods (> 0.8; chance 0.5)  (       method  balanced_accuracy_enrichment
+A_standard_OT                           1.0
+     B_our_OT                           1.0
+A_standard_OT                           1.0
+     B_our_OT                           1.0)
+PASS  own-subclone log2 enrichment > 0 for both methods  (0.53 0.69 0.38 0.43)
+PASS  KP, A (BOT): pi of L1.2 = its cell share within the family (60/330)
+PASS  KP, B (UOT): pi of L1.2 is the plan's actual row-mass share, not the cell share  (pi 0.2296, cell share 0.1818)
+PASS  run_manifest.tsv: every pilot test case has exactly A_standard_OT and B_our_OT, as methods.py defines them  (8 rows for 4 test cases)
 
-24 passed, 0 failed
+26 passed, 0 failed
