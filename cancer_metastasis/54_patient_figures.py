@@ -206,13 +206,14 @@ def overview_figure(items: list, dataset: str, side: str, acc: str, space: str, 
                 spine.set_color("#d0d0d0")
             if r == 0:
                 ax.set_title(columns[c], fontsize=8)
-    cax = fig.add_axes([0.3, 0.006, 0.4, 0.004])
+    height = fig.get_size_inches()[1]  # margins in inches, so a tall dataset keeps room for its title
+    cax = fig.add_axes([0.3, 0.25 / height, 0.4, 0.07 / height])
     bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=FRACTION), cax=cax, orientation="horizontal")
     bar.set_label("retained fraction f (corner: share of cells f=1 / 0<f<1 / f=0)", fontsize=7)
     bar.ax.tick_params(labelsize=6)
     fig.suptitle(f"{dataset}  -  {side.upper()}, acceptance {acc}: every patient on its own joint UMAP\n{space}",
                  fontsize=9, color=SIDE_COLOURS[side])
-    fig.tight_layout(rect=(0, 0.012, 1, 0.99))
+    fig.tight_layout(rect=(0, 0.75 / height, 1, 1 - 0.75 / height))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
