@@ -1,6 +1,52 @@
 # Local lineage visualization: real CRISPR lineage beside the existing ConfidenceOT outputs
 
-Status: **scripts written; KP-Tracer lineage figures checked on the authors' files; the OT, UMAP and Quinn parts wait for the TACC export.** Nothing here re-runs OT, re-infers a tree, classifies clones or computes a new validation metric. The frozen protocol (`../VALIDATION_PROTOCOL.md`, 508609f) is not touched.
+Status: **done 2026-10-22.**
+- The TACC export (4,803 files) was downloaded; every md5 matches `MANIFEST.tsv`.
+- 29 figures were generated from it (`figures/`, PNG + PDF) and checked by eye.
+- Nothing here re-runs OT, re-infers a tree, classifies clones or computes a new validation metric.
+- The frozen protocol (`../VALIDATION_PROTOCOL.md`, 508609f) is not touched.
+
+## Trees drawn
+
+| Tree | Leaves | Leaves that are analysed cells | Characters | Missing entries | OT run on the tree |
+|---|---|---|---|---|---|
+| KP-Tracer 3508_Apc_All | 4,798 | 4,798 | 29 | 15.0% | D_C3 (pooled primaries → pooled metastases) |
+| KP-Tracer 3515_Lkb1_All | 2,209 | 2,209 | 30 | 11.8% | D_C3 |
+| Quinn 10k LineageGroup 1 | 870 | 858 | from file | 7.3% | D_B (LL → pooled tissues) |
+| Quinn 10k LineageGroup 2 | 707 | 703 | from file | 8.5% | D_B |
+| Quinn 5k LineageGroup 3 | 5,616 | 4,780 | from file | 23.3% | D_B |
+
+- Leaves without a cell (Quinn) are leaves whose cell is not in the side files, e.g. removed by 27_'s QC or at an ineligible tissue. They are drawn white.
+- **Why these clones:**
+  - 10k LG1: 858 cells, 856 of them in XM and none in LL, the audit's clone with no counterpart in the source;
+  - 10k LG2: in LL and every tissue;
+  - 5k LG3: 4,533 of 4,780 cells in M2 and 5 in LL.
+
+## What the figures show (descriptive counts read off the annotation tables; no test)
+
+**KP-Tracer 3508 (families T1 and T2; every metastasis is T2 family):**
+- RNA only retains 101/3,719 T1 primary cells, 253/312 T2 primary cells and 708/750 metastatic cells.
+- Its retained metastatic cells have T2 as their largest source group in 661 cases and T1 in 47.
+- CNV only retains 1,117 T1 cells, and its retained metastatic cells point to T1 in 636 cases and to T2 in 58.
+- In the UMAP, T1 primary cells form their own expression clusters, and the T2 primary cells sit beside the metastases.
+
+**KP-Tracer 3515 (every metastasis is T1 family; T1 is also the largest primary):**
+- RNA only retains 201/710 T1, 54/213 T2 and 15/118 T3 primary cells, and 873/1,168 metastatic cells.
+- Of those 873, 845 point to T1.
+
+**Quinn 10k LG1 (no LL cell of this clone):**
+- RNA only rejects 719 of its 854 XM cells; CNV only rejects 350.
+- The cells kept have, by construction, no same-clone LL source. Their largest source group is LG2 (109 of 135 for RNA only), the largest LL clone.
+
+**Quinn 10k LG2:**
+- Almost every tissue cell is retained, and 482/494 point to LG2.
+- LG2 is 53% of the LL cells, so this agreement is largely what its size gives.
+
+**Quinn 5k LG3 (only 5 LL cells):**
+- RNA only retains 3,065/4,533 M2 cells.
+- Their largest source groups are LG2 (1,477) and LG29 (1,380), not LG3.
+
+**DEG/GSEA (Figure E):** none exists for these runs (`audit/deg_gsea_inventory.tsv` is empty), so no Figure E was made.
 
 ## Pipeline
 

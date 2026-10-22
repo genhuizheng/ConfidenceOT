@@ -400,7 +400,7 @@ def figure_umap(name, title, umap: pd.DataFrame, cells: pd.DataFrame, colours, l
     u = umap.copy()
     u["site"] = u["observation_id"].map(cells.set_index("cell_id")["site"]).fillna("?")
     u["lineage"] = u["observation_id"].map(cells.set_index("cell_id")["lineage"]).fillna("")
-    panels = [("site", u["site"], colours), ("family / clone", u["lineage"], lineage_colours)]
+    panels = [("site", u["site"], colours), ("clone (LineageGroup)" if "Quinn" in title else "family (MetFamily)", u["lineage"], lineage_colours)]
     for strategy in lv.STRATEGIES:
         st = ot[strategy]["states"]
         if st is not None:
@@ -425,11 +425,11 @@ def figure_umap(name, title, umap: pd.DataFrame, cells: pd.DataFrame, colours, l
             hit = values == cat
             ax.scatter(x[hit], y[hit], s=size, c=[colour], linewidths=0, rasterized=True, label=f"{cat} ({int(hit.sum())})")
         ax.set_title(label, fontsize=8); ax.set_xticks([]); ax.set_yticks([])
-        if len(cmap) <= 14:
+        if len(cmap) <= 18:
             ax.legend(fontsize=5, frameon=False, markerscale=2, loc="best")
     for ax in axes.ravel()[len(panels):]:
         ax.axis("off")
-    fig.suptitle(f"{title}: fixed joint UMAP (48_reference_umap.py, counts only), same coordinates in every panel", fontsize=9)
+    fig.suptitle(f"{title}: fixed joint UMAP (48_reference_umap.py, counts only), same coordinates in every panel", fontsize=9, y=1.02)
     fig.tight_layout()
     save(fig, out, f"{name}_D_umap", index, **info, panel="D UMAP")
 
