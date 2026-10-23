@@ -1,0 +1,28 @@
+PASS  tree distances equal brute force (unary node contracted)  ([6 6 6 4 4 2 6 6])
+PASS  statuses: m0, m1, m2 evaluable; m3 not_evaluable (unreliable); m9 not_informative (star); z not_evaluable (no leaf)  ({'m0': 'evaluable', 'm1': 'evaluable', 'm2': 'evaluable', 'm3': 'not_evaluable', 'm9': 'not_informative', 'z': 'not_evaluable'})
+PASS  fewer than 5 comparable primaries -> not_evaluable
+PASS  nearest set holding 3 of 5 primaries -> ambiguous  (tree-nearest set holds >= 50% of the comparable primaries)
+PASS  oracle coupling: delta_D_norm = 1, top-1 in the nearest set, enrichment > 0  (1.000)
+PASS  independent coupling with non-uniform marginals: delta_D 0, log2 enrichment 0 (actual marginals used)  (-8.88e-16)
+PASS  ... and a uniform baseline would have reported a spurious effect  (-0.269)
+PASS  mass on the farthest relatives: delta_D_norm < 0  (-0.325)
+PASS  half the mass on a non-comparable source: c_ot 0.5, conditional delta_D_norm still 1  (c_ot 0.50)
+T_M1__case: 16 cell x run rows, 0 s
+status
+missing    2
+ok         4
+PASS  run_status: 4 ok, cnv missing for both methods with the absent file named
+PASS  end to end: planted oracle (A) delta_D_norm 1 for every evaluable cell, planted independent (B) 0
+PASS  not_informative cell carried but its delta_D_norm undefined
+strategy        method  mice  mice_delta_D_pos  median_mouse_delta_D  median_mouse_delta_D_norm  median_mouse_top1_in_nearest  median_mouse_top1_ind_rate  median_mouse_log2_enrichment  families  families_delta_D_pos  families_ci_above_0  families_ci_below_0
+     rna A_standard_OT     1                 1                  2.81                        1.0                         1.000                       0.190                         2.474         1                     1                    1                    0
+     rna      B_our_OT     1                 0                  0.00                        0.0                         0.333                       0.156                         0.000         1                     0                    0                    0
+ rna_cnv A_standard_OT     1                 1                  2.81                        1.0                         1.000                       0.190                         2.474         1                     1                    1                    0
+ rna_cnv      B_our_OT     1                 0                  0.00                        0.0                         0.333                       0.156                         0.000         1                     0                    0                    0
+strategy  families  families_B_higher  families_A_higher  median_family_B_minus_A  mice  mice_B_higher  median_mouse_B_minus_A
+     rna         1                  0                  1                     -1.0     1              0                    -1.0
+ rna_cnv         1                  0                  1                     -1.0     1              0                    -1.0
+PASS  family summary: A oracle delta_D_norm 1 with a bootstrap interval; mouse mean is the mean over families
+PASS  A vs B paired on the same cells: B - A = -1 for the planted pair
+
+14 passed, 0 failed
