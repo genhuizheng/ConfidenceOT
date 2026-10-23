@@ -103,7 +103,11 @@ def consistency(fraction: pd.Series) -> dict:
 def space_label(folder: Path) -> str:
     """What the coordinates were computed from, as 53_ recorded it."""
     record = folder / "reference.json"
-    space = json.loads(record.read_text()).get("space", "raw") if record.exists() else "raw"
+    info = json.loads(record.read_text()) if record.exists() else {}
+    space = info.get("space", "raw")
+    if space == "grid":  # one setting of 56_umap_grid.py, named by its own record
+        return (f"grid UMAP: {info['representation']} representation, PCA {info['n_pcs']}, "
+                f"{info['n_neighbors']} neighbours, min_dist {info['min_dist']} (fixed coordinates, 56_umap_grid.py)")
     return {"gate": "preprocessing UMAP: ranknm256_noscale_ds_cos on the equalised counts (fixed coordinates)",
             "replication": "replication UMAP: the deck's old recipe, log CPM + z-score, PCA 30, min_dist 0.25 "
                            "(fixed coordinates)",
@@ -271,13 +275,21 @@ def dataset_figure(coords: pd.DataFrame, fractions: pd.DataFrame, annotation: pd
     ax = flat[1]
     ax.scatter(x[~mine], y[~mine], s=size, c=CONTEXT, linewidths=0, rasterized=True)
     patients = sorted(coords.loc[mine, "patient_id"].astype(str).unique())
-    colour = {p: SAMPLE_COLOURS[k % len(SAMPLE_COLOURS)] for k, p in enumerate(patients)}
-    ax.scatter(x[draw], y[draw], s=size, c=[colour[p] for p in coords["patient_id"].astype(str).to_numpy()[draw]],
-               linewidths=0, rasterized=True)
-    if len(patients) <= 10:
+    patient_of = coords["patient_id"].astype(str).to_numpy()
+    if len(patients) <= len(SAMPLE_COLOURS):
+        colour = {p: SAMPLE_COLOURS[k] for k, p in enumerate(patients)}
+        ax.scatter(x[draw], y[draw], s=size, c=[colour[p] for p in patient_of[draw]], linewidths=0, rasterized=True)
         for p in patients:
             ax.scatter([], [], s=20, c=colour[p], label=p)
         ax.legend(loc="lower left", fontsize=6, frameon=False, markerscale=1)
+    else:
+        # more patients than distinct colours: one colour, each patient named where its cells sit
+        ax.scatter(x[draw], y[draw], s=size, c=SIDE_COLOURS[side], linewidths=0, rasterized=True)
+        for p in patients:
+            hit = mine & (patient_of == p)
+            ax.text(np.median(x[hit]), np.median(y[hit]), p.replace("SPECTRUM-OV-", "OV-"), fontsize=5.5,
+                    ha="center", va="center", color="black",
+                    bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.7})
     frame(ax, f"{side} cells by patient ({len(patients)} patients, {int(mine.sum()):,} cells)")
     ax = flat[2]
     ax.scatter(x[~mine], y[~mine], s=size, c=CONTEXT, linewidths=0, rasterized=True)
@@ -293,10 +305,14 @@ def dataset_figure(coords: pd.DataFrame, fractions: pd.DataFrame, annotation: pd
         known = part["cell_uid"].isin(position.index)
         value[position.loc[part.loc[known, "cell_uid"]].to_numpy()] = part.loc[known, "retained_fraction"].to_numpy(float)
         scored = draw[np.isfinite(value[draw])]
+        unscored = draw[~np.isfinite(value[draw])]  # e.g. beyond a side's 10,000-cell OT cap
+        ax.scatter(x[unscored], y[unscored], s=size * 0.4, c="black", linewidths=0, rasterized=True)
         ax.scatter(x[scored], y[scored], s=size, c=value[scored], cmap=FRACTION, norm=norm, linewidths=0,
                    rasterized=True)
         share = consistency(part["retained_fraction"])
         text = f"f=1 {share['always']:.0%}   0<f<1 {share['sometimes']:.0%}   f=0 {share['never']:.0%}"
+        if len(unscored):
+            text += f"   no gated pair {len(unscored):,} (black)"
         if proliferating.any():
             inside = np.nanmean(value[proliferating])
             outside = np.nanmean(value[mine & ~proliferating])
@@ -407,7 +423,8 @@ def readme(args) -> str:
              f"acceptances     {' '.join(args.acceptances)}", "",
              "Every strategy, acceptance and step is drawn on the same coordinates; they were computed once.", ""]
     for space in sorted(spaces) or ["raw"]:
-        lines += RECIPES[space] + [""]
+        lines += RECIPES.get(space, [f"{space} coordinates: see each unit's reference.json "
+                                     "(56_umap_grid.py's docstring for the grid's representations)"]) + [""]
     lines += ["Colour: f = pairs that retained the cell / pairs that gated it (vermillion 0, grey 0.5, blue 1).",
               "", "Layout:"] + __doc__.split("Writes to FIGURES_DIR")[1].splitlines()[1:6]
     return chr(10).join(lines) + chr(10)
