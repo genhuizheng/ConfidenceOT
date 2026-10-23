@@ -236,6 +236,49 @@ def gate_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     return record
 
 
+REPLICATION_SEED = 20260913  # replication/plot_primary_metastasis_umap.py's defaults, kept as they were
+
+
+def replication_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
+    """The deck's old colorectal UMAP recipe (replication/plot_primary_metastasis_umap.py), unchanged:
+    original counts, common.prepare_joint_representation at its defaults (log_cpm, per-gene z-score,
+    2,000 HVGs, 30 PCs, squared Euclidean), then umap-learn on the PCs with 20 neighbours,
+    min_dist 0.25, Euclidean metric, seed 20260913. Only the cells differ: this unit's reference cells."""
+    import umap
+
+    missing_rows: list = []
+    primary = load_side(cells[cells["side"] == "primary"], sources, missing_rows)
+    metastasis = load_side(cells[cells["side"] == "metastasis"], sources, missing_rows)
+    if missing_rows:
+        raise KeyError(f"{len(missing_rows)} reference cells are absent from the original h5ads")
+    source, target, genes, provenance = prepare_joint_representation(
+        primary, metastasis, n_hvg=2000, n_pcs=30, seed=REPLICATION_SEED)
+    pcs = np.vstack([np.asarray(source), np.asarray(target)]).astype(np.float32)
+    coordinates = umap.UMAP(n_neighbors=min(20, len(pcs) - 1), min_dist=0.25, metric="euclidean",
+                            random_state=REPLICATION_SEED).fit_transform(pcs)
+    names = list(primary.obs_names) + list(metastasis.obs_names)
+    depth = {}
+    for side, side_data in (("primary", primary), ("metastasis", metastasis)):
+        matrix = sparse.csr_matrix(expression_matrix(side_data))
+        depth[side] = (np.asarray(matrix.sum(axis=1)).ravel(), np.asarray((matrix > 0).sum(axis=1)).ravel())
+    table = cells.set_index("cell_uid").loc[names].rename_axis("cell_uid").reset_index()
+    table["umap_1"], table["umap_2"] = coordinates[:, 0], coordinates[:, 1]
+    table["total_counts"] = np.concatenate([depth["primary"][0], depth["metastasis"][0]])
+    table["detected_genes"] = np.concatenate([depth["primary"][1], depth["metastasis"][1]])
+    out.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out / "patient_umap.csv.gz", index=False, compression="gzip")
+    record = {"space": "replication", "label": provenance.get("label"),
+              "dataset_id": str(cells["dataset_id"].iloc[0]),
+              "patient_id": ";".join(sorted(cells["patient_id"].astype(str).unique())),
+              "cells": {side: int((table["side"] == side).sum()) for side in ("primary", "metastasis")},
+              "pairs": sorted(set(";".join(table["pairs"]).split(";"))),
+              "n_hvg": 2000, "n_pcs": 30, "n_neighbors": 20, "min_dist": 0.25, "seed": REPLICATION_SEED,
+              "genes_md5": hashlib.md5("\n".join(map(str, genes)).encode()).hexdigest(),
+              "umap_learn": umap.__version__}
+    (out / "reference.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+    return record
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cells", type=Path, required=True, help="the export package's cells/ directory")
@@ -244,7 +287,7 @@ def main() -> None:
     parser.add_argument("--datasets", nargs="+")
     parser.add_argument("--task-index", type=int, default=0)
     parser.add_argument("--task-count", type=int, default=1)
-    parser.add_argument("--space", choices=["raw", "gate"], default="raw",
+    parser.add_argument("--space", choices=["raw", "gate", "replication"], default="raw",
                         help="raw: 48_'s recipe on original counts; gate: ranknm256_noscale_ds_cos on the "
                              "equalised counts (give the depth-equalised manifests)")
     parser.add_argument("--group", choices=["patient", "dataset"], default="patient",
@@ -268,7 +311,7 @@ def main() -> None:
             continue
         try:
             part = cells[(cells["dataset_id"] == dataset) & ((cells["patient_id"] == patient) if patient else True)]
-            record = (gate_umap if args.space == "gate" else patient_umap)(part, sources, out)
+            record = {"gate": gate_umap, "replication": replication_umap}.get(args.space, patient_umap)(part, sources, out)
             (out / "DONE").write_text("done\n", encoding="utf-8")
             (out / "FAILED").unlink(missing_ok=True)
             print(f"{dataset} {patient or 'all patients'}: {record['cells']} cells, {len(record['pairs'])} pairs", flush=True)

@@ -104,9 +104,11 @@ def space_label(folder: Path) -> str:
     """What the coordinates were computed from, as 53_ recorded it."""
     record = folder / "reference.json"
     space = json.loads(record.read_text()).get("space", "raw") if record.exists() else "raw"
-    return ("preprocessing UMAP: ranknm256_noscale_ds_cos on the equalised counts (fixed coordinates)"
-            if space == "gate" else
-            "log1p UMAP: raw counts, CP10k + log1p, 2,000 HVGs, PCA 40 (fixed coordinates)")
+    return {"gate": "preprocessing UMAP: ranknm256_noscale_ds_cos on the equalised counts (fixed coordinates)",
+            "replication": "replication UMAP: the deck's old recipe, log CPM + z-score, PCA 30, min_dist 0.25 "
+                           "(fixed coordinates)",
+            "old_coordinates": "the old deck UMAP's own coordinates (source_only 2026-09-13 export)"}.get(
+        space, "log1p UMAP: raw counts, CP10k + log1p, 2,000 HVGs, PCA 40 (fixed coordinates)")
 
 
 def umap_figure(coords: pd.DataFrame, fractions: pd.DataFrame, sides: list[str], acc: str, n_pairs: int,
@@ -380,6 +382,17 @@ RECIPES = {
         "  graph   20 nearest neighbours on those unit vectors (Euclidean, so cosine order)",
         "  UMAP    scanpy defaults (min_dist 0.5, spread 1.0), seed 20260904",
         "Fitted on the whole patient (or dataset), not on one pair: the gate's recipe, not one gate's geometry."],
+    "replication": [
+        "replication UMAP (fixed coordinates), 53_patient_umap.py --space replication: the old deck UMAP's",
+        "recipe (replication/plot_primary_metastasis_umap.py), unchanged:",
+        "  counts  the original counts",
+        "  scale   common.prepare_joint_representation defaults: log CPM, then per-gene z-score",
+        "  HVG     2,000 genes; PCA 30 components, seed 20260913",
+        "  UMAP    umap-learn on the PCs: 20 neighbours, min_dist 0.25, Euclidean, seed 20260913",
+        "Only the cells differ from the old figure: this unit's reference cells, not every post-QC malignant cell."],
+    "old_coordinates": [
+        "The old deck UMAP's own coordinates (source_only_GSE180661_GSE181919_GSE225857_20260913/replication_umap),",
+        "joined to the current cells by patient, sample and barcode; current cells absent from it are not drawn."],
 }
 
 

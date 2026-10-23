@@ -45,7 +45,7 @@ while (( $# )); do
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
-[[ "$space" == raw || "$space" == gate ]] || { echo "--space raw or gate" >&2; exit 2; }
+[[ "$space" == raw || "$space" == gate || "$space" == replication ]] || { echo "--space raw, gate or replication" >&2; exit 2; }
 cells=$result/cnv_rna_strategies_export/$export_name/cells
 out=$result/patient_umap_$export_name
 if [[ "$space" == gate ]]; then
@@ -53,6 +53,9 @@ if [[ "$space" == gate ]]; then
     prostate_manifest=$result/downsampled_GSE271675_20260916/pair_manifest_downsampled.csv
     out=$result/patient_umap_gate_$export_name
 fi
+# replication: the deck's old UMAP recipe (replication/plot_primary_metastasis_umap.py) on the
+# original counts, so the same manifests as raw
+[[ "$space" == replication ]] && out=$result/patient_umap_replication_$export_name
 [[ "$group" == patient || "$group" == dataset ]] || { echo "--group patient or dataset" >&2; exit 2; }
 if [[ "$group" == dataset ]]; then out=${out}_dataset; tasks=3; fi
 logs=$out/logs
