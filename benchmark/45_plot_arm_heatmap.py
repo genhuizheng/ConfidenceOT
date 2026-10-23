@@ -3,10 +3,10 @@
 Rows are the factorial's arms in its own order: normalisation outermost, then
 the binary tags, so the effect of one axis is a comparison between adjacent
 rows. The 8 raw-count arms are not drawn (user, 2026-10-22: raw is discarded,
-log1p takes its place), so 24 rows remain: log1p, rank256 and ranknm256, each
-with its 8 tag combinations. The code label of log1p is ``logcpm``; the figure
-prints log1p and says what it is, because the code name says "cpm" and the
-transform is library size 1e4. Columns are seven readouts, each at the three technical
+the library-size + log1p arm takes its place), so 24 rows remain: logcpm, rank256 and
+ranknm256, each with its 8 tag combinations. Every row is printed as its steps
+(``readable``), e.g. logcpm as "size 1e4 -> log1p -> HVG 2000 -> z-score -> PCA 30 -> Euclidean",
+never as a code label. Columns are seven readouts, each at the three technical
 levels.
 
 **Every value is the same quantity: the fraction of a named set of cells that
@@ -62,18 +62,42 @@ from matplotlib.patches import Rectangle  # noqa: E402
 ARMS = [a for n in ("logcpm", "rank256", "ranknm256") for a in (
     n, f"{n}_cos", f"{n}_ds", f"{n}_ds_cos", f"{n}_noscale", f"{n}_noscale_cos",
     f"{n}_noscale_ds", f"{n}_noscale_ds_cos")]
-# What each stem and tag is, printed under the figure so no label has to be decoded.
-STEM_DISPLAY = {"logcpm": "log1p"}
-KEY = ("log1p = raw counts -> library size 1e4 -> log1p (code label logcpm);  "
-       "rank256 = each cell's top 256 genes, ranked by expression / gene median;  "
-       "ranknm256 = top 256 genes ranked by expression itself.\n"
-       "Then 2,000 HVGs and PCA 30.  Tags:  _noscale = genes not scaled to unit variance;  "
-       "_ds = counts equalised to one depth first;  _cos = cosine cost (else squared Euclidean).")
+# Every arm is named by its steps, in order, built from the configuration the label parses to,
+# so a figure never shows a code label that has to be decoded (user, 2026-10-22).
+KEY = ("size 1e4 = each cell scaled to 10^4 counts;  log1p = log(1 + x) of each value;  depth-equalised = counts "
+       "subsampled to one depth first." + "\n" +
+       "rank top 256 = each cell's 256 highest genes by rank;  / gene median = ranked on expression divided by the "
+       "gene's median over both sides." + "\n" +
+       "HVG 2000 = the 2,000 most variable genes;  all genes = none dropped;  z-score = each gene centred and divided "
+       "by its SD over both sides (absent = not scaled)." + "\n" +
+       "Last step = the OT cost: Euclidean (squared), cosine, or Pearson (2 - 2r); every cost is divided by the "
+       "median cross-side pair.")
 
 
-def display(arm: str) -> str:
-    stem, _, rest = arm.partition("_")
-    return STEM_DISPLAY.get(stem, stem) + (f"_{rest}" if rest else "")
+def readable(arm: str) -> str:
+    """The arm as its steps, e.g. log1p -> HVG 2000 -> PCA 30 -> Euclidean."""
+    from confidenceot.preprocessing import Preprocessing
+
+    try:
+        c = Preprocessing.from_label(arm)
+    except ValueError:
+        return arm
+    steps = ["depth-equalised"] if c.equalise_depth else []
+    steps += {"log1p": ["log1p"], "log_cpm": ["size 1e4", "log1p"], "cpm": ["size 1e4"],
+              "rank_value": [f"rank top {c.rank_top_n} / gene median"],
+              "rank_no_median": [f"rank top {c.rank_top_n}"],
+              "pearson_residuals": ["Pearson residuals"]}.get(c.normalisation, [c.label_stem or "raw counts"])
+    steps.append("all genes" if c.n_hvg == 0 else f"HVG {c.n_hvg}")
+    if c.scale_genes:
+        steps.append("z-score")
+    steps.append(f"PCA {c.n_pcs}" if c.n_pcs else "no PCA")
+    steps.append({"squared_euclidean": "Euclidean", "cosine": "cosine", "pearson": "Pearson"}[c.cost])
+    return " -> ".join(steps)
+
+
+display = readable  # the name 55_ imports
+
+
 # Shown as L0 / L1 / L2 under every block, always in that order. What each
 # means -- matched, depth mismatch, depth + dropout -- goes in the caption once
 # rather than under each column.
@@ -161,12 +185,14 @@ def main() -> None:
                          columns=[f"{g} | {c.replace(chr(10), ' ')} | ground truth {t} | {s}"
                                   for g, c, t, s in columns])
     frame.index.name = "arm"
-    frame.insert(0, "shown_as", [display(a) for a in ARMS])
+    frame.insert(0, "shown_as", [readable(a) for a in ARMS])
     frame.round(4).to_csv(args.output_dir / "arm_error_heatmap_values.csv")
 
     n_rows, n_cols = values.shape
     cell_w, cell_h = 0.38, 0.235
-    left, right, top, bottom = 2.25, 1.55, 1.85, 1.0
+    # wide enough for the longest step-by-step name
+    left = 0.35 + 0.057 * max(len(readable(a)) for a in ARMS)
+    right, top, bottom = 1.55, 1.85, 1.35
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -183,7 +209,7 @@ def main() -> None:
     ax.set_ylim(n_rows, 0)
     ax.set_xticks([])
     ax.set_yticks(np.arange(n_rows) + 0.5)
-    ax.set_yticklabels([display(a) for a in ARMS], fontsize=7.4, color=INK)
+    ax.set_yticklabels([readable(a) for a in ARMS], fontsize=7.4, color=INK)
     ax.tick_params(axis="y", length=0, pad=4)
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -263,7 +289,7 @@ def main() -> None:
         fig.text((left + n_cols * cell_w + 0.52) / fig_w, (y + 0.065) / fig_h,
                  "undefined", fontsize=6.4, color=MUTED, va="center")
 
-    fig.text(left / fig_w, 0.12 / fig_h, KEY, fontsize=6.4, color=MUTED, va="bottom", linespacing=1.4)
+    fig.text(0.15 / fig_w, 0.1 / fig_h, KEY, fontsize=6.4, color=MUTED, va="bottom", linespacing=1.4)
 
     for suffix in ("png", "pdf"):
         fig.savefig(args.output_dir / f"arm_error_heatmap.{suffix}", dpi=220,
