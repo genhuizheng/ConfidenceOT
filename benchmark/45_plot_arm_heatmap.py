@@ -1,8 +1,12 @@
 """Every preprocessing arm against what the gate rejected, in one grid.
 
-Rows are the 32 arms of the factorial, in its own order: normalisation
-outermost, then the binary tags, so the effect of one axis is a comparison
-between adjacent rows. Columns are seven readouts, each at the three technical
+Rows are the factorial's arms in its own order: normalisation outermost, then
+the binary tags, so the effect of one axis is a comparison between adjacent
+rows. The 8 raw-count arms are not drawn (user, 2026-10-22: raw is discarded,
+log1p takes its place), so 24 rows remain: log1p, rank256 and ranknm256, each
+with its 8 tag combinations. The code label of log1p is ``logcpm``; the figure
+prints log1p and says what it is, because the code name says "cpm" and the
+transform is library size 1e4. Columns are seven readouts, each at the three technical
 levels.
 
 **Every value is the same quantity: the fraction of a named set of cells that
@@ -54,10 +58,22 @@ import pandas as pd  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
-# The factorial's order as the rest of the project writes it.
-ARMS = [a for n in ("raw", "logcpm", "rank256", "ranknm256") for a in (
+# The factorial's order as the rest of the project writes it, without the raw-count arms.
+ARMS = [a for n in ("logcpm", "rank256", "ranknm256") for a in (
     n, f"{n}_cos", f"{n}_ds", f"{n}_ds_cos", f"{n}_noscale", f"{n}_noscale_cos",
     f"{n}_noscale_ds", f"{n}_noscale_ds_cos")]
+# What each stem and tag is, printed under the figure so no label has to be decoded.
+STEM_DISPLAY = {"logcpm": "log1p"}
+KEY = ("log1p = raw counts -> library size 1e4 -> log1p (code label logcpm);  "
+       "rank256 = each cell's top 256 genes, ranked by expression / gene median;  "
+       "ranknm256 = top 256 genes ranked by expression itself.\n"
+       "Then 2,000 HVGs and PCA 30.  Tags:  _noscale = genes not scaled to unit variance;  "
+       "_ds = counts equalised to one depth first;  _cos = cosine cost (else squared Euclidean).")
+
+
+def display(arm: str) -> str:
+    stem, _, rest = arm.partition("_")
+    return STEM_DISPLAY.get(stem, stem) + (f"_{rest}" if rest else "")
 # Shown as L0 / L1 / L2 under every block, always in that order. What each
 # means -- matched, depth mismatch, depth + dropout -- goes in the caption once
 # rather than under each column.
@@ -109,6 +125,9 @@ def parse_args() -> argparse.Namespace:
                         help="Outline this arm's row; may be repeated")
     parser.add_argument("--bare", action="store_true",
                         help="no title or reading notes, for a slide whose notes explain")
+    parser.add_argument("--acceptance", default="0.90",
+                        help="the within-side acceptance the metrics were run at, printed in the title "
+                             "(runs/ is the runner's default, 0.90)")
     return parser.parse_args()
 
 
@@ -142,11 +161,12 @@ def main() -> None:
                          columns=[f"{g} | {c.replace(chr(10), ' ')} | ground truth {t} | {s}"
                                   for g, c, t, s in columns])
     frame.index.name = "arm"
+    frame.insert(0, "shown_as", [display(a) for a in ARMS])
     frame.round(4).to_csv(args.output_dir / "arm_error_heatmap_values.csv")
 
     n_rows, n_cols = values.shape
     cell_w, cell_h = 0.38, 0.235
-    left, right, top, bottom = 2.25, 1.55, 1.85, 0.55
+    left, right, top, bottom = 2.25, 1.55, 1.85, 1.0
     fig_w = left + n_cols * cell_w + right
     fig_h = top + n_rows * cell_h + bottom
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -163,7 +183,7 @@ def main() -> None:
     ax.set_ylim(n_rows, 0)
     ax.set_xticks([])
     ax.set_yticks(np.arange(n_rows) + 0.5)
-    ax.set_yticklabels(ARMS, fontsize=7.4, color=INK)
+    ax.set_yticklabels([display(a) for a in ARMS], fontsize=7.4, color=INK)
     ax.tick_params(axis="y", length=0, pad=4)
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -213,7 +233,8 @@ def main() -> None:
                  "Rejected fraction for each preprocessing arm",
                  fontsize=10.5, fontweight="semibold", color=INK, va="top")
         fig.text(left / fig_w, 1 - 0.42 / fig_h,
-                 f"Native-depth simulation, {args.method}, mean over 3 sizes x 5 replicates. "
+                 f"Native-depth simulation, {args.method}, within-side acceptance {args.acceptance}, "
+                 "mean over 3 sizes x 5 replicates. "
                  "Every cell is the fraction of the named cells that the gate rejected.",
                  fontsize=7.4, color=MUTED, va="top")
         fig.text(left / fig_w, 1 - 0.62 / fig_h,
@@ -241,6 +262,8 @@ def main() -> None:
         swatch.set_facecolor(UNDEFINED)
         fig.text((left + n_cols * cell_w + 0.52) / fig_w, (y + 0.065) / fig_h,
                  "undefined", fontsize=6.4, color=MUTED, va="center")
+
+    fig.text(left / fig_w, 0.12 / fig_h, KEY, fontsize=6.4, color=MUTED, va="bottom", linespacing=1.4)
 
     for suffix in ("png", "pdf"):
         fig.savefig(args.output_dir / f"arm_error_heatmap.{suffix}", dpi=220,

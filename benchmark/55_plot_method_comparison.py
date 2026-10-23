@@ -102,6 +102,8 @@ def parse_args() -> argparse.Namespace:
                         metavar="BENCHMARK_METRICS_CSV")
     parser.add_argument("--bare", action="store_true",
                         help="no titles or reading notes")
+    parser.add_argument("--arm", action="append", default=None,
+                        help="Repeat, in display order; default 56_'s arms. logcpm prints as log1p")
     return parser.parse_args()
 
 
@@ -193,7 +195,7 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
     ax.set_ylim(n_rows, 0)
     ax.set_xticks([])
     ax.set_yticks(np.arange(n_rows) + 0.5)
-    ax.set_yticklabels([arm for _, arm in rows], fontsize=7.4, color=INK)
+    ax.set_yticklabels([arm_heatmap.display(arm) for _, arm in rows], fontsize=7.4, color=INK)
     ax.tick_params(axis="y", length=0, pad=4)
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -260,6 +262,8 @@ def heatmap(table: pd.DataFrame, out: Path) -> None:
     bar.ax.tick_params(labelsize=6.6, colors=MUTED, length=2)
     bar.outline.set_visible(False)
     cax.set_title("fraction\nrejected", fontsize=7.0, color=INK, loc="left", pad=6)
+    # what each arm label is, on the figure itself
+    fig.text(0.01, 0.002, arm_heatmap.KEY, fontsize=5.8, color=MUTED, va="bottom", linespacing=1.35)
     for suffix in ("png", "pdf"):
         fig.savefig(out / f"method_comparison_heatmap.{suffix}", dpi=220, **TIGHT)
     plt.close(fig)
@@ -299,7 +303,7 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
         part = summary[summary["arm"] == arm]
         x = np.arange(len(STRATEGIES)) + (k - 1) * (width + gap)
         handles.append(ax.bar(x, part["mean"].fillna(0), width=width, color=colour,
-                              label=arm, edgecolor="#ffffff", linewidth=1.0, zorder=2))
+                              label=arm_heatmap.display(arm), edgecolor="#ffffff", linewidth=1.0, zorder=2))
         # F1 lies in [0, 1], so the 1 SD whisker stops at the bounds; past 1
         # it ran into the number above it.
         mean, spread = part["mean"].to_numpy(), part["std"].fillna(0).to_numpy()
@@ -343,6 +347,8 @@ def bar_plot(f1: pd.DataFrame, out: Path) -> None:
                  "At acceptance 0.90, M4-R's outer loop cycled in most pairs other than "
                  "populations_disjoint.",
                  fontsize=7.0, color=MUTED, va="top")
+    # what each arm label is, on the figure itself
+    fig.text(0.01, 0.002, arm_heatmap.KEY, fontsize=5.8, color=MUTED, va="bottom", linespacing=1.35)
     for suffix in ("png", "pdf"):
         fig.savefig(out / f"method_comparison_f1.{suffix}", dpi=220, **TIGHT)
     plt.close(fig)
@@ -353,6 +359,8 @@ def main() -> None:
     args = parse_args()
     BARE = args.bare
     TIGHT = {"bbox_inches": "tight", "pad_inches": 0.05} if BARE else {}
+    if args.arm:
+        ARMS[:] = args.arm
     table = collect(args.decisions_csv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     present = coverage(table)
