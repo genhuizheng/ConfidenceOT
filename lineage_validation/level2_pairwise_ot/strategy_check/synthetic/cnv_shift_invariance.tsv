@@ -1,0 +1,4 @@
+unit	variant	cells	max_abs_coord_diff	max_abs_coord_diff_rel	max_abs_cost_diff	cost_median
+C:\Users\ncsub\AppData\Local\Temp\tmpu2vsjxb_\SYN\P1	no shift (values as stored, 1 = neutral)	1200	1.1368683772161603e-13	4.6369331307581294e-14	0.0	0.999850869178772
+C:\Users\ncsub\AppData\Local\Temp\tmpu2vsjxb_\SYN\P1	values - 1 (same as shipped, recomputed)	1200	0.0	0.0	0.0	0.999850869178772
+C:\Users\ncsub\AppData\Local\Temp\tmpu2vsjxb_\SYN\P1	values - 1 + 7 (an arbitrary constant)	1200	2.3283064365386963e-10	9.496439051792649e-11	0.0	0.999850869178772
