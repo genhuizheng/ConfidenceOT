@@ -4,6 +4,10 @@
 #
 #   bash cancer_metastasis/submit_patient_umap.sh --dry-run
 #   bash cancer_metastasis/submit_patient_umap.sh [--export export_20261021b] [--tasks 8] [--space raw|gate]
+#        [--group patient|dataset]
+#
+# --group dataset: one UMAP per dataset with every patient together (3 tasks), written under
+#   <out>_dataset; --group patient (default) is one per patient.
 #
 # --space raw (default): 48_'s recipe on the original counts -> patient_umap_<export>.
 # --space gate: the gates' own ranknm256_noscale_ds_cos on the depth-equalised counts the strategy
@@ -29,12 +33,14 @@ prostate_manifest=$result/prepared_GSE271675_20260916/pair_manifest_eligible.csv
 export_name=export_20261021b
 tasks=8
 space=raw
+group=patient
 dry_run=0
 while (( $# )); do
     case "$1" in
         --export) export_name=$2; shift 2 ;;
         --tasks) tasks=$2; shift 2 ;;
         --space) space=$2; shift 2 ;;
+        --group) group=$2; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -47,6 +53,8 @@ if [[ "$space" == gate ]]; then
     prostate_manifest=$result/downsampled_GSE271675_20260916/pair_manifest_downsampled.csv
     out=$result/patient_umap_gate_$export_name
 fi
+[[ "$group" == patient || "$group" == dataset ]] || { echo "--group patient or dataset" >&2; exit 2; }
+if [[ "$group" == dataset ]]; then out=${out}_dataset; tasks=3; fi
 logs=$out/logs
 
 problems=0
@@ -71,10 +79,12 @@ submit() {
 
 array=$(submit -p gg -N 1 -n 1 -c 16 -t 04:00:00 -A MCB26031 -J pu_$space --array=0-$((tasks - 1)) \
     -o "$logs/umap_%A_%a.out" -e "$logs/umap_%A_%a.err" \
-    --wrap "$activate && python cancer_metastasis/53_patient_umap.py --cells $cells --manifest $uniform_manifest --manifest $prostate_manifest --out $out --space $space --task-index \$SLURM_ARRAY_TASK_ID --task-count $tasks")
-echo "patient UMAPs: $array ($tasks tasks) -> $out/patients" >&2
-pack="cd $out && echo \"DONE \$(ls patients/*/*/DONE | wc -l), FAILED \$(ls patients/*/*/FAILED 2> /dev/null | wc -l)\" && (ls patients/*/*/FAILED 2> /dev/null || true) && tar -czf $out.tar.gz.partial patients && mv $out.tar.gz.partial $out.tar.gz && { if ls patients/*/*/FAILED > /dev/null 2>&1; then echo 'some patients FAILED: no md5 written, the package is incomplete; fix and resubmit'; exit 1; fi; } && md5sum $out.tar.gz > $out.tar.gz.md5 && cat $out.tar.gz.md5 && du -h $out.tar.gz"
+    --wrap "$activate && python cancer_metastasis/53_patient_umap.py --cells $cells --manifest $uniform_manifest --manifest $prostate_manifest --out $out --space $space --group $group --task-index \$SLURM_ARRAY_TASK_ID --task-count $tasks")
+echo "UMAPs ($group): $array ($tasks tasks) -> $out" >&2
+top=patients; units='patients/*/*'
+[[ "$group" == dataset ]] && { top=datasets; units='datasets/*'; }
+pack="cd $out && echo \"DONE \$(ls $units/DONE | wc -l), FAILED \$(ls $units/FAILED 2> /dev/null | wc -l)\" && (ls $units/FAILED 2> /dev/null || true) && tar -czf $out.tar.gz.partial $top && mv $out.tar.gz.partial $out.tar.gz && { if ls $units/FAILED > /dev/null 2>&1; then echo 'some patients FAILED: no md5 written, the package is incomplete; fix and resubmit'; exit 1; fi; } && md5sum $out.tar.gz > $out.tar.gz.md5 && cat $out.tar.gz.md5 && du -h $out.tar.gz"
 id=$(submit --dependency=afterany:$array -p gg -N 1 -n 1 -c 4 -t 01:00:00 -A MCB26031 -J pu_pack \
     -o "$logs/pack_%j.out" -e "$logs/pack_%j.err" --wrap "$pack")
 echo "pack: $id -> $out.tar.gz" >&2
-echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown); space $space; manifests $uniform_manifest $prostate_manifest; cells $cells"
+echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown); space $space; group $group; manifests $uniform_manifest $prostate_manifest; cells $cells"

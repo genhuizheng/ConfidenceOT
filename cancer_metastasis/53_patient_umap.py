@@ -26,7 +26,10 @@ pooled cells, so it is not any single pair's geometry.
 Coordinates compare only within one patient and are never recomputed: a patient with DONE is
 skipped.
 
-Writes OUT/patients/<dataset>/<patient>/: patient_umap.csv.gz (cell_uid, dataset_id, patient_id,
+--group dataset: one UMAP over every patient of a dataset together (OUT/datasets/<dataset>/), same
+recipe; patients then separate by their own differences as much as by anything else.
+
+Writes OUT/patients/<dataset>/<patient>/ (or OUT/datasets/<dataset>/): patient_umap.csv.gz (cell_uid, dataset_id, patient_id,
 side, sample, observation_id, umap_1, umap_2, total_counts, detected_genes, pairs = the pairs the
 cell is a reference cell of), reference.json, hvg.txt, DONE (or FAILED with the error).
 No OT is run and no gate result is read or written.
@@ -136,7 +139,8 @@ def patient_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     table["detected_genes"] = data.obs["detected_genes"].to_numpy()
     out.mkdir(parents=True, exist_ok=True)
     table.to_csv(out / "patient_umap.csv.gz", index=False, compression="gzip")
-    record = {"dataset_id": str(cells["dataset_id"].iloc[0]), "patient_id": str(cells["patient_id"].iloc[0]),
+    record = {"space": "raw", "dataset_id": str(cells["dataset_id"].iloc[0]),
+              "patient_id": ";".join(sorted(cells["patient_id"].astype(str).unique())),
               "cells": {side: int((table["side"] == side).sum()) for side in ("primary", "metastasis")},
               "samples": {side: sorted(table.loc[table["side"] == side, "sample"].unique().tolist())
                           for side in ("primary", "metastasis")},
@@ -214,7 +218,7 @@ def gate_umap(cells: pd.DataFrame, sources: dict, out: Path) -> dict:
     table.to_csv(out / "patient_umap.csv.gz", index=False, compression="gzip")
     counts = table["total_counts"].to_numpy(float)
     record = {"space": "gate", "label": GATE_LABEL, "dataset_id": str(cells["dataset_id"].iloc[0]),
-              "patient_id": str(cells["patient_id"].iloc[0]),
+              "patient_id": ";".join(sorted(cells["patient_id"].astype(str).unique())),
               "cells": {side: int((table["side"] == side).sum()) for side in ("primary", "metastasis")},
               "samples": {side: sorted(table.loc[table["side"] == side, "sample"].unique().tolist())
                           for side in ("primary", "metastasis")},
@@ -243,29 +247,36 @@ def main() -> None:
     parser.add_argument("--space", choices=["raw", "gate"], default="raw",
                         help="raw: 48_'s recipe on original counts; gate: ranknm256_noscale_ds_cos on the "
                              "equalised counts (give the depth-equalised manifests)")
+    parser.add_argument("--group", choices=["patient", "dataset"], default="patient",
+                        help="one UMAP per patient (OUT/patients/<dataset>/<patient>) or one per dataset, "
+                             "every patient's cells together (OUT/datasets/<dataset>)")
     args = parser.parse_args()
     sources = sample_sources(args.manifest)
     cells = patient_cells(args.cells, args.datasets)
     failures = 0
-    patients = sorted(cells.groupby(["dataset_id", "patient_id"]).groups)
-    for index, (dataset, patient) in enumerate(patients):
+    if args.group == "dataset":
+        units = [(dataset, None) for dataset in sorted(cells["dataset_id"].unique())]
+    else:
+        units = sorted(cells.groupby(["dataset_id", "patient_id"]).groups)
+    for index, (dataset, patient) in enumerate(units):
         if index % args.task_count != args.task_index:
             continue
-        out = args.out / "patients" / dataset / safe(patient)
+        out = (args.out / "datasets" / dataset if patient is None
+               else args.out / "patients" / dataset / safe(patient))
         if (out / "DONE").exists():
-            print(f"skip {dataset} {patient}: DONE", flush=True)
+            print(f"skip {dataset} {patient or 'all patients'}: DONE", flush=True)
             continue
         try:
-            part = cells[(cells["dataset_id"] == dataset) & (cells["patient_id"] == patient)]
+            part = cells[(cells["dataset_id"] == dataset) & ((cells["patient_id"] == patient) if patient else True)]
             record = (gate_umap if args.space == "gate" else patient_umap)(part, sources, out)
             (out / "DONE").write_text("done\n", encoding="utf-8")
             (out / "FAILED").unlink(missing_ok=True)
-            print(f"{dataset} {patient}: {record['cells']} cells, {len(record['pairs'])} pairs", flush=True)
+            print(f"{dataset} {patient or 'all patients'}: {record['cells']} cells, {len(record['pairs'])} pairs", flush=True)
         except Exception as error:  # noqa: BLE001 - a failed patient is recorded and reported, never hidden
             failures += 1
             out.mkdir(parents=True, exist_ok=True)
             (out / "FAILED").write_text(f"{type(error).__name__}: {error}\n{traceback.format_exc()}", encoding="utf-8")
-            print(f"FAILED {dataset} {patient}: {type(error).__name__}: {error}", flush=True)
+            print(f"FAILED {dataset} {patient or 'all patients'}: {type(error).__name__}: {error}", flush=True)
     sys.exit(1 if failures else 0)
 
 
