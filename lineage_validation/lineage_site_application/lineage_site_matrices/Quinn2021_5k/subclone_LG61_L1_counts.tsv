@@ -1,0 +1,6 @@
+	Liv	M1	M2	RE	RW
+site_kind	metastasis	metastasis	metastasis	metastasis	metastasis
+L1.1	0	22	5	4	1
+L1.2	1	14	2	2	1
+ambiguous	1	2	0	1	0
+unknown: unreliable leaf (missing > 0.5)	0	1	0	0	0

@@ -1,0 +1,7 @@
+	3724_NT_T1	3724_NT_L1	3724_NT_L2	3724_NT_L3	3724_NT_S1
+site_kind	primary	metastasis	metastasis	metastasis	metastasis
+L1.1	9985	2	2	1	3781
+L1.2	4789	85	1510	861	5
+L1.3	20	0	0	0	3
+ambiguous	23	3	0	1	0
+unknown: unreliable leaf (missing > 0.5)	35	0	0	0	2

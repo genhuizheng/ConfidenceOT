@@ -1,0 +1,9 @@
+PASS  KP site kind: T<n> primary, everything else metastasis
+PASS  Quinn site kind: LL / 30kLL primary, other tissues metastatic
+PASS  the builder reads no OT output (no gates, couplings or cell_confidence)
+PASS  every mouse: column sums equal the site's cells, unknown cells only in the unknown row
+PASS  3515: T1 family shared across sites, T2 and T3 primary-only
+PASS  3460: the N1 family without a sampled primary is metastatic-sites-only (protocol 5.3)
+PASS  frozen Level 1 labels (6 mice local) agree cell by cell on lineage and site  (6/6)
+
+7 passed, 0 failed

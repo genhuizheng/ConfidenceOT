@@ -1,0 +1,5 @@
+	M1	M2	RE	RW
+site_kind	metastasis	metastasis	metastasis	metastasis
+L1.1	0.285714	0.0	0.0	0.0
+ambiguous	0.649351	1.0	1.0	1.0
+unknown: unreliable leaf (missing > 0.5)	0.064935	0.0	0.0	0.0

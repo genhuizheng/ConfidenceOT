@@ -1,0 +1,161 @@
+dataset	mouse	family_or_clone	eligible	lineage_cells	tree	reason	tree_leaves	reliable_leaves	labelled_L1	ambiguous_L1
+KPTracer	3454	3454_Lkb1_T1	True	3205	3454_Lkb1_All_tree.nwk		1714	1708	1708	0
+KPTracer	3454	3454_Lkb1_T2	False	135	3454_Lkb1_All_tree.nwk	no metastatic cell of this family (primary only)	0	0	0	0
+KPTracer	3457	3457_Apc_T1	True	890	3457_Apc_T1_Fam_tree.nwk		890	888	888	0
+KPTracer	3457	3457_Apc_T4	True	430	3457_Apc_T4_Fam_tree.nwk		430	430	430	0
+KPTracer	3460	3460_Lkb1_T1	False	849	3460_Lkb1_T1_Fam_tree.nwk	0 level-1 subclone(s)	849	849	0	849
+KPTracer	3508	3508_Apc_T1	False	3731	3508_Apc_All_tree.nwk	no metastatic cell of this family (primary only)	0	0	0	0
+KPTracer	3508	3508_Apc_T2	False	1067	3508_Apc_T2_Fam_tree.nwk	1 level-1 subclone(s)	1067	1055	0	793
+KPTracer	3513	3513_NT_T1	False	1212	3513_NT_T1_Fam_tree.nwk	1 level-1 subclone(s)	1212	1212	0	22
+KPTracer	3515	3515_Lkb1_T2	False	213	3515_Lkb1_All_tree.nwk	no metastatic cell of this family (primary only)	0	0	0	0
+KPTracer	3515	3515_Lkb1_T3	False	118	3515_Lkb1_All_tree.nwk	no metastatic cell of this family (primary only)	0	0	0	0
+KPTracer	3515	3515_Lkb1_T1	True	1878	3515_Lkb1_T1_Fam_tree.nwk		1878	1876	1772	104
+KPTracer	3724	3724_NT_T1	True	21108	3724_NT_All_tree.nwk		21108	21071	21044	27
+Quinn2021	100k	LG1	False	2863		no tree file	0	0	0	0
+Quinn2021	100k	LG10	False	126		no tree file	0	0	0	0
+Quinn2021	100k	LG11	False	79	m100k_lg11_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s)	79	79	0	30
+Quinn2021	100k	LG12	False	64		no tree file	0	0	0	0
+Quinn2021	100k	LG13	False	57	m100k_lg13_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s)	57	57	0	57
+Quinn2021	100k	LG14	False	56	m100k_lg14_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	56	56	0	56
+Quinn2021	100k	LG15	False	49		no tree file	0	0	0	0
+Quinn2021	100k	LG16	False	47	m100k_lg16_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	47	47	0	47
+Quinn2021	100k	LG17	False	42		no tree file	0	0	0	0
+Quinn2021	100k	LG18	False	35	m100k_lg18_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 12 reliable primary cells (< 20)	35	35	0	35
+Quinn2021	100k	LG19	False	33	m100k_lg19_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 12 reliable primary cells (< 20)	33	33	0	33
+Quinn2021	100k	LG2	True	454	m100k_lg2_tree_hybrid_priors.alleleThresh.processed.txt		454	454	454	0
+Quinn2021	100k	LG20	False	31	m100k_lg20_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 19 reliable primary cells (< 20); 12 reliable metastatic cells (< 20)	31	31	0	31
+Quinn2021	100k	LG21	False	28		no tree file	0	0	0	0
+Quinn2021	100k	LG22	False	26	m100k_lg22_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 10 reliable primary cells (< 20); 16 reliable metastatic cells (< 20)	26	26	0	26
+Quinn2021	100k	LG23	False	25	m100k_lg23_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 8 reliable primary cells (< 20); 17 reliable metastatic cells (< 20)	25	25	0	25
+Quinn2021	100k	LG24	False	24		no tree file	0	0	0	0
+Quinn2021	100k	LG25	False	25	m100k_lg25_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 6 reliable primary cells (< 20); 19 reliable metastatic cells (< 20)	25	25	0	25
+Quinn2021	100k	LG26	False	24	m100k_lg26_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 9 reliable primary cells (< 20); 15 reliable metastatic cells (< 20)	24	24	0	24
+Quinn2021	100k	LG27	False	23		no tree file	0	0	0	0
+Quinn2021	100k	LG28	False	23		no tree file	0	0	0	0
+Quinn2021	100k	LG29	False	22	m100k_lg29_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 11 reliable primary cells (< 20); 11 reliable metastatic cells (< 20)	22	22	0	22
+Quinn2021	100k	LG3	True	450	m100k_lg3_tree_hybrid_priors.alleleThresh.processed.txt		450	450	352	98
+Quinn2021	100k	LG30	False	21	m100k_lg30_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 6 reliable primary cells (< 20); 15 reliable metastatic cells (< 20)	21	21	0	21
+Quinn2021	100k	LG31	False	15	m100k_lg31_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 5 reliable primary cells (< 20); 10 reliable metastatic cells (< 20)	15	15	0	15
+Quinn2021	100k	LG4	True	391	m100k_lg4_tree_hybrid_priors.alleleThresh.processed.txt		391	391	71	320
+Quinn2021	100k	LG5	True	176	m100k_lg5_tree_hybrid_priors.alleleThresh.processed.txt		176	176	157	19
+Quinn2021	100k	LG6	False	172		no tree file	0	0	0	0
+Quinn2021	100k	LG7	False	160	m100k_lg7_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s)	160	154	0	80
+Quinn2021	100k	LG8	False	147		no tree file	0	0	0	0
+Quinn2021	100k	LG9	False	118		no tree file	0	0	0	0
+Quinn2021	10k	LG1	False	858	m10k_lg1_tree_hybrid_priors.alleleThresh.processed.txt	0 reliable primary cells (< 20)	858	858	0	523
+Quinn2021	10k	LG10	False	52	m10k_lg10_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 8 reliable primary cells (< 20)	51	51	0	51
+Quinn2021	10k	LG11	False	25	m10k_lg11_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 1 reliable primary cells (< 20)	25	25	0	25
+Quinn2021	10k	LG12	False	27	m10k_lg12_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 4 reliable primary cells (< 20)	27	27	0	27
+Quinn2021	10k	LG13	False	25	m10k_lg13_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 12 reliable primary cells (< 20); 13 reliable metastatic cells (< 20)	25	25	0	25
+Quinn2021	10k	LG2	True	706	m10k_lg2_tree_hybrid_priors.alleleThresh.processed.txt		703	703	388	315
+Quinn2021	10k	LG3	True	223	m10k_lg3_tree_hybrid_priors.alleleThresh.processed.txt		223	223	211	12
+Quinn2021	10k	LG4	False	161	m10k_lg4_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 19 reliable primary cells (< 20)	160	160	0	127
+Quinn2021	10k	LG5	True	135	m10k_lg5_tree_hybrid_priors.alleleThresh.processed.txt		134	134	87	47
+Quinn2021	10k	LG6	False	104		no tree file	0	0	0	0
+Quinn2021	10k	LG7	False	92	m10k_lg7_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s)	91	91	0	32
+Quinn2021	10k	LG8	False	72		no tree file	0	0	0	0
+Quinn2021	10k	LG9	False	61	m10k_lg9_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 11 reliable primary cells (< 20)	59	59	0	59
+Quinn2021	30k	LG1	True	16158	m30k_lg1_tree_hybrid_priors.alleleThresh.processed.txt		16158	10663	10266	397
+Quinn2021	30k	LG2	True	461	m30k_lg2_tree_hybrid_priors.alleleThresh.processed.txt		461	445	401	44
+Quinn2021	30k	LG3	False	438	m30k_lg3_tree_hybrid_priors.alleleThresh.processed.txt	6 reliable primary cells (< 20)	438	410	0	0
+Quinn2021	30k	LG4	False	132	m30k_lg4_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 0 reliable primary cells (< 20)	132	131	0	101
+Quinn2021	5k	LG1	True	10691	m5k_lg1_tree_hybrid_priors.alleleThresh.processed.txt		10691	8664	7058	1606
+Quinn2021	5k	LG10	False	530	m5k_lg10_tree_hybrid_priors.alleleThresh.processed.txt	17 reliable primary cells (< 20)	530	527	0	42
+Quinn2021	5k	LG100	False	24	m5k_lg100_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20); 16 reliable metastatic cells (< 20)	24	16	0	16
+Quinn2021	5k	LG11	True	456	m5k_lg11_tree_hybrid_priors.alleleThresh.processed.txt		456	448	436	12
+Quinn2021	5k	LG12	True	481	m5k_lg12_tree_hybrid_priors.alleleThresh.processed.txt		481	465	416	49
+Quinn2021	5k	LG13	True	458	m5k_lg13_tree_hybrid_priors.alleleThresh.processed.txt		457	409	311	98
+Quinn2021	5k	LG14	False	443	m5k_lg14_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 4 reliable primary cells (< 20)	443	425	0	64
+Quinn2021	5k	LG15	True	352	m5k_lg15_tree_hybrid_priors.alleleThresh.processed.txt		352	338	215	123
+Quinn2021	5k	LG16	False	400		no tree file	0	0	0	0
+Quinn2021	5k	LG17	True	325	m5k_lg17_tree_hybrid_priors.alleleThresh.processed.txt		325	325	171	154
+Quinn2021	5k	LG18	False	313		no tree file	0	0	0	0
+Quinn2021	5k	LG19	False	305	m5k_lg19_tree_hybrid_priors.alleleThresh.processed.txt	1 reliable primary cells (< 20)	305	303	0	109
+Quinn2021	5k	LG2	True	7525	m5k_lg2_tree_hybrid_priors.alleleThresh.processed.txt		7524	7140	6357	783
+Quinn2021	5k	LG20	False	273	m5k_lg20_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 3 reliable primary cells (< 20)	273	268	0	211
+Quinn2021	5k	LG21	False	282	m5k_lg21_tree_hybrid_priors.alleleThresh.processed.txt	5 reliable primary cells (< 20)	282	213	0	0
+Quinn2021	5k	LG22	False	244	m5k_lg22_tree_hybrid_priors.alleleThresh.processed.txt	0 reliable primary cells (< 20)	244	239	0	106
+Quinn2021	5k	LG23	False	223	m5k_lg23_tree_hybrid_priors.alleleThresh.processed.txt	7 reliable primary cells (< 20)	223	220	0	100
+Quinn2021	5k	LG24	False	223	m5k_lg24_tree_hybrid_priors.alleleThresh.processed.txt	10 reliable primary cells (< 20)	223	211	0	3
+Quinn2021	5k	LG25	False	199		no tree file	0	0	0	0
+Quinn2021	5k	LG26	True	153	m5k_lg26_tree_hybrid_priors.alleleThresh.processed.txt		153	153	64	89
+Quinn2021	5k	LG27	False	151	m5k_lg27_tree_hybrid_priors.alleleThresh.processed.txt	0 reliable primary cells (< 20)	151	149	0	51
+Quinn2021	5k	LG28	False	154	m5k_lg28_tree_hybrid_priors.alleleThresh.processed.txt	9 reliable primary cells (< 20)	154	143	0	62
+Quinn2021	5k	LG29	False	132	m5k_lg29_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 0 reliable metastatic cells (< 20)	132	130	0	60
+Quinn2021	5k	LG3	False	4780	m5k_lg3_tree_hybrid_priors.alleleThresh.processed.txt	5 reliable primary cells (< 20)	4780	4716	0	49
+Quinn2021	5k	LG30	False	156	m5k_lg30_tree_hybrid_priors.alleleThresh.processed.txt	7 reliable primary cells (< 20)	156	145	0	44
+Quinn2021	5k	LG31	False	121	m5k_lg31_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 13 reliable primary cells (< 20)	121	120	0	99
+Quinn2021	5k	LG32	False	111	m5k_lg32_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 2 reliable primary cells (< 20)	111	110	0	55
+Quinn2021	5k	LG33	False	142		no tree file	0	0	0	0
+Quinn2021	5k	LG34	False	124	m5k_lg34_tree_hybrid_priors.alleleThresh.processed.txt	3 reliable primary cells (< 20)	124	121	0	24
+Quinn2021	5k	LG35	False	122	m5k_lg35_tree_hybrid_priors.alleleThresh.processed.txt	5 reliable primary cells (< 20)	122	117	0	0
+Quinn2021	5k	LG36	False	117	m5k_lg36_tree_hybrid_priors.alleleThresh.processed.txt	1 reliable primary cells (< 20)	117	110	0	0
+Quinn2021	5k	LG37	False	107	m5k_lg37_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 3 reliable primary cells (< 20)	107	104	0	104
+Quinn2021	5k	LG38	False	120		no tree file	0	0	0	0
+Quinn2021	5k	LG39	False	120		no tree file	0	0	0	0
+Quinn2021	5k	LG4	True	1127	m5k_lg4_tree_hybrid_priors.alleleThresh.processed.txt		1127	929	800	129
+Quinn2021	5k	LG40	False	112	m5k_lg40_tree_hybrid_priors.alleleThresh.processed.txt	1 reliable primary cells (< 20)	112	112	0	18
+Quinn2021	5k	LG41	False	115		no tree file	0	0	0	0
+Quinn2021	5k	LG42	False	99	m5k_lg42_tree_hybrid_priors.alleleThresh.processed.txt	14 reliable primary cells (< 20)	99	98	0	5
+Quinn2021	5k	LG43	False	95	m5k_lg43_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 4 reliable primary cells (< 20)	95	74	0	74
+Quinn2021	5k	LG44	False	101	m5k_lg44_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 1 reliable primary cells (< 20)	101	98	0	41
+Quinn2021	5k	LG45	False	86	m5k_lg45_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	86	84	0	84
+Quinn2021	5k	LG46	False	52	m5k_lg46_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable metastatic cells (< 20)	52	52	0	52
+Quinn2021	5k	LG47	False	82	m5k_lg47_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 0 reliable primary cells (< 20)	82	77	0	55
+Quinn2021	5k	LG48	False	40	m5k_lg48_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	40	40	0	40
+Quinn2021	5k	LG49	False	78	m5k_lg49_tree_hybrid_priors.alleleThresh.processed.txt	1 level-1 subclone(s); 0 reliable primary cells (< 20)	78	77	0	25
+Quinn2021	5k	LG5	False	1022		no tree file	0	0	0	0
+Quinn2021	5k	LG50	False	60		no tree file	0	0	0	0
+Quinn2021	5k	LG51	False	79	m5k_lg51_tree_hybrid_priors.alleleThresh.processed.txt	1 reliable primary cells (< 20)	79	78	0	1
+Quinn2021	5k	LG52	False	64	m5k_lg52_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 1 reliable primary cells (< 20)	64	63	0	63
+Quinn2021	5k	LG53	False	68		no tree file	0	0	0	0
+Quinn2021	5k	LG54	False	65	m5k_lg54_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	65	62	0	62
+Quinn2021	5k	LG55	False	56		no tree file	0	0	0	0
+Quinn2021	5k	LG56	False	58	m5k_lg56_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 4 reliable primary cells (< 20)	58	58	0	58
+Quinn2021	5k	LG57	False	63	m5k_lg57_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	63	63	0	63
+Quinn2021	5k	LG58	False	46	m5k_lg58_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	46	46	0	46
+Quinn2021	5k	LG59	False	60	m5k_lg59_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 3 reliable primary cells (< 20)	60	60	0	60
+Quinn2021	5k	LG6	True	627	m5k_lg6_tree_hybrid_priors.alleleThresh.processed.txt		627	591	591	0
+Quinn2021	5k	LG60	False	45	m5k_lg60_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 3 reliable primary cells (< 20)	45	42	0	42
+Quinn2021	5k	LG61	False	57	m5k_lg61_tree_hybrid_priors.alleleThresh.processed.txt	0 reliable primary cells (< 20)	57	56	0	4
+Quinn2021	5k	LG62	False	53	m5k_lg62_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 3 reliable primary cells (< 20)	53	52	0	52
+Quinn2021	5k	LG63	False	50	m5k_lg63_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	50	49	0	49
+Quinn2021	5k	LG64	False	56	m5k_lg64_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 3 reliable primary cells (< 20)	56	55	0	55
+Quinn2021	5k	LG65	False	44		no tree file	0	0	0	0
+Quinn2021	5k	LG66	False	48	m5k_lg66_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 1 reliable primary cells (< 20)	48	39	0	39
+Quinn2021	5k	LG67	False	44	m5k_lg67_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	44	44	0	44
+Quinn2021	5k	LG68	False	50	m5k_lg68_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 5 reliable primary cells (< 20)	50	50	0	50
+Quinn2021	5k	LG69	False	38		no tree file	0	0	0	0
+Quinn2021	5k	LG7	False	603	m5k_lg7_tree_hybrid_priors.alleleThresh.processed.txt	13 reliable primary cells (< 20)	603	590	0	3
+Quinn2021	5k	LG70	False	45	m5k_lg70_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s)	45	45	0	45
+Quinn2021	5k	LG71	False	43	m5k_lg71_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 1 reliable primary cells (< 20)	43	42	0	42
+Quinn2021	5k	LG72	False	46	m5k_lg72_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 1 reliable primary cells (< 20)	46	33	0	33
+Quinn2021	5k	LG73	False	44	m5k_lg73_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	44	44	0	44
+Quinn2021	5k	LG74	False	35	m5k_lg74_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 3 reliable primary cells (< 20)	35	34	0	34
+Quinn2021	5k	LG75	False	35		no tree file	0	0	0	0
+Quinn2021	5k	LG76	False	39	m5k_lg76_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 2 reliable primary cells (< 20)	39	37	0	37
+Quinn2021	5k	LG77	False	44	m5k_lg77_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	44	38	0	38
+Quinn2021	5k	LG78	False	20	m5k_lg78_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 18 reliable primary cells (< 20); 0 reliable metastatic cells (< 20)	20	18	0	18
+Quinn2021	5k	LG79	False	40	m5k_lg79_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	40	39	0	39
+Quinn2021	5k	LG8	True	556	m5k_lg8_tree_hybrid_priors.alleleThresh.processed.txt		556	524	468	56
+Quinn2021	5k	LG80	False	42	m5k_lg80_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	42	42	0	42
+Quinn2021	5k	LG81	False	35		no tree file	0	0	0	0
+Quinn2021	5k	LG82	False	37	m5k_lg82_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 2 reliable primary cells (< 20)	37	37	0	37
+Quinn2021	5k	LG83	False	36	m5k_lg83_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 7 reliable primary cells (< 20)	36	34	0	34
+Quinn2021	5k	LG84	False	33	m5k_lg84_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	33	27	0	27
+Quinn2021	5k	LG85	False	29	m5k_lg85_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	29	28	0	28
+Quinn2021	5k	LG86	False	36	m5k_lg86_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	36	36	0	36
+Quinn2021	5k	LG87	False	33		no tree file	0	0	0	0
+Quinn2021	5k	LG88	False	31		no tree file	0	0	0	0
+Quinn2021	5k	LG89	False	32	m5k_lg89_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	32	30	0	30
+Quinn2021	5k	LG9	True	567	m5k_lg9_tree_hybrid_priors.alleleThresh.processed.txt		567	543	367	176
+Quinn2021	5k	LG90	False	33	m5k_lg90_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	33	33	0	33
+Quinn2021	5k	LG91	False	24	m5k_lg91_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	24	22	0	22
+Quinn2021	5k	LG92	False	26	m5k_lg92_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	26	24	0	24
+Quinn2021	5k	LG93	False	32		no tree file	0	0	0	0
+Quinn2021	5k	LG94	False	25	m5k_lg94_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable metastatic cells (< 20)	25	25	0	25
+Quinn2021	5k	LG95	False	21	m5k_lg95_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 13 reliable primary cells (< 20); 8 reliable metastatic cells (< 20)	21	21	0	21
+Quinn2021	5k	LG96	False	19	m5k_lg96_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20); 19 reliable metastatic cells (< 20)	19	19	0	19
+Quinn2021	5k	LG97	False	25	m5k_lg97_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 10 reliable primary cells (< 20); 14 reliable metastatic cells (< 20)	25	24	0	24
+Quinn2021	5k	LG98	False	25	m5k_lg98_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 0 reliable primary cells (< 20)	25	21	0	21
+Quinn2021	5k	LG99	False	26	m5k_lg99_tree_hybrid_priors.alleleThresh.processed.txt	0 level-1 subclone(s); 5 reliable primary cells (< 20)	26	25	0	25

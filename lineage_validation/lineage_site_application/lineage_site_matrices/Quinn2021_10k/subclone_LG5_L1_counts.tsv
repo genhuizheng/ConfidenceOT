@@ -1,0 +1,6 @@
+	LL	M1	M2	NE	NW	SE	SW
+site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis
+L1.1	14	17	19	1	10	5	0
+L1.2	1	2	2	1	0	15	0
+ambiguous	8	10	11	4	9	5	0
+unknown: no tree leaf	0	0	0	0	0	0	1

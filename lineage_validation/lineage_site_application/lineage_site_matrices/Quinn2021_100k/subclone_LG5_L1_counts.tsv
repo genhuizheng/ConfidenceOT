@@ -1,0 +1,5 @@
+	LL	MS	NE	NW	SE	SW
+site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis
+L1.1	48	33	6	13	13	10
+L1.2	14	10	2	3	4	1
+ambiguous	14	2	1	0	1	1

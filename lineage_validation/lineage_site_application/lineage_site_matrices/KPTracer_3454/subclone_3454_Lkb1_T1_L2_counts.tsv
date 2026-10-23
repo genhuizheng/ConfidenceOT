@@ -1,0 +1,7 @@
+	3454_Lkb1_T1	3454_Lkb1_K1	3454_Lkb1_L1	3454_Lkb1_N1	3454_Lkb1_Rib
+site_kind	primary	metastasis	metastasis	metastasis	metastasis
+L1.1.1	991	1	0	530	1
+L1.1.2	113	0	0	1	0
+unknown: no subclone at this level	13	0	0	49	9
+unknown: no tree leaf	0	0	1491	0	0
+unknown: unreliable leaf (missing > 0.5)	2	0	0	4	0

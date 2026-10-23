@@ -1,0 +1,7 @@
+	LL
+site_kind	primary
+L1.1.1	0.242424
+L1.1.2	0.151515
+ambiguous	0.454545
+unknown: no subclone at this level	0.136364
+unknown: unreliable leaf (missing > 0.5)	0.015152

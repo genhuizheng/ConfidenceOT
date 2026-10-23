@@ -1,0 +1,6 @@
+lineage	cells_primary	cells_metastatic	primary_sites	metastatic_sites	sites	sharing
+3457_Apc_T1	714	176	1	2	3457_Apc_T1;3457_Apc_K1;3457_Apc_N2	shared_across_sites
+3457_Apc_T2	245	0	1	0	3457_Apc_T2	primary_sites_only
+3457_Apc_T3	347	0	1	0	3457_Apc_T3	primary_sites_only
+3457_Apc_T4	346	84	1	2	3457_Apc_T4;3457_Apc_L1;3457_Apc_L2	shared_across_sites
+3457_Apc_T5	247	0	1	0	3457_Apc_T5	primary_sites_only

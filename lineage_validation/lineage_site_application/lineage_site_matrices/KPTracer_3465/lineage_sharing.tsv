@@ -1,0 +1,2 @@
+lineage	cells_primary	cells_metastatic	primary_sites	metastatic_sites	sites	sharing
+3465_Lkb1_T1	126	1501	1	5	3465_Lkb1_T1;3465_Lkb1_DN1;3465_Lkb1_K1;3465_Lkb1_K3;3465_Lkb1_L1;3465_Lkb1_Spl1	shared_across_sites

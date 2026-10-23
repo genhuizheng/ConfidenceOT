@@ -1,0 +1,10 @@
+PASS  export exits 0
+PASS  status: rna, cnv, cnv_then_rna ok; rna_cnv and rna_then_cnv missing (listed, not filled)
+PASS  rna: rejected source s3 keeps raw mass but has effective mass 0
+PASS  rna: effective masses equal the row / column sums of rho P tau
+PASS  cnv_then_rna: cells removed at step 1 are excluded (margin inf, no mass); s1 rejected at step 2
+PASS  cnv_then_rna: S0 x T0 is step 1's analysed cells (6 + 5), step 2's plan placed inside
+PASS  blocks: lineage and site blocks each sum to the effective total; T2 -> T1-family block is a cross-lineage block
+PASS  SUCCESS written and sides.tsv copied
+
+8 passed, 0 failed

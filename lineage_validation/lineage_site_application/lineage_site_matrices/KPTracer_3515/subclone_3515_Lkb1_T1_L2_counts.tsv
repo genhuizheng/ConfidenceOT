@@ -1,0 +1,9 @@
+	3515_Lkb1_T1	3515_Lkb1_K1	3515_Lkb1_K2	3515_Lkb1_K3	3515_Lkb1_L1	3515_Lkb1_L2	3515_Lkb1_N1
+site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis
+L1.1.1	433	53	360	358	60	0	21
+L1.1.2	11	13	2	1	0	241	44
+L1.2.1	83	0	0	0	0	0	8
+L1.2.2	64	0	0	0	0	0	3
+ambiguous	103	0	0	0	0	0	1
+unknown: no subclone at this level	16	0	0	0	0	0	1
+unknown: unreliable leaf (missing > 0.5)	0	0	0	2	0	0	0

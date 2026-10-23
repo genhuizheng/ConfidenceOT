@@ -1,0 +1,6 @@
+	LL	Liv	M1	M2	RE	RW
+site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis
+L1.1	0.5	0.846154	0.713924	0.79562	0.653846	0.714286
+L1.2	0.045455	0.076923	0.136709	0.116788	0.307692	0.285714
+L1.3	0.363636	0.038462	0.075949	0.058394	0.038462	0.0
+unknown: unreliable leaf (missing > 0.5)	0.090909	0.038462	0.073418	0.029197	0.0	0.0
