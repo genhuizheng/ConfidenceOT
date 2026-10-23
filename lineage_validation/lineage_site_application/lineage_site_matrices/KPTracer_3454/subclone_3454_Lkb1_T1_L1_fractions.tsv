@@ -1,6 +1,0 @@
-	3454_Lkb1_T1	3454_Lkb1_K1	3454_Lkb1_L1	3454_Lkb1_N1	3454_Lkb1_Rib
-site_kind	primary	metastasis	metastasis	metastasis	metastasis
-L1.1	0.99017	1.0	0.0	0.910959	0.1
-L1.2	0.008043	0.0	0.0	0.082192	0.9
-unknown: no tree leaf	0.0	0.0	1.0	0.0	0.0
-unknown: unreliable leaf (missing > 0.5)	0.001787	0.0	0.0	0.006849	0.0

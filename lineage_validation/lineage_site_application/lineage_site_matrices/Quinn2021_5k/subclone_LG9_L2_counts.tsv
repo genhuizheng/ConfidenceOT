@@ -1,7 +1,0 @@
-	LL	Liv	M1	M2	RE	RW
-site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis
-L1.2.1	1	2	24	7	6	20
-L1.2.2	4	4	9	6	1	4
-ambiguous	10	9	55	34	39	29
-unknown: no subclone at this level	18	18	100	65	39	39
-unknown: unreliable leaf (missing > 0.5)	3	3	6	9	1	2

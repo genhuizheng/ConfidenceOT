@@ -1,4 +1,0 @@
-lineage	cells_primary	cells_metastatic	primary_sites	metastatic_sites	sites	sharing
-3451_Lkb1_T1	215	2186	1	5	3451_Lkb1_T1;3451_Lkb1_K1;3451_Lkb1_L1;3451_Lkb1_PF;3451_Lkb1_S1;3451_Lkb1_S2	shared_across_sites
-3451_Lkb1_T2	44	0	1	0	3451_Lkb1_T2	primary_sites_only
-3451_Lkb1_T3	78	0	1	0	3451_Lkb1_T3	primary_sites_only

@@ -1,6 +1,0 @@
-	LL	BL	M1	M2	NE	NW	SE	SW
-site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis
-L1.1.1	0.014851	0.0	0.027027	0.033333	0.0	0.069565	0.0	0.0
-ambiguous	0.391089	0.0	0.459459	0.488889	0.542857	0.452174	0.433333	0.0
-unknown: no subclone at this level	0.594059	0.0	0.513514	0.477778	0.457143	0.478261	0.566667	0.0
-unknown: no tree leaf	0.0	1.0	0.0	0.0	0.0	0.0	0.0	1.0

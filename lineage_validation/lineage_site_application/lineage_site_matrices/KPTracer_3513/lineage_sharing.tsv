@@ -1,7 +1,0 @@
-lineage	cells_primary	cells_metastatic	primary_sites	metastatic_sites	sites	sharing
-3513_NT_N1	0	15	0	1	3513_NT_K1	metastatic_sites_only
-3513_NT_T1	969	243	1	1	3513_NT_T1;3513_NT_N1	shared_across_sites
-3513_NT_T2	2118	0	1	0	3513_NT_T2	primary_sites_only
-3513_NT_T3	1457	0	1	0	3513_NT_T3	primary_sites_only
-3513_NT_T4	604	0	1	0	3513_NT_T4	primary_sites_only
-3513_NT_T5	347	0	1	0	3513_NT_T5	primary_sites_only

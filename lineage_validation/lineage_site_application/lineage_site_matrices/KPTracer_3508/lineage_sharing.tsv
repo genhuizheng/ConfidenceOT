@@ -1,3 +1,0 @@
-lineage	cells_primary	cells_metastatic	primary_sites	metastatic_sites	sites	sharing
-3508_Apc_T1	3731	0	1	0	3508_Apc_T1	primary_sites_only
-3508_Apc_T2	312	755	1	8	3508_Apc_T2;3508_Apc_N1;3508_Apc_N2;3508_Apc_N3;3508_Apc_N4;3508_Apc_N5;3508_Apc_N6;3508_Apc_PF;3508_Apc_Rib	shared_across_sites

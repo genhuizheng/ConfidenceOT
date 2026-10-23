@@ -1,5 +1,0 @@
-	LL	BL	M1	M2	NE	NW	SE
-site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis
-L1.1	0.421053	0.0	0.173913	0.235294	0.111111	0.157895	0.166667
-ambiguous	0.578947	0.0	0.826087	0.764706	0.888889	0.842105	0.833333
-unknown: no tree leaf	0.0	1.0	0.0	0.0	0.0	0.0	0.0

@@ -1,5 +1,0 @@
-lineage	cells_primary	cells_metastatic	primary_sites	metastatic_sites	sites	sharing
-LG1	598	15560	1	5	30kLL;30kBL;30kLN;30kM1;30kM2;30kRL	shared_across_sites
-LG2	37	424	1	5	30kLL;30kBL;30kLN;30kM1;30kM2;30kRL	shared_across_sites
-LG3	6	432	1	5	30kLL;30kBL;30kLN;30kM1;30kM2;30kRL	shared_across_sites
-LG4	0	132	0	1	30kM1	metastatic_sites_only

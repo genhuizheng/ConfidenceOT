@@ -1,1 +1,9 @@
 __pycache__/
+# generated outputs: rebuilt by the scripts, archived on F:, never committed
+lineage_site_matrices/
+cell_level_gate_validation/
+figures/
+application_extension/results/
+*.tar.gz
+*.tar.gz.md5
+lineage_site_export_*/

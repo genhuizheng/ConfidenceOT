@@ -1,6 +1,0 @@
-	LL	BL	M1	M2	NE	NW	SE	SW
-site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis
-L1.1.1	3	0	3	6	0	8	0	0
-ambiguous	79	0	51	88	19	52	26	0
-unknown: no subclone at this level	120	0	57	86	16	55	34	0
-unknown: no tree leaf	0	1	0	0	0	0	0	2

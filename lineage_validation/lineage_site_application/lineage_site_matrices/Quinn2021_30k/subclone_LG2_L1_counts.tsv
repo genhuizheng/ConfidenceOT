@@ -1,8 +1,0 @@
-	30kLL	30kBL	30kLN	30kM1	30kM2	30kRL
-site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis
-L1.1	29	34	8	80	48	1
-L1.2	5	22	7	57	16	4
-L1.3	0	6	2	31	25	0
-L1.4	0	4	0	10	12	0
-ambiguous	0	10	1	24	9	0
-unknown: unreliable leaf (missing > 0.5)	3	4	1	8	0	0

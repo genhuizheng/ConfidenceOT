@@ -1,5 +1,0 @@
-	3508_Apc_T2	3508_Apc_N1	3508_Apc_N2	3508_Apc_N3	3508_Apc_N4	3508_Apc_N5	3508_Apc_N6	3508_Apc_PF	3508_Apc_Rib
-site_kind	primary	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis	metastasis
-L1.1	0.839744	0.0	0.0	0.0	0.0	0.0	0.0	0.0	0.0
-ambiguous	0.141026	1.0	1.0	0.991071	0.994595	1.0	1.0	0.923077	0.986667
-unknown: unreliable leaf (missing > 0.5)	0.019231	0.0	0.0	0.008929	0.005405	0.0	0.0	0.076923	0.013333
