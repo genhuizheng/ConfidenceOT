@@ -94,3 +94,15 @@ Status: **fixed 2026-10-22, before any Level 3 quantity was computed from a coup
 - **C — success and failure examples.**
   - Per strategy and method, among all evaluable cells pooled, take the cell at the 90th and at the 10th percentile of ΔD^norm; ties go to the smaller cell id.
   - Each panel shows the mass on sources at each tree distance (OT q̃ against independent π̃) and the number of sources available at each distance. It is annotated with d_min, the top-1 distance and weight, and c^OT.
+
+## 2026-10-22, post hoc (added after the primary results above were seen, before this analysis was computed): within-subclone decomposition
+
+**Why.** The primary results show ΔD > 0 in most families, with a large effect only in KP 3724, the family whose sites are seeded by different level-1 subclones. The user's question 3 asks whether there is cell-level lineage signal *beyond* the subclone level, which is the Level 2 quantity. The primary ΔD mixes the two.
+
+**Definition** (fixed here, before computing it; the rest of the plan is unchanged):
+- For an evaluable metastatic cell j with a frozen level-L subclone label g (L = 1, 2), S_j^g = the comparable primary cells of S_j in the same subclone g.
+- `cell_metrics` is computed on S_j^g in place of S_j:
+  - c^g_OT vs c^g_ind: the share of j's matched mass on its own subclone's primaries, against the independent coupling. This is the subclone-level signal.
+  - The conditional ΔD^g and ΔD^g_norm within the subclone. This is the cell-level signal beyond the subclone.
+- Cells with |S_j^g| < 5 or with equal distances to all of S_j^g are not scored here (counted).
+- Aggregation as above (cell → family → mouse). Reported as post hoc.
