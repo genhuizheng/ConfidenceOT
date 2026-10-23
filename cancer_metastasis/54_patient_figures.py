@@ -57,11 +57,13 @@ STRATEGIES = [("rna", "RNA only"), ("cnv", "CNV only"), ("rna_cnv", "CNV + RNA")
 SCORED = {"retain", "reject", "exclude"}  # exclude only occurs in the two-step final columns
 SIDE_COLOURS = {"primary": "#762A83", "metastasis": "#1B7837"}
 # diverging, Okabe-Ito poles as in 52_: never retained vermillion, always retained blue, grey midpoint
-FRACTION = LinearSegmentedColormap.from_list("retained_fraction", ["#D55E00", "#BFBFBF", "#0072B2"])
+# midpoint a mid grey, darker than the backdrop so a half-retained cell never reads as backdrop
+FRACTION = LinearSegmentedColormap.from_list("retained_fraction", ["#D55E00", "#808080", "#0072B2"])
+OPPOSITE_SIDE = {"primary": "metastasis", "metastasis": "primary"}
 CONSISTENCY = [("always", "retained by every gated pair (f = 1)", "#0072B2"),
-               ("sometimes", "retained by some (0 < f < 1)", "#BFBFBF"),
+               ("sometimes", "retained by some (0 < f < 1)", "#808080"),
                ("never", "retained by none (f = 0)", "#D55E00")]
-CONTEXT = "#F0F0F0"
+CONTEXT = "#D9D9D4"  # the other side: visible, so where the two sides sit apart can be seen
 # samples: never the retained-fraction poles (#D55E00, #0072B2) or its grey midpoint
 SAMPLE_COLOURS = ["#762A83", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#F0E442", "#8C510A", "#01665E",
                   "#000000", "#C51B7D"]
@@ -245,7 +247,7 @@ def dataset_figure(coords: pd.DataFrame, fractions: pd.DataFrame, annotation: pd
     position = pd.Series(np.arange(len(coords)), index=coords["cell_uid"].to_numpy())
     labels = annotation.reindex(coords["cell_uid"]).astype(str).to_numpy()
     proliferating = pd.Series(labels).str.contains(PROLIFERATION, case=False, regex=True).to_numpy() & mine
-    fig, axes = plt.subplots(2, 4, figsize=(17, 8.6), squeeze=False)
+    fig, axes = plt.subplots(3, 3, figsize=(15, 14.5), squeeze=False)
     flat = axes.ravel()
 
     def frame(ax, title):
@@ -254,8 +256,18 @@ def dataset_figure(coords: pd.DataFrame, fractions: pd.DataFrame, annotation: pd
             spine.set_color("#d0d0d0")
         ax.set_title(title, fontsize=9)
 
+    # where the two sides sit, so their separation on this UMAP is visible before any gate
     ax = flat[0]
-    ax.scatter(x[~mine], y[~mine], s=size * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
+    both = order
+    ax.scatter(x[both], y[both], s=size, c=np.where(coords["side"].to_numpy()[both] == "primary",
+                                                    SIDE_COLOURS["primary"], SIDE_COLOURS["metastasis"]),
+               linewidths=0, rasterized=True)
+    for name, colour_ in SIDE_COLOURS.items():
+        ax.scatter([], [], s=20, c=colour_, label=f"{name} ({int((coords['side'] == name).sum()):,})")
+    ax.legend(loc="lower left", fontsize=7, frameon=False)
+    frame(ax, "primary and metastasis on this UMAP")
+    ax = flat[1]
+    ax.scatter(x[~mine], y[~mine], s=size, c=CONTEXT, linewidths=0, rasterized=True)
     patients = sorted(coords.loc[mine, "patient_id"].astype(str).unique())
     colour = {p: SAMPLE_COLOURS[k % len(SAMPLE_COLOURS)] for k, p in enumerate(patients)}
     ax.scatter(x[draw], y[draw], s=size, c=[colour[p] for p in coords["patient_id"].astype(str).to_numpy()[draw]],
@@ -265,15 +277,15 @@ def dataset_figure(coords: pd.DataFrame, fractions: pd.DataFrame, annotation: pd
             ax.scatter([], [], s=20, c=colour[p], label=p)
         ax.legend(loc="lower left", fontsize=6, frameon=False, markerscale=1)
     frame(ax, f"{side} cells by patient ({len(patients)} patients, {int(mine.sum()):,} cells)")
-    ax = flat[1]
-    ax.scatter(x[~mine], y[~mine], s=size * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
-    ax.scatter(x[mine & ~proliferating], y[mine & ~proliferating], s=size, c="#BDBDBD", linewidths=0, rasterized=True)
+    ax = flat[2]
+    ax.scatter(x[~mine], y[~mine], s=size, c=CONTEXT, linewidths=0, rasterized=True)
+    ax.scatter(x[mine & ~proliferating], y[mine & ~proliferating], s=size, c="#B9B3D9", linewidths=0, rasterized=True)
     ax.scatter(x[proliferating], y[proliferating], s=size * 1.3, c="black", linewidths=0, rasterized=True)
     frame(ax, f"authors' proliferating subtype (black, {int(proliferating.sum()):,} cells)"
               if proliferating.any() else "authors' labels name no proliferating subtype")
     norm = Normalize(0, 1)
-    for ax, (strategy, label) in zip(flat[2:7], STRATEGIES):
-        ax.scatter(x[~mine], y[~mine], s=size * 0.5, c=CONTEXT, linewidths=0, rasterized=True)
+    for ax, (strategy, label) in zip(flat[3:8], STRATEGIES):
+        ax.scatter(x[~mine], y[~mine], s=size, c=CONTEXT, linewidths=0, rasterized=True)
         part = fractions[(fractions["strategy"] == strategy) & (fractions["side"] == side)]
         value = np.full(len(coords), np.nan)
         known = part["cell_uid"].isin(position.index)
@@ -288,12 +300,12 @@ def dataset_figure(coords: pd.DataFrame, fractions: pd.DataFrame, annotation: pd
             outside = np.nanmean(value[mine & ~proliferating])
             text += f"\nmean f: proliferating {inside:.2f} vs other {outside:.2f}"
         frame(ax, f"{label}\n{text}")
-    flat[7].axis("off")
-    flat[7].text(0.0, 0.95, f"{side.upper()} cells coloured; the other side is the grey backdrop.\n"
+    flat[8].axis("off")
+    flat[8].text(0.0, 0.95, f"{side.upper()} cells coloured; the {OPPOSITE_SIDE[side]} cells are the grey backdrop.\n"
                  "f = pairs that retained the cell / pairs that gated it\n(a primary cell meets each metastasis "
                  "its sample was paired with).\nPatients usually separate on a joint UMAP;\nthat is between-patient "
-                 "difference, not the gate.", fontsize=8, va="top", transform=flat[7].transAxes)
-    cax = fig.add_axes([0.78, 0.22, 0.18, 0.02])
+                 "difference, not the gate.", fontsize=8.5, va="top", transform=flat[8].transAxes)
+    cax = fig.add_axes([0.70, 0.16, 0.24, 0.012])
     bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=FRACTION), cax=cax, orientation="horizontal")
     bar.set_label("retained fraction f", fontsize=8)
     fig.suptitle(f"{dataset}  -  all patients, acceptance {acc}\n{space}", fontsize=11)
