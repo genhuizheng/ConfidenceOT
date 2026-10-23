@@ -89,7 +89,8 @@ def main() -> None:
                 args.out / f"{dataset}_ds_missing.tsv", sep="\t", index=False)
             report[dataset].update({"ds": ds_path.name, "ds_md5": md5(ds_path), "ds_missing": len(missing)})
         print(dataset, json.dumps(report[dataset]), flush=True)
-    (args.out / "MANIFEST.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        # one manifest per dataset, so jobs exporting different datasets into one folder never collide
+        (args.out / f"{dataset}_MANIFEST.json").write_text(json.dumps(report[dataset], indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
