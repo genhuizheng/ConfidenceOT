@@ -166,6 +166,11 @@ def parse_args() -> argparse.Namespace:
         help="Run only IC-POT, with the source and the target unmatched cost "
              "both set to this value; the literature's is 0.5. Written as its "
              "own solver; give it its own output directory.")
+    parser.add_argument(
+        "--uot-only", action="store_true",
+        help="Run Vanilla UOT alone (no Traditional OT, no Partial OT), beside "
+             "ConfidenceOT's stored gate: the UOT baseline without the network-"
+             "simplex solves. Give it its own output directory.")
     parser.add_argument("--max-iterations", type=int, default=20_000,
                         help="Sinkhorn iterations for Vanilla UOT")
     parser.add_argument(
@@ -203,6 +208,9 @@ def geometry(row: pd.Series, args: argparse.Namespace):
     from confidenceot.preprocessing import Preprocessing, median_pair_scale
 
     configuration = Preprocessing.from_label(args.preprocessing)
+    if configuration.cost == "pearson" or configuration.n_hvg == 0 or configuration.n_pcs == 0:
+        # As 02_run_pair.py: a pcc / allgenes / nopca label sets both dimensions.
+        args.n_hvg, args.n_pcs = configuration.n_hvg, configuration.n_pcs
     source = load_exact_side(side_paths(row, "source"), str(row["source_sample"]))
     target = load_exact_side(side_paths(row, "target"), str(row["target_sample"]))
     names = {"source": source.obs_names.astype(str).tolist(),
@@ -342,6 +350,9 @@ def main() -> None:
             args.oracle_budget or not np.isfinite(args.icpot_cost) or args.icpot_cost <= 0):
         raise SystemExit("--icpot-cost takes one positive value and runs on its own, "
                          "without --oracle-budget")
+    if args.uot_only and (args.oracle_budget or args.icpot_cost is not None):
+        raise SystemExit("--uot-only is the default solvers without the network-simplex ones; "
+                         "it does not combine with --oracle-budget or --icpot-cost")
     import ot
     import ot.partial
     import ot.unbalanced
@@ -461,16 +472,18 @@ def main() -> None:
         add("Oracle-budget Partial OT", plan=plan)
         del plan
     else:
-        plan, record = ot.emd(a, b, cost, numItermax=args.emd_iterations, log=True)
-        # result_code 1 is POT's "optimal". Anything else is a plan the network
-        # simplex stopped on, and it is not the method's answer.
-        provenance["traditional_ot"] = {"result_code": int(record["result_code"]),
-                                        "warning": record["warning"]}
-        if int(record["result_code"]) != 1:
-            raise SystemExit(f"Traditional OT did not reach the optimum: "
-                             f"{record['warning']}")
-        add("Traditional OT", plan=plan)
-        del plan
+        if not args.uot_only:
+            plan, record = ot.emd(a, b, cost, numItermax=args.emd_iterations, log=True)
+            # result_code 1 is POT's "optimal". Anything else is a plan the network
+            # simplex stopped on, and it is not the method's answer.
+            provenance["traditional_ot"] = {"result_code": int(record["result_code"]),
+                                            "warning": record["warning"]}
+            if int(record["result_code"]) != 1:
+                raise SystemExit(f"Traditional OT did not reach the optimum: "
+                                 f"{record['warning']}")
+            add("Traditional OT", plan=plan)
+            del plan
+        provenance["uot_only"] = bool(args.uot_only)
         vanilla, record = ot.unbalanced.sinkhorn_unbalanced(
             a, b, cost, reg=args.epsilon, reg_m=args.reg_m,
             method=args.uot_method, numItermax=args.max_iterations, log=True)
@@ -493,7 +506,7 @@ def main() -> None:
                   f"solver failure, not a result")
         add("Vanilla UOT", plan=vanilla)
         del vanilla
-        for mass in masses:
+        for mass in ([] if args.uot_only else masses):
             try:
                 plan = ot.partial.partial_wasserstein(
                     a, b, cost, m=float(mass), numItermax=args.emd_iterations)

@@ -499,8 +499,10 @@ class Preprocessing:
                                  "as they are: scale_genes must be False (noscale)")
             if self.regress_out:
                 raise ValueError("cost='pearson' does not combine with regress_out")
-        elif self.n_hvg < 2 or self.n_pcs < 1:
-            raise ValueError("n_hvg must be >= 2 and n_pcs >= 1")
+        elif (self.n_hvg != 0 and self.n_hvg < 2) or self.n_pcs < 0:
+            # 0 is a setting, not a count: n_hvg = 0 keeps every common gene
+            # (label tag allgenes), n_pcs = 0 skips the PCA (tag nopca).
+            raise ValueError("n_hvg must be 0 (every gene) or >= 2, and n_pcs 0 (no PCA) or >= 1")
         if self.equalise_target is not None and self.equalise_target < 1:
             raise ValueError("equalise_target must be a positive read count")
         if not 0.0 < self.equalise_quantile < 1.0:
@@ -531,6 +533,14 @@ class Preprocessing:
         if self.label_stem is None and self.normalisation.startswith("rank"):
             stem = f"{stem}{self.rank_top_n}"
         parts = [stem]
+        if self.cost != "pearson":
+            # Right after the stem, so every existing label is unchanged and the
+            # parser can strip them once the other tags are gone. pearson means
+            # every gene and no PCA by definition and carries neither.
+            if self.n_hvg == 0:
+                parts.append("allgenes")
+            if self.n_pcs == 0:
+                parts.append("nopca")
         if not self.scale_genes:
             # Before the other tags, for the same reason they are ordered as
             # they are: the parser strips from the end, so a new tag placed
@@ -560,8 +570,11 @@ class Preprocessing:
         real and silent: a rank cut set while the transform was left at its
         default produces a run with an ignored cut and no name.
 
-        The label carries the three axes the depth screen varied and nothing
-        else.  ``n_hvg``, ``n_pcs``, ``residual_theta``,
+        The label carries the three axes the depth screen varied, plus two
+        optional dimension tags: ``allgenes`` (n_hvg = 0, every common gene)
+        and ``nopca`` (n_pcs = 0, the genes are the coordinates), so
+        ``log1p_allgenes_nopca_noscale`` is log1p over every gene with no PCA.
+        Other values of ``n_hvg``, ``n_pcs``, ``residual_theta``,
         ``minimum_detection_rate`` and ``equalise_quantile`` come from the
         defaults unless passed in ``overrides``, so a label identifies a
         configuration only together with those -- which is why
@@ -596,12 +609,18 @@ class Preprocessing:
         scale_genes = True
         if len(parts) > 1 and parts[-1] == "noscale":
             scale_genes, parts = False, parts[:-1]
+        dimensions: dict[str, int] = {}
+        if len(parts) > 1 and parts[-1] == "nopca":
+            dimensions["n_pcs"], parts = 0, parts[:-1]
+        if len(parts) > 1 and parts[-1] == "allgenes":
+            dimensions["n_hvg"], parts = 0, parts[:-1]
         stem = "_".join(parts)
         if not stem:
             raise ValueError(f"label {label!r} names no transform")
         settings: dict[str, Any] = {"cost": cost, "equalise_depth": equalise,
                                     "regress_out": regressed,
                                     "scale_genes": scale_genes}
+        settings.update(dimensions)
         if cost == "pearson":
             settings.update(n_hvg=0, n_pcs=0)
         inverse = {value: key for key, value in _LABEL_STEM.items()}
@@ -840,7 +859,8 @@ class Preprocessing:
             # The pearson cost: the genes themselves are the coordinates.
             components = 0
             coordinates = dense
-            scaling_note = "no gene scaling and no PCA: every common gene is a coordinate"
+            scaling_note = (("genes centred and scaled, " if self.scale_genes else "no gene scaling, ")
+                            + "no PCA: every selected gene is a coordinate")
         else:
             from sklearn.decomposition import PCA  # optional dependency
 

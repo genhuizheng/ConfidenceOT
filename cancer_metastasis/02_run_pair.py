@@ -496,9 +496,10 @@ def main() -> None:
         args.representation = configuration.normalisation
         args.rank_top_n = configuration.rank_top_n
         args.cost = configuration.cost
-        if configuration.cost == "pearson":
-            # The pcc label means every gene and no PCA; --n-hvg and --n-pcs do
-            # not apply to it, and the configuration refuses anything but 0.
+        if configuration.cost == "pearson" or configuration.n_hvg == 0 or configuration.n_pcs == 0:
+            # The pcc label means every gene and no PCA, and the allgenes / nopca
+            # tags say so for the other costs; the label then sets both, not
+            # --n-hvg / --n-pcs.
             args.n_hvg, args.n_pcs = configuration.n_hvg, configuration.n_pcs
         args.scale_genes = configuration.scale_genes
         args.label_stem = configuration.label_stem

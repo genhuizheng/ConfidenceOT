@@ -56,8 +56,18 @@ if [[ -n "$icpot_cost" && "$oracle_budget" == "1" ]]; then
     echo "CONFIDENCEOT_SOLVER_ICPOT_COST and CONFIDENCEOT_SOLVER_ORACLE_BUDGET each run one solver alone; set one" >&2
     exit 2
 fi
+# 1 runs Vanilla UOT alone beside ConfidenceOT's stored gate (50_solver_comparison.py
+# --uot-only: no Traditional OT, no Partial OT), into solvers_uot_only/.
+uot_only=${CONFIDENCEOT_SOLVER_UOT_ONLY:-0}
+if [[ "$uot_only" == "1" && ( -n "$icpot_cost" || "$oracle_budget" == "1" ) ]]; then
+    echo "CONFIDENCEOT_SOLVER_UOT_ONLY runs the default solvers' UOT alone; set it without the other two" >&2
+    exit 2
+fi
 mode_args=()
-if [[ -n "$icpot_cost" ]]; then
+if [[ "$uot_only" == "1" ]]; then
+    mode_args=(--uot-only)
+    out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers_uot_only/$label}
+elif [[ -n "$icpot_cost" ]]; then
     mode_args=(--icpot-cost "$icpot_cost")
     out=${CONFIDENCEOT_SOLVER_ROOT:-$root/solvers_icpot/$label}
 elif [[ "$oracle_budget" == "1" ]]; then
@@ -84,6 +94,9 @@ partial_mass=${CONFIDENCEOT_SOLVER_PARTIAL_MASS:-}
 mass_args=()
 for value in $partial_mass; do mass_args+=(--partial-mass "$value"); done
 force=${CONFIDENCEOT_SOLVER_FORCE:-0}
+# Where this label's acceptance-0.90 ConfidenceOT runs are: runs/ for the grid's arms;
+# runs_acceptance_0.90 for an arm run with the acceptance set explicitly (log1p_noscale_pcc).
+runs_dir=${CONFIDENCEOT_SOLVER_RUNS_DIR:-runs}
 
 cd "$repo"
 export PYTHONPATH="$repo/src:$repo/cancer_metastasis:$repo${PYTHONPATH:+:$PYTHONPATH}"
@@ -151,7 +164,7 @@ for (( unit = start; unit < stop; unit++ )); do
         "$manifest" "$destination" \
         --index "$pair_index" \
         --preprocessing "$label" \
-        --confidenceot-root "$root/runs/$label" \
+        --confidenceot-root "$root/$runs_dir/$label" \
         --scope "$scope" \
         --seed "$seed" \
         --epsilon "$epsilon" \

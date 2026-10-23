@@ -580,5 +580,50 @@ class FitCountsTest(unittest.TestCase):
             )
 
 
+class DimensionTagTest(unittest.TestCase):
+    """allgenes (n_hvg = 0) and nopca (n_pcs = 0) for the non-pearson costs."""
+
+    def test_the_tags_round_trip_and_set_the_dimensions(self):
+        expected = {"log1p_noscale": (2000, 30), "log1p_allgenes_noscale": (0, 30),
+                    "log1p_nopca_noscale": (2000, 0), "log1p_allgenes_nopca_noscale": (0, 0),
+                    "log1p_noscale_pcc": (0, 0)}
+        for label, (n_hvg, n_pcs) in expected.items():
+            with self.subTest(label=label):
+                configuration = Preprocessing.from_label(label)
+                self.assertEqual((configuration.n_hvg, configuration.n_pcs), (n_hvg, n_pcs))
+                self.assertEqual(configuration.label(), label)
+
+    def test_existing_labels_are_unchanged(self):
+        for label in ("ranknm256_noscale_ds_cos", "logcpm", "rank256_cos", "log1p_noscale_pcc"):
+            with self.subTest(label=label):
+                self.assertNotIn("allgenes", Preprocessing.from_label(label).label())
+                self.assertNotIn("nopca", Preprocessing.from_label(label).label())
+
+    def test_the_coordinates_are_what_the_tags_say(self):
+        source, target = fixture()
+        cases = {"log1p_allgenes_noscale": 5, "log1p_nopca_noscale": 10,
+                 "log1p_allgenes_nopca_noscale": N_GENES}
+        for label, width in cases.items():
+            with self.subTest(label=label):
+                configuration = Preprocessing.from_label(label, **(
+                    {"n_pcs": 5} if label == "log1p_allgenes_noscale" else
+                    {"n_hvg": 10} if label == "log1p_nopca_noscale" else {}))
+                prepared = configuration.representation(
+                    source, target, seed=1, source_genes=GENES, target_genes=GENES)
+                self.assertEqual(prepared.source.shape[1], width)
+                if configuration.n_hvg == 0:
+                    self.assertEqual(prepared.provenance["hvg_n"], N_GENES)
+                if configuration.n_pcs == 0:
+                    # no PCA: the selected genes' log1p values are the coordinates
+                    genes = [GENES.index(g) for g in prepared.selected_genes]
+                    np.testing.assert_allclose(prepared.source, np.log1p(source[:, genes]), rtol=1e-6)
+
+    def test_a_single_gene_is_still_refused(self):
+        with self.assertRaises(ValueError):
+            Preprocessing(normalisation="log1p", n_hvg=1)
+        with self.assertRaises(ValueError):
+            Preprocessing(normalisation="log1p", n_pcs=-1)
+
+
 if __name__ == "__main__":
     unittest.main()

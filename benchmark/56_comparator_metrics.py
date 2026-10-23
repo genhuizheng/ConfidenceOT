@@ -536,6 +536,8 @@ def main() -> None:
                                              **counts(~block["retained"].to_numpy(dtype=bool),
                                                       should[side])})
                 for solver in ("Vanilla UOT", FIXED_PARTIAL):
+                    if solver != "Vanilla UOT" and not score_file(directory, solver, side).exists():
+                        continue  # a 50_ --uot-only run: Vanilla UOT alone
                     u = np.load(score_file(directory, solver, side))
                     if u.size != should[side].size:
                         raise SystemExit(f"{directory}: {solver} {side} has {u.size} scores "
@@ -622,13 +624,15 @@ def main() -> None:
                                      "precision": oracle.get("oracle_f1_precision", np.nan),
                                      "recall": oracle.get("oracle_f1_recall", np.nan),
                                      "f1": oracle.get("oracle_f1_f1", np.nan)})
-                balanced = np.load(score_file(directory, "Traditional OT", side))
-                set1.append({**base, "solver": "Balanced OT", "side": side,
-                             "decision": "none: every unit of mass is transported",
-                             "largest_saved_u": float(balanced.max()),
-                             **counts(np.zeros(should[side].size, bool), should[side])})
+                if score_file(directory, "Traditional OT", side).exists():
+                    balanced = np.load(score_file(directory, "Traditional OT", side))
+                    set1.append({**base, "solver": "Balanced OT", "side": side,
+                                 "decision": "none: every unit of mass is transported",
+                                 "largest_saved_u": float(balanced.max()),
+                                 **counts(np.zeros(should[side].size, bool), should[side])})
 
-            budgets = [("fixed budget, m = 0.85", directory, FIXED_PARTIAL, 0.85)]
+            budgets = ([("fixed budget, m = 0.85", directory, FIXED_PARTIAL, 0.85)]
+                       if score_file(directory, FIXED_PARTIAL, "source").exists() else [])
             oracle_directory = args.bench_root / args.oracle_dir / arm / pair_id
             if (oracle_directory / "solver_comparison.csv").exists():
                 m = {"all_shared": 1.0, "populations_disjoint": 0.0}.get(case)
