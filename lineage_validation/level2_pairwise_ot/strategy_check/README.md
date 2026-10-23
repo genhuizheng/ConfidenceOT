@@ -14,7 +14,11 @@ Checks made 2026-10-22, before any Level 2 CNV coupling. Nothing is recomputed: 
   | values − 1 (shipped) | 0 | 0 |
   | values − 1 + 7 (any constant) | 9.5e-11 | 0 |
 
-- **Real profiles.** Run on TACC (`cnv_values.tsv`: value quantiles and share of entries exactly 1 per unit; `cnv_shift_invariance.tsv`). Pending.
+- **Real profiles.** Every exported unit: KP-Tracer `infercnvpy_mouse` (11 mice) and Quinn `infercnvpy_experiment` (100k, 10k, 30k, 5k, LM0). Up to 4,000 cells per unit; TACC jobs 1091585 / 1091586 (identical reruns); output on TACC in `level2_pairwise_ot/strategy_check_cnv/`.
+  - KP units have 2,269 windows, Quinn units 2,944 or 2,995.
+  - Baseline: in every unit the median is 1.0000, and 86.8–89.2% of entries are exactly 1.0. No entry is within 1e-3 of 0. Means are 1.0005–1.0037, maxima 1.23–1.56.
+  - Invariance: across the stored values, the shipped "− 1" and an arbitrary constant, the coordinates differ by at most 7.5e-9 (relative 4.2e-9; 3460), and in most units exactly 0. The costs differ by at most 2.4e-7, which is float32 rounding at a cost median near 1.
+  - **The "− 1" only undoes the export's "+ 1" and changes neither the CNV PCA coordinates nor the cost.** The existing CNV implementation is used as it is.
 
 ## Behaviour of the strategies without rejection (`check_strategy_identities.py`, synthetic, ε 0.1)
 
