@@ -1,0 +1,12 @@
+KPTracer_3454__3454_Lkb1_T1__family_metastases: 3480 cell x run rows, 6 s
+KPTracer_3457__3457_Apc_T1__family_metastases: 1038 cell x run rows, 2 s
+KPTracer_3457__3457_Apc_T4__family_metastases: 414 cell x run rows, 1 s
+KPTracer_3515__3515_Lkb1_T1__family_metastases: 6996 cell x run rows, 9 s
+KPTracer_3724__3724_NT_T1__family_metastases: 37290 cell x run rows, 347 s
+Quinn2021_100k__LL__metastases: 5610 cell x run rows, 16 s
+Quinn2021_10k__LL__metastases: 4656 cell x run rows, 8 s
+Quinn2021_30k__LL__metastases: 64146 cell x run rows, 32 s
+Quinn2021_5k__LL__metastases: 115464 cell x run rows, 187 s
+status
+ok    54
+exit 0

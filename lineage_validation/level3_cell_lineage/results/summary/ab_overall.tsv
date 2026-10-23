@@ -1,0 +1,4 @@
+strategy	families	families_B_higher	families_A_higher	median_family_B_minus_A	mice	mice_B_higher	median_mouse_B_minus_A
+cnv	26	16	10	0.0009602829682686248	8	3	-6.553787087846923e-05
+rna	26	9	17	-0.004325309001074886	8	2	-0.008993335474779915
+rna_cnv	26	10	16	-0.0015617914930735628	8	2	-0.0034793922247556676

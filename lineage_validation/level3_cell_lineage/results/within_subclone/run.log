@@ -1,0 +1,23 @@
+KPTracer_3454__3454_Lkb1_T1__family_metastases: 1111 cell x level units scored, 0 skipped (< 5 subclone primaries or equal distances)
+KPTracer_3457__3457_Apc_T1__family_metastases: 346 cell x level units scored, 0 skipped (< 5 subclone primaries or equal distances)
+KPTracer_3457__3457_Apc_T4__family_metastases: 69 cell x level units scored, 0 skipped (< 5 subclone primaries or equal distances)
+KPTracer_3515__3515_Lkb1_T1__family_metastases: 2329 cell x level units scored, 0 skipped (< 5 subclone primaries or equal distances)
+KPTracer_3724__3724_NT_T1__family_metastases: 12417 cell x level units scored, 0 skipped (< 5 subclone primaries or equal distances)
+Quinn2021_100k__LL__metastases: 744 cell x level units scored, 16 skipped (< 5 subclone primaries or equal distances)
+Quinn2021_10k__LL__metastases: 474 cell x level units scored, 35 skipped (< 5 subclone primaries or equal distances)
+Quinn2021_30k__LL__metastases: 15230 cell x level units scored, 1813 skipped (< 5 subclone primaries or equal distances)
+Quinn2021_5k__LL__metastases: 23500 cell x level units scored, 4293 skipped (< 5 subclone primaries or equal distances)
+strategy        method  level  families  families_dDn_pos  families_ci_above_0  families_ci_below_0  median_family_dDn  mice  mice_dDn_pos  median_mouse_dDn  median_family_c_ot  median_family_c_ind
+     rna A_standard_OT      1        25                18                   10                    1              0.010     8             8             0.014               0.098                0.023
+     rna A_standard_OT      2        15                10                    7                    2              0.018     7             5             0.013               0.067                0.012
+     rna      B_our_OT      1        25                21                   12                    0              0.015     8             7             0.018               0.093                0.024
+     rna      B_our_OT      2        15                13                    7                    1              0.023     7             6             0.019               0.057                0.012
+     cnv A_standard_OT      1        25                17                   10                    2              0.007     8             8             0.008               0.134                0.023
+     cnv A_standard_OT      2        15                10                    5                    1              0.019     7             5             0.007               0.084                0.012
+     cnv      B_our_OT      1        25                17                    9                    2              0.008     8             8             0.008               0.142                0.022
+     cnv      B_our_OT      2        15                12                    6                    1              0.016     7             5             0.016               0.080                0.012
+ rna_cnv A_standard_OT      1        25                18                   11                    1              0.009     8             8             0.012               0.117                0.023
+ rna_cnv A_standard_OT      2        15                11                    6                    1              0.014     7             6             0.008               0.079                0.012
+ rna_cnv      B_our_OT      1        25                21                   10                    1              0.010     8             8             0.016               0.121                0.023
+ rna_cnv      B_our_OT      2        15                12                    8                    1              0.009     7             5             0.009               0.076                0.012
+exit 0
