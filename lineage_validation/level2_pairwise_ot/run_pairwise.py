@@ -77,7 +77,10 @@ def files_for(pair: pd.Series) -> dict:
         for side in ("source", "target"):
             for _, r in ds.iterrows():
                 ds_path.setdefault(r[f"{side}_sample"], side_paths(r, side))
-        part = lambda t: {"ds": (ds_path[t], t), "raw": ([str(KP / "prepared" / "h5ad" / f"{t}.h5ad")], t), "site": t}
+        # One file per tumour (sample_id = the tumour): every cell's site is the tumour itself. The files' own
+        # obs 'site' is the tissue category ('primary' / ...), so it is not used to select cells.
+        part = lambda t: {"ds": (ds_path[t], t), "raw": ([str(KP / "prepared" / "h5ad" / f"{t}.h5ad")], t), "site": t,
+                          "site_from_obs": False}
         # A site without an equalised file did not pass the 104-pair eligibility (>= 20 malignant cells).
         missing = {t: "no equalised file" for t in tgt.split(";") if t not in ds_path}
         return {"source": [part(src)], "target": [part(t) for t in tgt.split(";") if t in ds_path], "left_out": missing}
@@ -89,7 +92,10 @@ def files_for(pair: pd.Series) -> dict:
         if len(r) != 1:
             raise ValueError(f"Quinn {pair['mouse']}: {len(r)} rows in the {kind} manifest")
         rows[kind] = r.iloc[0]
-    spec = lambda side, site: [{k: (side_paths(rows[k], side), rows[k][f"{side}_sample"]) for k in ("ds", "raw")} | {"site": site}]
+    # Quinn sides are pooled over tissues; obs 'site' of the raw file is the tissue (sampleID), so it labels
+    # and, for a named site, selects the cells.
+    spec = lambda side, site: [{k: (side_paths(rows[k], side), rows[k][f"{side}_sample"]) for k in ("ds", "raw")}
+                               | {"site": site, "site_from_obs": True}]
     return {"source": spec("source", None), "target": spec("target", None if tgt == "ALL" else tgt), "left_out": {}}
 
 
@@ -100,8 +106,12 @@ def load_part(part: dict, side: str):
     if not ds.obs_names.isin(raw.obs_names).all():
         raise ValueError(f"{side}: {int((~ds.obs_names.isin(raw.obs_names)).sum())} equalised cells missing from the raw file")
     raw = raw[ds.obs_names].copy()
-    # The site of each cell is read off the raw file (Quinn's equalised files need not carry it).
-    site = raw.obs["site"].astype(str).to_numpy() if "site" in raw.obs else np.repeat(part["site"], raw.n_obs)
+    if not part["site_from_obs"]:  # KP-Tracer: the file is the tumour; its sample_id was checked by load_exact_side
+        return raw, ds, np.repeat(part["site"], raw.n_obs).astype(object)
+    # Quinn: the site of each cell is read off the raw file (the equalised files need not carry it).
+    if "site" not in raw.obs:
+        raise ValueError(f"{side}: the raw file has no obs 'site'")
+    site = raw.obs["site"].astype(str).to_numpy()
     if part["site"] is not None:
         keep = site == part["site"]
         ds, raw, site = ds[keep].copy(), raw[keep].copy(), site[keep]

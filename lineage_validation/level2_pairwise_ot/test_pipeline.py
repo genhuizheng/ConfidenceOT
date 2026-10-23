@@ -72,14 +72,15 @@ def main():
         sid, tid = [f"s{i}" for i in range(len(src_lab))], [f"t{j}" for j in range(len(tgt_lab))]
         # equalised = binomial thinning; the raw file has 10 extra non-malignant cells the equalised file lacks
         thin = lambda X: rng.binomial(X, 0.5)
-        adata(Xs, sid, "M_T1", "M_T1").write_h5ad(kp / "downsampled" / "M_T1.h5ad")
-        adata(thin(Xt), tid, "M_K1", "M_K1").write_h5ad(kp / "downsampled" / "M_K1.h5ad")
-        adata(np.vstack([Xs, counts(rng, [prog["A"]] * 10, 10)]), sid + [f"x{i}" for i in range(10)], "M_T1", "M_T1").write_h5ad(kp / "prepared" / "h5ad" / "M_T1.h5ad")
-        adata(Xt, tid, "M_K1", "M_K1").write_h5ad(kp / "prepared" / "h5ad" / "M_K1.h5ad")
+        # As in the real KP-Tracer files, obs site is the tissue category, not the tumour: the tumour is the file.
+        adata(Xs, sid, "M_T1", "primary").write_h5ad(kp / "downsampled" / "M_T1.h5ad")
+        adata(thin(Xt), tid, "M_K1", "metastasis").write_h5ad(kp / "downsampled" / "M_K1.h5ad")
+        adata(np.vstack([Xs, counts(rng, [prog["A"]] * 10, 10)]), sid + [f"x{i}" for i in range(10)], "M_T1", "primary").write_h5ad(kp / "prepared" / "h5ad" / "M_T1.h5ad")
+        adata(Xt, tid, "M_K1", "metastasis").write_h5ad(kp / "prepared" / "h5ad" / "M_K1.h5ad")
         # a second metastasis of the family, K2 = 60 A cells: the plan covers K1 and K2 together
         Xk2, k2id = counts(rng, [prog["A"]] * 60, 60), [f"k{j}" for j in range(60)]
-        adata(thin(Xk2), k2id, "M_K2", "M_K2").write_h5ad(kp / "downsampled" / "M_K2.h5ad")
-        adata(Xk2, k2id, "M_K2", "M_K2").write_h5ad(kp / "prepared" / "h5ad" / "M_K2.h5ad")
+        adata(thin(Xk2), k2id, "M_K2", "metastasis").write_h5ad(kp / "downsampled" / "M_K2.h5ad")
+        adata(Xk2, k2id, "M_K2", "metastasis").write_h5ad(kp / "prepared" / "h5ad" / "M_K2.h5ad")
         pd.DataFrame([{"source_sample": "M_T1", "target_sample": t, "source_h5ad": str(kp / "downsampled" / "M_T1.h5ad"),
                        "target_h5ad": str(kp / "downsampled" / f"{t}.h5ad")} for t in ("M_K1", "M_K2")]).to_csv(
             kp / "downsampled" / "pair_manifest_downsampled.csv", index=False)
