@@ -15,7 +15,13 @@ reverse). For each strategy and acceptance:
 The same cell can be retained against one metastasis and rejected against another; the fraction
 says how often. A patient with one pair has fractions 0 or 1 only.
 
-Writes to FIGURES_DIR:
+Writes to FIGURES_DIR (README.txt there says which coordinates were drawn and how):
+  tables/        cell_retained_fraction_acc<a>.csv.gz, patient_summary.tsv
+  patients/acc<a>/<dataset>/<patient>.png      one figure per patient
+  overview/acc<a>/<dataset>_<side>.png         every patient of a dataset, one row each
+  dataset/acc<a>/<dataset>_<side>.png          every patient on one joint UMAP (--dataset-umap)
+  consistency/acc<a>/<dataset>_<side>.png      per-patient f = 1 / 0 < f < 1 / f = 0 bars
+In detail:
   cell_retained_fraction_acc<a>.csv.gz  one row per cell x strategy: gated / retained pairs, fraction
   patient_summary.tsv   patient x strategy x side x acceptance: cells, pairs, the median number of
                         pairs that gated a cell (a primary sample meets only its own metastases), mean fraction, and the
@@ -336,6 +342,52 @@ def consistency_figure(summary: pd.DataFrame, dataset: str, side: str, acc: str,
     plt.close(fig)
 
 
+RECIPES = {
+    "raw": [
+        "log1p UMAP (fixed coordinates), 53_patient_umap.py --space raw, 48_reference_umap.py's recipe:",
+        "  cells   the union of the reference cells of the patient's (or dataset's) pairs, both sides",
+        "  counts  the original counts",
+        "  scale   normalize_total to 1e4 per cell, then log1p",
+        "  HVG     2,000 genes, scanpy highly_variable_genes flavor='seurat', on all cells together",
+        "  genes   scaled to unit variance, clipped at 10",
+        "  PCA     40 components (arpack), seed 20260904",
+        "  graph   20 nearest neighbours in PCA space (Euclidean)",
+        "  UMAP    scanpy defaults (min_dist 0.5, spread 1.0), seed 20260904"],
+    "gate": [
+        "preprocessing UMAP (fixed coordinates), 53_patient_umap.py --space gate: the gates' own",
+        "ranknm256_noscale_ds_cos, built by common.prepare_joint_representation:",
+        "  cells   the same union, less the reference cells absent from the equalised h5ads",
+        "          (missing_from_equalised.tsv per unit; no strategy gate scored any of them)",
+        "  counts  the depth-equalised counts (27_downsample_counts.py), the ones the strategy OT read",
+        "  genes   the genes both sides share",
+        "  rank    each cell's top 256 genes ranked, without the gene-median division (ranknm256)",
+        "  HVG     2,000 genes of highest variance of the rank-encoded values, both sides together",
+        "  scale   none per gene (noscale); PCA centres the genes",
+        "  PCA     30 components (sklearn PCA), seed 20260904",
+        "  rows    L2-normalised (the cosine cost's geometry)",
+        "  graph   20 nearest neighbours on those unit vectors (Euclidean, so cosine order)",
+        "  UMAP    scanpy defaults (min_dist 0.5, spread 1.0), seed 20260904",
+        "Fitted on the whole patient (or dataset), not on one pair: the gate's recipe, not one gate's geometry."],
+}
+
+
+def readme(args) -> str:
+    spaces = set()
+    for root in [args.patient_umap] + ([args.dataset_umap] if args.dataset_umap else []):
+        for record in list(Path(root).glob("patients/*/*/reference.json")) + list(Path(root).glob("datasets/*/reference.json")):
+            spaces.add(json.loads(record.read_text()).get("space", "raw"))
+    lines = ["Patient-by-patient figures of the five CNV / RNA gate strategies (54_patient_figures.py).", "",
+             f"export          {args.export}", f"patient UMAPs   {args.patient_umap}",
+             f"dataset UMAPs   {args.dataset_umap}", f"sides drawn     {' '.join(args.sides)}",
+             f"acceptances     {' '.join(args.acceptances)}", "",
+             "Every strategy, acceptance and step is drawn on the same coordinates; they were computed once.", ""]
+    for space in sorted(spaces) or ["raw"]:
+        lines += RECIPES[space] + [""]
+    lines += ["Colour: f = pairs that retained the cell / pairs that gated it (vermillion 0, grey 0.5, blue 1).",
+              "", "Layout:"] + __doc__.split("Writes to FIGURES_DIR")[1].splitlines()[1:6]
+    return chr(10).join(lines) + chr(10)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("export", type=Path)
@@ -387,14 +439,15 @@ def main() -> None:
                       f"have no coordinates in {umap_file}")
             fractions = fractions[placed]
             umap_figure(coords, fractions, sides, acc, len(part), f"{dataset}  {patient}",
-                        args.figures / "umap" / f"acc{acc}" / dataset / f"{patient}.png", overview_space)
+                        args.figures / "patients" / f"acc{acc}" / dataset / f"{patient}.png", overview_space)
             overview.setdefault(dataset, []).append((patient, coords, fractions, len(part)))
         for dataset, items in overview.items():
             for side in sides:
                 overview_figure(items, dataset, side, acc, overview_space,
-                                args.figures / f"overview_acc{acc}_{dataset}_{side}.png")
+                                args.figures / "overview" / f"acc{acc}" / f"{dataset}_{side}.png")
         every = pd.concat(all_cells, ignore_index=True)
-        every.to_csv(args.figures / f"cell_retained_fraction_acc{acc}.csv.gz", index=False, compression="gzip")
+        (args.figures / "tables").mkdir(parents=True, exist_ok=True)
+        every.to_csv(args.figures / "tables" / f"cell_retained_fraction_acc{acc}.csv.gz", index=False, compression="gzip")
         if args.dataset_umap is not None:
             for dataset in sorted(index["dataset_id"].unique()):
                 umap_file = args.dataset_umap / "datasets" / dataset / "patient_umap.csv.gz"
@@ -407,16 +460,18 @@ def main() -> None:
                 for side in sides:
                     dataset_figure(coords, every[every["dataset_id"] == dataset],
                                    annotation.set_index("cell_uid")["annotation"], dataset, side, acc,
-                                   space_label(umap_file.parent), args.figures / f"dataset_acc{acc}_{dataset}_{side}.png")
+                                   space_label(umap_file.parent), args.figures / "dataset" / f"acc{acc}" / f"{dataset}_{side}.png")
     summary = pd.DataFrame(summary_rows)
-    summary.to_csv(args.figures / "patient_summary.tsv", sep="\t", index=False)
+    (args.figures / "tables").mkdir(parents=True, exist_ok=True)
+    summary.to_csv(args.figures / "tables" / "patient_summary.tsv", sep="\t", index=False)
     for acc in args.acceptances:
         for dataset in sorted(summary["dataset_id"].unique()):
             for side in sides:
                 consistency_figure(summary, dataset, side, acc,
-                                   args.figures / f"consistency_acc{acc}_{dataset}_{side}.png")
+                                   args.figures / "consistency" / f"acc{acc}" / f"{dataset}_{side}.png")
     if missing:
         print(f"no patient UMAP for {len(sorted(set(missing)))} patient(s): {sorted(set(missing))[:10]}")
+    (args.figures / "README.txt").write_text(readme(args), encoding="utf-8")
     print(f"done: {args.figures}")
 
 
