@@ -96,8 +96,9 @@ def space_label(folder: Path) -> str:
     """What the coordinates were computed from, as 53_ recorded it."""
     record = folder / "reference.json"
     space = json.loads(record.read_text()).get("space", "raw") if record.exists() else "raw"
-    return ("UMAP in the gate space (ranknm256_noscale_ds_cos, equalised counts)" if space == "gate"
-            else "UMAP on raw counts (log-normalised, 48_ recipe)")
+    return ("preprocessing UMAP: ranknm256_noscale_ds_cos on the equalised counts (fixed coordinates)"
+            if space == "gate" else
+            "log1p UMAP: raw counts, CP10k + log1p, 2,000 HVGs, PCA 40 (fixed coordinates)")
 
 
 def umap_figure(coords: pd.DataFrame, fractions: pd.DataFrame, sides: list[str], acc: str, n_pairs: int,
