@@ -1,6 +1,15 @@
 """Level 2 OT without rejection: Method A and Method B from one primary to its family's metastases (PLAN.md).
 
-    python lineage_validation/level2_pairwise_ot/run_pairwise.py --index I --out OUT_ROOT
+    python lineage_validation/level2_pairwise_ot/run_pairwise.py --index I --out OUT_ROOT [--strategy rna|cnv|rna_cnv]
+
+Strategy (methods.py; the cost is built as 02_run_pair.py --representation-source builds it, from the existing
+infercnvpy exports, nothing recomputed):
+  rna      the method's RNA coordinates (below)
+  cnv      02_run_pair.py:cnv_coordinates (CNV profile - 1 -> joint PCA 30, seed 20260831 + I): the same
+           coordinates for A and B, which then differ only in the solver
+  rna_cnv  [the method's RNA coordinates | the CNV PCA], each block divided by the root of its median pair cost
+           (seed 20260831 + I * 104729 + 1)
+The two-step strategies are not run: without rejection they equal rna and cnv exactly (strategy_check/README.md).
 
 Row I of inputs/cases.tsv (every eligible family; make_inputs.py). Cells: the malignant cells of the primary and of the target sites in the
 depth-equalised files (KP-Tracer: the per-tumour files of the 104-pair runs, the target sites concatenated;
@@ -19,8 +28,11 @@ epsilon 0.1 for both:
 Writes OUT_ROOT/<case_id>/:
   sites.json                       target sites used (cells) and left out (no equalised file, < 20 cells)
   cells.tsv.gz                     side, cell id, site, total counts raw and equalised (plan row/column order)
-  coordinates_<label>.npz          source/target coordinates and cell ids, cost scale, HVGs
-  <method>/preprocessing.json      configuration, representation record, seeds, cost scale
+  coordinates_<label>.npz          rna: source/target coordinates and cell ids, cost scale, HVGs
+  coordinates_cnv.npz              cnv: the CNV PCA (shared by A and B)
+  coordinates_rna_cnv__<label>.npz rna_cnv: the block-scaled joint coordinates of each method
+  RUNNING                          the SLURM job id while the task runs (removed at the end, success or not)
+  <method>/preprocessing.json      strategy, configuration, representation / CNV record, block scales, seeds, cost scale
   <method>/coupling.npz            the full plan (float32), for Level 3
   <method>/source_groups.tsv       per family and level: group, cells, row mass of the plan
   <method>/target_mass_<family>_L<k>.tsv.gz  per target cell: site, column mass, plan mass from each source group
@@ -52,13 +64,25 @@ sys.path[:0] = [str(HERE), str(REPO / "src"), str(REPO / "cancer_metastasis")]
 from common import load_exact_side, prepare_joint_representation  # noqa: E402
 from confidenceot import ConfidenceOT  # noqa: E402
 from confidenceot.preprocessing import Preprocessing, median_pair_scale, squared_euclidean  # noqa: E402
-from methods import EPSILON, METHODS  # noqa: E402
+from methods import EPSILON, METHODS, STRATEGIES  # noqa: E402
 from traditional_ot.balanced import balanced_ot  # noqa: E402
 
 SEED, N_HVG, N_PCS = 20260831, 2000, 30
 UNLABELLED, OTHER = "family unlabelled", "other"
 KP = Path("/scratch/10119/ghzheng/OT_project/kp_tracer_confidenceot")
 LV = Path("/scratch/10119/ghzheng/OT_project/lineage_validation")
+# The existing infercnvpy exports (49_infercnvpy_unit.py), read as 02_run_pair.py --cnv-root reads them; not recomputed.
+KP_CNV = KP / "cnv_profiles" / "infercnvpy_mouse"
+QUINN_CNV = Path("/scratch/10119/ghzheng/OT_project/quinn2021_confidenceot/cnv_profiles/infercnvpy_experiment")
+
+
+def load_run_pair():
+    """02_run_pair.py as a module, for its cnv_coordinates (the shipped CNV representation, used unchanged)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("run_pair_02", REPO / "cancer_metastasis" / "02_run_pair.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def side_paths(row: pd.Series, side: str) -> list[str]:
@@ -200,10 +224,15 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--cases", type=Path, default=HERE / "inputs" / "cases.tsv")
     parser.add_argument("--inputs", type=Path, default=HERE / "inputs", help="family_cells.tsv.gz and subclones.tsv")
+    parser.add_argument("--strategy", choices=tuple(STRATEGIES), default="rna",
+                        help="rna (default, the first runs), cnv or rna_cnv; --out is that strategy's folder")
     parser.add_argument("--kp-root", type=Path, default=KP)
     parser.add_argument("--lv-root", type=Path, default=LV)
+    parser.add_argument("--kp-cnv-root", type=Path, default=None, help="default <kp-root>/cnv_profiles/infercnvpy_mouse")
+    parser.add_argument("--quinn-cnv-root", type=Path, default=QUINN_CNV)
     args = parser.parse_args()
-    globals().update(KP=args.kp_root, LV=args.lv_root)
+    globals().update(KP=args.kp_root, LV=args.lv_root, KP_CNV=args.kp_cnv_root or args.kp_root / "cnv_profiles" / "infercnvpy_mouse",
+                     QUINN_CNV=args.quinn_cnv_root)
     pair = pd.read_csv(args.cases, sep="\t", dtype=str).iloc[args.index]
     if int(pair["index"]) != args.index:
         raise ValueError("cases.tsv row order does not match its index column")
@@ -212,16 +241,20 @@ def main() -> None:
         sys.exit(f"{out}/SUCCESS exists")
     out.mkdir(parents=True, exist_ok=True)
     (out / "FAILED.json").unlink(missing_ok=True)  # a retry starts clean; the earlier reason stays in the log
+    # RUNNING names this SLURM job while the task runs, so submit_full.sh never submits the case twice.
+    (out / "RUNNING").write_text(os.environ.get("SLURM_JOB_ID", "local") + "\n", encoding="utf-8")
     started = time.perf_counter()
     try:
         run(args, pair, out)
     except BaseException as error:  # recorded, never swallowed: the task still exits non-zero
         (out / "FAILED.json").write_text(json.dumps({
-            "case_id": pair["case_id"], "index": args.index, "error": f"{type(error).__name__}: {error}",
+            "case_id": pair["case_id"], "index": args.index, "strategy": args.strategy, "error": f"{type(error).__name__}: {error}",
             "traceback": traceback.format_exc(), "seconds": time.perf_counter() - started,
             "job": os.environ.get("SLURM_JOB_ID", ""), "array_job": os.environ.get("SLURM_ARRAY_JOB_ID", ""),
             "array_task": os.environ.get("SLURM_ARRAY_TASK_ID", "")}, indent=1), encoding="utf-8")
         raise
+    finally:
+        (out / "RUNNING").unlink(missing_ok=True)
 
 
 def run(args, pair: pd.Series, out: Path) -> None:
@@ -239,29 +272,58 @@ def run(args, pair: pd.Series, out: Path) -> None:
     pd.concat([pd.DataFrame({"side": side, "cell": d.obs_names, "site": s, "total_counts_raw": total(r), "total_counts_ds": total(d)})
                for side, r, d, s in (("source", s_raw, s_ds, s_site), ("target", t_raw, t_ds, t_site))]).to_csv(
         out / "cells.tsv.gz", sep="\t", index=False, compression="gzip")
+    strategy = args.strategy
+    cnv = None
+    if strategy != "rna":  # the shipped CNV PCA, once: it does not depend on the method (cell ids are the same)
+        cnv_root = KP_CNV if pair["dataset"] == "KPTracer" else QUINN_CNV
+        cs, ct, cnv_record = load_run_pair().cnv_coordinates(cnv_root, pair["dataset"], pair["mouse"], s_ds.obs_names.astype(str),
+                                                             t_ds.obs_names.astype(str), n_pcs=N_PCS, seed=SEED + args.index)
+        cnv = (cs, ct, {**cnv_record, "cnv_seed": SEED + args.index, "cnv_root": str(cnv_root)})
+        if strategy == "cnv":
+            np.savez_compressed(out / "coordinates_cnv.npz", source=cs, target=ct, source_ids=np.asarray(s_ds.obs_names, dtype=str),
+                                target_ids=np.asarray(t_ds.obs_names, dtype=str))
     plans = {}
     for method, spec_m in METHODS.items():
         label, kind, solver = spec_m["preprocessing"], spec_m["counts"], spec_m["solver"]
-        cfg = Preprocessing.from_label(label)
         src, tgt = (s_raw, t_raw) if kind == "raw" else (s_ds, t_ds)
-        xs, xt, hvg, record = prepare_joint_representation(
-            src, tgt, n_hvg=N_HVG, n_pcs=N_PCS, seed=SEED + args.index, representation=cfg.normalisation,
-            rank_top_n=cfg.rank_top_n, minimum_detection_rate=0.0, cost=cfg.cost, equalise_depth=cfg.equalise_depth,
-            regress_out=cfg.regress_out, regress_on_ranks=cfg.regress_on_ranks, scale_genes=cfg.scale_genes,
-            label_stem=cfg.label_stem)
-        if record.get("label") != label:
-            raise RuntimeError(f"{label}: the representation built {record.get('label')!r}")
+        meta = {"method": method, "strategy": strategy, "representation": STRATEGIES[strategy]["representation"],
+                "source_cells": int(src.n_obs), "target_cells": int(tgt.n_obs), "scale_seed": SEED + args.index * 104729,
+                "cost": "squared_euclidean / median_pair_scale"}
+        if strategy == "cnv":
+            xs, xt = cnv[0], cnv[1]
+            meta.update(cnv_record=cnv[2], rna_preprocessing="not used (the CNV path reads no RNA representation)")
+        else:
+            cfg = Preprocessing.from_label(label)
+            xs, xt, hvg, record = prepare_joint_representation(
+                src, tgt, n_hvg=N_HVG, n_pcs=N_PCS, seed=SEED + args.index, representation=cfg.normalisation,
+                rank_top_n=cfg.rank_top_n, minimum_detection_rate=0.0, cost=cfg.cost, equalise_depth=cfg.equalise_depth,
+                regress_out=cfg.regress_out, regress_on_ranks=cfg.regress_on_ranks, scale_genes=cfg.scale_genes,
+                label_stem=cfg.label_stem)
+            if record.get("label") != label:
+                raise RuntimeError(f"{label}: the representation built {record.get('label')!r}")
+            meta.update(preprocessing=label, counts=kind, configuration=dataclasses.asdict(cfg), representation_record=record,
+                        n_hvg=N_HVG, n_pcs=N_PCS, representation_seed=SEED + args.index, n_hvg_used=int(len(hvg)))
+            if strategy == "rna":
+                np.savez_compressed(out / f"coordinates_{label}.npz", source=xs, target=xt,
+                                    scale=median_pair_scale(xs, xt, rng=np.random.default_rng(SEED + args.index * 104729)),
+                                    hvg=np.asarray(hvg, dtype=str), source_ids=np.asarray(src.obs_names, dtype=str),
+                                    target_ids=np.asarray(tgt.obs_names, dtype=str))
+            else:  # rna_cnv, as 02_run_pair.py: each block divided by the root of its median pair cost
+                block_rng = np.random.default_rng(SEED + args.index * 104729 + 1)
+                rna_scale = median_pair_scale(xs, xt, rng=block_rng)
+                cnv_scale = median_pair_scale(cnv[0], cnv[1], rng=block_rng)
+                xs = np.hstack([xs / np.sqrt(rna_scale), cnv[0] / np.sqrt(cnv_scale)]).astype(np.float32)
+                xt = np.hstack([xt / np.sqrt(rna_scale), cnv[1] / np.sqrt(cnv_scale)]).astype(np.float32)
+                meta.update(cnv_record=cnv[2], rna_block_scale=float(rna_scale), cnv_block_scale=float(cnv_scale))
+                np.savez_compressed(out / f"coordinates_rna_cnv__{label}.npz", source=xs, target=xt, hvg=np.asarray(hvg, dtype=str),
+                                    source_ids=np.asarray(src.obs_names, dtype=str), target_ids=np.asarray(tgt.obs_names, dtype=str))
         scale = median_pair_scale(xs, xt, rng=np.random.default_rng(SEED + args.index * 104729))
-        np.savez_compressed(out / f"coordinates_{label}.npz", source=xs, target=xt, scale=scale, hvg=np.asarray(hvg, dtype=str),
-                            source_ids=np.asarray(src.obs_names, dtype=str), target_ids=np.asarray(tgt.obs_names, dtype=str))
-        meta = {"method": method, "preprocessing": label, "counts": kind, "configuration": dataclasses.asdict(cfg),
-                "representation_record": record, "n_hvg": N_HVG, "n_pcs": N_PCS, "representation_seed": SEED + args.index,
-                "scale_seed": SEED + args.index * 104729, "cost": "squared_euclidean / median_pair_scale", "cost_scale": float(scale),
-                "n_hvg_used": int(len(hvg)), "source_cells": int(xs.shape[0]), "target_cells": int(xt.shape[0])}
+        meta["cost_scale"] = float(scale)
         (out / method).mkdir(exist_ok=True)
         (out / method / "preprocessing.json").write_text(json.dumps(meta, indent=1, default=str), encoding="utf-8")
         P, info = solve(squared_euclidean(xs, xt) / scale, solver)
-        info.update(method=method, preprocessing=label, counts=kind, solver=solver, epsilon=EPSILON, cost_scale=float(scale),
+        info.update(method=method, strategy=strategy, preprocessing=label if strategy != "cnv" else "cnv (no RNA preprocessing)",
+                    counts=kind, solver=solver, epsilon=EPSILON, cost_scale=float(scale),
                     n_source=int(P.shape[0]), n_target=int(P.shape[1]), solver_call=METHODS[method]["solver_call"],
                     rejection=METHODS[method]["rejection"])
         print(json.dumps(info), flush=True)

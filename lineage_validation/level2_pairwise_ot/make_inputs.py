@@ -10,7 +10,8 @@ is included; none is dropped for being hard to evaluate (the scorer marks those 
                       sites_left_out (json), estimated_entries, resource (standard / large)
   subclones.tsv       name, level, subclone of every family in cases.tsv
   family_cells.tsv.gz name, dataset, mouse, cell_id, site, reliable, L1, L2 (every family cell, both sides)
-  run_manifest.tsv    one row per case x method (A_standard_OT, B_our_OT; methods.py): the dry-run manifest
+  run_manifest.tsv    one row per case x strategy (rna, cnv, rna_cnv) x method (A_standard_OT, B_our_OT;
+                      methods.py): the dry-run manifest, 6 couplings per case
 A case is one plan from a primary to its pooled metastases:
   KP-Tracer: one case per eligible family; source = the family's primary tumour; target = every metastatic
              site with >= 20 reliable family cells carrying a level-1 subclone label.
@@ -33,7 +34,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from methods import EPSILON, METHODS  # noqa: E402
+from methods import EPSILON, METHODS, STRATEGIES  # noqa: E402
 
 DEFS = HERE.parent / "within_family_subclones" / "output"
 MIN_SITE_CELLS = 20
@@ -99,11 +100,15 @@ def main() -> None:
         fam = cells[cells["name"].isin(r["families"].split(";")) & cells["reliable"].eq("True")]
         fam = fam[[x in l1[n] for n, x in zip(fam["name"], fam["L1"])]]
         by_site = {s: int(c) for s, c in fam["site"].value_counts().sort_index().items()}
-        for method, m in METHODS.items():
-            manifest.append({"index": r["index"], "case_id": r["case_id"], "method": method, **m, "epsilon": EPSILON,
-                             "source_site": r["source_site"], "target_sites": r["target_sites"], "families": r["families"],
-                             "resource": r["resource"], "level1_labelled_family_cells_by_site": json.dumps(by_site),
-                             "output": f"<root>/level2_pairwise_ot/full/{r['case_id']}/{method}"})
+        for strategy, s in STRATEGIES.items():
+            for method, m in METHODS.items():
+                manifest.append({"index": r["index"], "case_id": r["case_id"], "strategy": strategy, "method": method,
+                                 "preprocessing": m["preprocessing"] if strategy != "cnv" else "cnv (no RNA preprocessing)",
+                                 "counts": m["counts"], "solver": m["solver"], "representation": s["representation"],
+                                 "solver_call": m["solver_call"], "rejection": m["rejection"], "epsilon": EPSILON,
+                                 "source_site": r["source_site"], "target_sites": r["target_sites"], "families": r["families"],
+                                 "resource": r["resource"], "level1_labelled_family_cells_by_site": json.dumps(by_site),
+                                 "output": f"<root>/level2_pairwise_ot/{s['folder']}/{r['case_id']}/{method}"})
     pd.DataFrame(manifest).to_csv(out / "run_manifest.tsv", sep="\t", index=False, lineterminator="\n")
     pd.set_option("display.width", 250)
     print(cases.drop(columns=["families"]).to_string(index=False))

@@ -1,10 +1,23 @@
-PASS  run_pairwise index 0 exits 0
-PASS  run_pairwise index 1 exits 0
+PASS  run_pairwise rna index 0 exits 0
+PASS  run_pairwise rna index 1 exits 0
+PASS  run_pairwise cnv index 0 exits 0
+PASS  run_pairwise cnv index 1 exits 0
+PASS  run_pairwise rna_cnv index 0 exits 0
+PASS  run_pairwise rna_cnv index 1 exits 0
+PASS  no RUNNING marker is left behind, after success or failure  ([])
+PASS  rna KPTracer_M__M_T1__family_metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  rna Quinn2021_Z__LL__metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  cnv KPTracer_M__M_T1__family_metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  cnv Quinn2021_Z__LL__metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  rna_cnv KPTracer_M__M_T1__family_metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  rna_cnv Quinn2021_Z__LL__metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
+PASS  cnv: the coordinates are exactly 02_run_pair.py:cnv_coordinates on the case's cells
+PASS  cnv: A and B share the representation (same cost scale) and differ in the solver only
+PASS  rna_cnv: the CNV block is the shipped CNV PCA / sqrt(its median pair cost), the same in A and B
+PASS  rna_cnv: the RNA blocks differ between A and B (their own preprocessing)
 PASS  a failing case exits non-zero, writes FAILED.json with the error and traceback, and no SUCCESS  (ValueError: target: no site with >= 20 cells)
 PASS  KP: source = the 330 equalised cells (raw-only cells left out), target 120 K1 + 60 K2
-PASS  KPTracer_M__M_T1__family_metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
 PASS  KPTracer_M__M_T1__family_metastases: A and B use the same source and target cells in the same order
-PASS  Quinn2021_Z__LL__metastases: exactly two OT runs, A_standard_OT and B_our_OT  (['A_standard_OT', 'B_our_OT'])
 PASS  Quinn2021_Z__LL__metastases: A and B use the same source and target cells in the same order
 PASS  A_standard_OT: logcpm_noscale on raw counts, Balanced OT, marginals exact  (row 1.3e-09, col 3.4e-15)
 PASS  A_standard_OT: group masses sum to the column mass and match the saved plan
@@ -16,25 +29,35 @@ PASS  B_our_OT: source groups 240 / 60 / 30 unlabelled / 0 other
 PASS  Quinn: the whole metastases side, sites read off the raw file (80 M1 + 40 M2)
 PASS  Quinn: the other clone's 50 LL cells are 'other'
 PASS  score_pairwise exits 0
-PASS  KP: 160 family targets scored, 20 foreign not
+PASS  summary covers the three strategies  (['cnv', 'rna', 'rna_cnv'])
+PASS  KP: 160 family targets scored, 20 foreign not (every strategy and method)
 PASS  per-site table: K1 holds the 100 L1.2 cells, K2 the 60 L1.1 cells
-PASS  comparison.tsv: one row per case and family / level (KP L1, Quinn L1, Quinn L2), A and B side by side with B - A
-PASS  a one-subclone family level is kept and marked not_evaluable with its reason
+PASS  comparison.tsv: one row per strategy, case and family / level (3 x: KP L1, Quinn L1, Quinn L2), A and B with B - A
+PASS  comparison_by_strategy.tsv: the six couplings of each family side by side
+PASS  a one-subclone family level is kept and marked not_evaluable with its reason (every strategy)
 PASS  the two-subclone levels are evaluable
 PASS  coverage: every labelled family target cell is scored here (coverage 1)
-PASS  run_status.tsv: 2 cases ok for both methods, the broken one failed for both with its recorded error
-PASS  comparison_overview.tsv: level 1 counts 2 evaluable families
+PASS  run_status.tsv: cases 0, 1 ok in every strategy; case 2 failed (rna, with its error) and missing (cnv, rna_cnv: not run)
+PASS  comparison_overview.tsv: level 1 counts 2 evaluable families in each strategy
 PASS  identity: under BOT the mean of S_B over all target cells is B's source cell share (60/330)  (0.181818 vs 0.181818)
-PASS  planted rare subclone L1.2 (20%) recovered by the enrichment rule by both methods (> 0.8; chance 0.5)  (       method  balanced_accuracy_enrichment
-A_standard_OT                           1.0
-     B_our_OT                           1.0
-A_standard_OT                           1.0
-     B_our_OT                           1.0)
-PASS  own-subclone log2 enrichment > 0 for both methods  (0.53 0.69 0.38 0.43)
+PASS  planted rare subclone L1.2 (20%) recovered by the enrichment rule, both methods, every strategy (> 0.8; chance 0.5)  (strategy        method  balanced_accuracy_enrichment
+     rna A_standard_OT                           1.0
+     rna      B_our_OT                           1.0
+     rna A_standard_OT                           1.0
+     rna      B_our_OT                           1.0
+     cnv A_standard_OT                           1.0
+     cnv      B_our_OT                           1.0
+     cnv A_standard_OT                           1.0
+     cnv      B_our_OT                           1.0
+ rna_cnv A_standard_OT                           1.0
+ rna_cnv      B_our_OT                           1.0
+ rna_cnv A_standard_OT                           1.0
+ rna_cnv      B_our_OT                           1.0)
+PASS  own-subclone log2 enrichment > 0 for both methods, every strategy  (0.53 0.69 0.38 0.43 0.70 1.13 0.79 1.05 0.70 0.94 0.78 0.93)
 PASS  KP, A (BOT): pi of L1.2 = its cell share within the family (60/330)
 PASS  KP, B (UOT): pi of L1.2 is the plan's actual row-mass share, not the cell share  (pi 0.2296, cell share 0.1818)
 PASS  cases.tsv: every eligible family of the systematic audit appears exactly once (none dropped)  (26 families in 9 cases, 26 eligible)
 PASS  family_cells.tsv.gz and subclones.tsv cover exactly the families of cases.tsv  (26 / 26 / 26)
-PASS  run_manifest.tsv: every case has exactly A_standard_OT and B_our_OT, as methods.py defines them  (18 rows for 9 cases)
+PASS  run_manifest.tsv: every case x strategy (rna, cnv, rna_cnv) has exactly A_standard_OT and B_our_OT: 6 couplings per case  (54 rows for 9 cases)
 
-34 passed, 0 failed
+49 passed, 0 failed

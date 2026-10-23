@@ -6,7 +6,7 @@
 #SBATCH -A MCB26031
 # One Level 2 case per array task: SLURM_ARRAY_TASK_ID is the row index of inputs/cases.tsv, and
 # run_pairwise.py makes exactly the two OT runs (A_standard_OT, B_our_OT) in it. Submitted by submit_full.sh,
-# which sets the time limit per resource class, the log paths and L2_OUT. No set -u, as everywhere in this repo.
+# which sets the time limit per resource class, the log paths, L2_OUT and L2_STRATEGY (rna, cnv, rna_cnv). No set -u, as everywhere in this repo.
 set -eo pipefail
 
 source /home1/10119/ghzheng/.bashrc
@@ -15,6 +15,6 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 cd "$repo"
 export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo
 index=${SLURM_ARRAY_TASK_ID:?not an array task}
-echo "== $(date -Iseconds) job ${SLURM_ARRAY_JOB_ID}_${index} host $(hostname) commit $(git rev-parse --short HEAD) case $index"
-python lineage_validation/level2_pairwise_ot/run_pairwise.py --index "$index" --out "${L2_OUT:?}"
+echo "== $(date -Iseconds) job ${SLURM_ARRAY_JOB_ID}_${index} host $(hostname) commit $(git rev-parse --short HEAD) strategy ${L2_STRATEGY:-rna} case $index"
+python lineage_validation/level2_pairwise_ot/run_pairwise.py --index "$index" --out "${L2_OUT:?}" --strategy "${L2_STRATEGY:-rna}"
 echo "== $(date -Iseconds) done case $index"

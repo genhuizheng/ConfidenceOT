@@ -1,6 +1,6 @@
 # Level 2: within-family subclone identification, Standard OT workflow vs Our OT workflow
 
-Status: **fixed 2026-10-22, before any Level 2 coupling was computed.** Simplified by the user the same day, still before any coupling, to exactly two OT runs per case, and run on every eligible family (no pilot).
+Status: **fixed 2026-10-22, before any Level 2 coupling was computed.** Simplified by the user the same day, still before any coupling, to exactly two OT runs per case and strategy, run on every eligible family (no pilot), over three strategies (RNA, CNV, RNA+CNV).
 - An exploratory biological application, separate from the frozen protocol (`../VALIDATION_PROTOCOL.md`, unchanged) and from the earlier subclone analysis and its audit (kept as they are). Level 1 is not re-run.
 - Subclones are the frozen CRISPR subclones of `../within_family_subclones/SUBCLONE_RULES.md` (a545f1c), recomputed by the same code.
 - Nothing here is tuned on CRISPR labels. A later change is a dated section at the end, marked post hoc.
@@ -34,6 +34,27 @@ Level 1 already tells which primary and metastases are related (same CRISPR fami
 - With `backbone="uot"` the plan stays KL-relaxed UOT. On the test cost its total mass is 0.82 and the largest row-marginal deviation is 62% of 1/n.
 - Only `backbone="balanced"` with (0, 0) equals `balanced_ot` (marginal residual 5e-15). Level 2 does not use it; Method A uses `balanced_ot` itself.
 
+## Strategies: three representations × the two methods = 6 couplings per family
+
+The strategy is the representation the cost is built from, exactly as `02_run_pair.py --representation-source` builds it. The CNV profiles are the existing infercnvpy exports (`49_infercnvpy_unit.py`; KP-Tracer `infercnvpy_mouse`, Quinn `infercnvpy_experiment`), not recomputed. A and B are the two workflows, not aliases of strategies.
+
+| Strategy | A, Standard OT | B, Our OT | Output folder |
+|---|---|---|---|
+| RNA-only | `logcpm_noscale` coordinates (raw counts) → BOT | `ranknm256_noscale_ds_cos` coordinates (equalised counts) → UOT, budget 0 | `full/` |
+| CNV-only | CNV PCA → BOT | the **same** CNV PCA → UOT, budget 0 (A and B differ only in the solver) | `full_cnv/` |
+| RNA+CNV | [logcpm coordinates ‖ CNV PCA] → BOT | [ranknm256_ds_cos coordinates ‖ CNV PCA] → UOT, budget 0 | `full_rna_cnv/` |
+
+- **CNV PCA** (`cnv_coordinates`, called unchanged): stored profile − 1 → joint PCA of the case's source and target cells, 30 components, seed 20260831 + index.
+- **RNA+CNV:** each block divided by the root of its own median pair cost (seed 20260831 + index × 104729 + 1), so each contributes a median cost of 1.
+- **Cost:** squared Euclidean / `median_pair_scale`, as for RNA.
+- **The "− 1" changes nothing** (`strategy_check/README.md`).
+  - The export stores infercnvpy's `X_cnv` + 1, and on the 16 real units the median is 1.0000, with 87–89% of entries exactly 1.
+  - Coordinates change by ≤ 7.5e-9 and the cost by ≤ 2.4e-7 (float32).
+- **The two-step strategies (CNV→RNA, RNA→CNV) are not run.**
+  - Without rejection, step 1 keeps every cell under both methods, so step 2 is exactly RNA-only or CNV-only (max |Δ| 0; proof and check in `strategy_check/README.md`).
+  - They are reported as equivalent, not recomputed. No new two-stage method is defined.
+- Every case has the 6 runs in `inputs/run_manifest.tsv` (54 runs). The RNA-only results already on disk are kept and not resubmitted.
+
 ## Cases (full run, every eligible family)
 
 One plan per case, from the primary to all the family's metastatic sites pooled (user decision 2026-10-22, section below). **Every** family / clone with `subclone_structure_eligible = True` in the systematic lineage audit (`../within_family_subclones/output/feasibility.tsv`) is run; none is dropped (`inputs/cases.tsv`, made by `make_inputs.py`; `test_pipeline.py` checks that every eligible family appears exactly once). That is 26 families in 9 cases:
@@ -47,24 +68,25 @@ Case composition:
   - Quinn: the lineage-validation metastases side (every tissue with ≥ 20 cells), because every tissue holds cells of every clone.
   - A site without an equalised file, or with < 20 malignant cells in it, is left out and recorded (`sites.json`).
   - The rule reads CRISPR composition only (`make_inputs.py`). Sites left out by it are listed in `cases.tsv` (`sites_left_out`): 3454 Rib (10), K1 (1); 3457 T4 L2 (15).
-- Each case has exactly two OT runs, A and B (`inputs/run_manifest.tsv`, 18 runs).
+- Each case has exactly two OT runs, A and B, per strategy: 6 per case (`inputs/run_manifest.tsv`, 54 runs).
 - **Cases that cannot be scored as a multi-class problem are run all the same.** A family / level whose scored cells hold fewer than two true subclones, or that has fewer than two candidates, is reported as `not_evaluable` with its reason. It is never removed. 3457 T1 is known in advance to be one of these.
 
 ## Running (TACC, `submit_full.sh`)
 
-- **SLURM.** One array per resource class of `cases.tsv`; each task is one case (`level2_task.slurm` → `run_pairwise.py`), on one whole gg node, so the node's memory.
+- **SLURM.** One array per strategy and resource class of `cases.tsv`; each task is one case of one strategy (`level2_task.slurm` → `run_pairwise.py --strategy`), on one whole gg node, so the node's memory.
   - `standard`: 12 h.
   - `large`: 48 h. A case is large when (primary family cells) × (metastatic family cells) > 2 × 10⁶, a lower bound on the plan size, so 3724 T1, Quinn 30k and Quinn 5k.
   - The array tasks plus one scoring job count against the 40-job cap, which is checked before submitting.
-- **Scoring.** The scoring job (`afterany`) runs `score_pairwise.py` on whatever finished, then packs the small files (no couplings or coordinates) for download.
-- **Failures.** A failing task writes `FAILED.json` (error, traceback, SLURM ids) and exits non-zero. `run_status.tsv` lists every case × method as ok / failed / missing with its reason.
+- **Scoring.** The scoring job (`afterany`) runs `score_pairwise.py` on every strategy found on disk, then packs the small files (no couplings or coordinates) for download. `--score-only` submits one scoring job after every Level 2 job still queued.
+- **Failures.** A failing task writes `FAILED.json` (error, traceback, SLURM ids) and exits non-zero. `run_status.tsv` lists every strategy × case × method as ok / failed / missing with its reason.
   - `submit_full.sh --only i,j` resubmits those cases with the same parameters. A case with SUCCESS is never resubmitted.
+  - A running task writes `RUNNING` (its job id). A case whose job is still queued is not submitted again, and nothing is submitted while a job of a requested strategy is queued.
   - Nothing is skipped silently and no parameter is changed on retry.
 - **Saved for Level 3** (per case), all on TACC:
   - `cells.tsv.gz`: cell ids and sites in plan order;
-  - `coordinates_<label>.npz`;
+  - `coordinates_<label>.npz` (rna), `coordinates_cnv.npz` (cnv), `coordinates_rna_cnv__<label>.npz` (rna_cnv);
   - `<method>/coupling.npz`;
-  - `<method>/preprocessing.json`: configuration, representation record, seeds, cost scale;
+  - `<method>/preprocessing.json`: strategy, configuration, representation / CNV record, block scales, seeds, cost scale;
   - `<method>/diagnostics.json`: convergence, mass, marginals, gates;
   - the per-target-cell subclone masses.
 
@@ -96,8 +118,9 @@ Case composition:
   - `coverage_scored`: scored cells / family target cells.
   - `mean_family_mass_share`: mean over scored cells of the share of their incoming mass that comes from their own family / clone.
 - **Outputs (`score_pairwise.py`):**
-  - `comparison.tsv`: one row per case × family × level, A, B and B − A;
-  - `comparison_overview.tsv`: per level and metric over the evaluable families: medians of A, B and B − A, and how many families have B higher, A higher or equal;
+  - `comparison.tsv`: one row per strategy × case × family × level, A, B and B − A;
+  - `comparison_by_strategy.tsv`: the six couplings of each family side by side (balanced accuracy, rare-subclone recall);
+  - `comparison_overview.tsv`: per strategy, level and metric over the evaluable families: medians of A, B and B − A, and how many families have B higher, A higher or equal;
   - `per_site.tsv`, `per_subclone.tsv`, `confusion.tsv`, `summary.tsv`, `diagnostics.tsv`, `run_status.tsv`.
 
 No test statistic; cells are not pooled over cases.
@@ -138,3 +161,10 @@ Chosen by the user after the identity above ("Pool the family's metastases"). Th
 - Not-evaluable cases are kept and marked.
 - SLURM arrays within the submission limits; failures recorded and retried individually, never skipped or re-parameterised.
 - No new method and no change of the analysis on intermediate results. Level 1 is not re-run.
+
+## 2026-10-22, decision (user, after the RNA-only runs were submitted): three strategies
+
+- The five-strategy framework of Level 1 is kept as three independent strategies × A / B: RNA-only, CNV-only and RNA+CNV, 6 couplings per family (section "Strategies").
+- CNV→RNA and RNA→CNV are strictly equivalent to RNA-only and CNV-only without rejection. They are documented, not recomputed, and no new two-stage method is designed.
+- The CNV preprocessing is the existing infercnvpy one and is used unchanged, after the shift audit on the real exports (`strategy_check/`).
+- The RNA-only results already on disk are kept.
