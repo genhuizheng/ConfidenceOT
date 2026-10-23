@@ -19,6 +19,14 @@
 #   bash benchmark/tacc/submit_log1p_dimensions.sh ot --acceptance 0.90 [--arms "a b"] [--dry-run]
 #   bash benchmark/tacc/submit_log1p_dimensions.sh uot [--arms "a b"] [--dry-run]
 #   bash benchmark/tacc/submit_log1p_dimensions.sh score [--dry-run]
+#   bash benchmark/tacc/submit_log1p_dimensions.sh all [--ot-tasks 9] [--uot-tasks 2] [--dry-run]
+#
+# all    everything in one submission, compressed to 38 tasks so it fits the 40-task cap: per
+#        acceptance ONE array over arms 1-4 together (one combined work list, 720 units, dealt round
+#        robin by size and arm so every task carries the same mix; 9 tasks of 80, 48 h each), UOT
+#        per arm in 2 tasks of 90 (afterany the 0.90 array; the pcc arm's runs exist, so it starts
+#        at once), then the scoring afterany everything. A unit already done is skipped, so the
+#        same command after a failure redoes only what is missing.
 #
 # ot     ConfidenceOT on arms 1-4 (default) at one acceptance, 9 tasks per arm. 0.90 writes runs/<arm>
 #        (the grid's convention, which the UOT stage reads), 0.95 / 0.99 runs_acceptance_<a>/<arm>.
@@ -38,11 +46,15 @@ stage=${1:-}
 shift || true
 acceptance=""
 arms=""
+ot_tasks=9
+uot_tasks=2
 dry_run=0
 while (( $# )); do
     case "$1" in
         --acceptance) acceptance=$2; shift 2 ;;
         --arms) arms=$2; shift 2 ;;
+        --ot-tasks) ot_tasks=$2; shift 2 ;;
+        --uot-tasks) uot_tasks=$2; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -74,7 +86,7 @@ if [[ "$stage" == status ]]; then
     echo "(of 180 pairs each)"
     exit 0
 fi
-[[ "$stage" == ot || "$stage" == uot || "$stage" == score ]] || { echo "stage: status, ot, uot or score" >&2; exit 2; }
+[[ "$stage" == ot || "$stage" == uot || "$stage" == score || "$stage" == all ]] || { echo "stage: status, ot, uot, score or all" >&2; exit 2; }
 test -f "$source_list" || { echo "no $source_list" >&2; exit 2; }
 
 submit() {
@@ -177,5 +189,76 @@ if [[ "$stage" == score ]]; then
     id=$(submit -p gg -N 1 -n 1 -c 16 -t 02:00:00 -A MCB26031 -J ld_score \
         -o "$logs/ld_score_%j.out" -e "$logs/ld_score_%j.err" --wrap "$job")
     echo "scoring: $id -> $out (and $root/comparator_metrics_log1p_dims.tgz)"
+fi
+
+if [[ "$stage" == all ]]; then
+    [[ -e "$out" ]] && { echo "$out exists; not rewritten" >&2; exit 2; }
+    n_new=$(wc -w <<< "$new_arms")
+    units=$(( n_new * 180 ))
+    ot_chunk=$(( (units + ot_tasks - 1) / ot_tasks ))
+    uot_chunk=$(( (180 + uot_tasks - 1) / uot_tasks ))
+    total=$(( 3 * ot_tasks + $(wc -w <<< "$all_arms") * uot_tasks + 1 ))
+    cap "$total"
+    # arms 1-4 in one list: every raw row once per arm, sorted by size, then dealt round robin
+    # into the tasks, so each contiguous chunk holds the same mix of sizes and arms
+    combined=$root/worklist_log1p_dims.csv
+    rows=$(awk -F',' -v OFS=',' -v arms="$new_arms" -v blocks="$ot_tasks" '
+        BEGIN { n_arms = split(arms, arm, " ") }
+        NR == 1 { next }
+        $4 == "raw" {
+            size = $3; sub(/^N/, "", size); sub(/_.*/, "", size)
+            for (k = 1; k <= n_arms; k++) { $4 = arm[k]; n[size]++; row[size, n[size]] = $0 }
+        }
+        END {
+            split("1000 5000 10000", order, " ")
+            total = 0
+            for (s = 1; s <= 3; s++) for (i = 1; i <= n[order[s]]; i++) all[++total] = row[order[s], i]
+            for (b = 0; b < blocks; b++) for (i = b + 1; i <= total; i += blocks) print all[i]
+        }' "$source_list")
+    count=$(printf '%s\n' "$rows" | grep -c . || true)
+    [[ "$count" -eq "$units" ]] || { echo "expected $units rows for the combined list, found $count" >&2; exit 2; }
+    if (( dry_run )); then
+        echo "DRY RUN  $count units -> $combined; per task: $(printf '%s\n' "$rows" | head -n "$ot_chunk" | awk -F',' '{print $4}' | sort | uniq -c | tr '\n' ' ')"
+    else
+        { head -n 1 "$source_list"; printf '%s\n' "$rows"; } > "$combined.tmp"
+        if [[ -f "$combined" ]] && ! cmp -s "$combined" "$combined.tmp"; then
+            echo "$combined exists and differs; not overwritten" >&2; rm -f "$combined.tmp"; exit 2
+        fi
+        mv "$combined.tmp" "$combined"
+    fi
+    ids=()
+    for acceptance in 0.90 0.95 0.99; do
+        acc_env=""
+        [[ "$acceptance" != 0.90 ]] && acc_env=",CONFIDENCEOT_BENCH_WITHIN_SIDE_ACCEPTANCE=$acceptance"
+        id=$(submit --array=0-$(( ot_tasks - 1 )) -t 48:00:00 -J ld_ot_$acceptance \
+            --export=ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_BENCH_ROOT=$root,CONFIDENCEOT_BENCH_WORKLIST=$combined,CONFIDENCEOT_BENCH_CHUNK=$ot_chunk,CONFIDENCEOT_BENCH_SAVE_EDGES=0$acc_env \
+            -o "$logs/ld_ot_${acceptance}_%A_%a.out" -e "$logs/ld_ot_${acceptance}_%A_%a.err" \
+            "$repo/benchmark/tacc/ot_array.slurm")
+        ids+=("$id")
+        [[ "$acceptance" == 0.90 ]] && ot090=$id
+        echo "ConfidenceOT arms 1-4 at $acceptance: $id ($ot_tasks tasks x $ot_chunk)"
+    done
+    for arm in $all_arms; do
+        if [[ "$arm" == "$pcc" ]]; then
+            list=$root/worklist_$pcc.csv; dependency=()
+            test -f "$list" || { echo "no $list" >&2; exit 2; }
+        else
+            list=$combined; dependency=(--dependency=afterany:$ot090)
+        fi
+        id=$(submit "${dependency[@]}" --array=0-$(( uot_tasks - 1 )) -t 48:00:00 -J ld_uot \
+            --export=ALL,CONFIDENCEOT_REPO=$repo,CONFIDENCEOT_BENCH_ROOT=$root,CONFIDENCEOT_BENCH_WORKLIST=$list,CONFIDENCEOT_SOLVER_LABEL=$arm,CONFIDENCEOT_SOLVER_CHUNK=$uot_chunk,CONFIDENCEOT_SOLVER_UOT_ONLY=1,CONFIDENCEOT_SOLVER_RUNS_DIR=$(runs_090 "$arm") \
+            -o "$logs/ld_uot_${arm}_%A_%a.out" -e "$logs/ld_uot_${arm}_%A_%a.err" \
+            "$repo/benchmark/tacc/solvers.slurm")
+        ids+=("$id")
+        echo "Vanilla UOT on $arm: $id ($uot_tasks tasks x $uot_chunk)"
+    done
+    arm_args=""
+    for arm in $all_arms; do arm_args="$arm_args --arm $arm"; done
+    # the counts go in the log first, so a scoring that ran on missing pairs says so
+    job="cd $repo && bash benchmark/tacc/submit_log1p_dimensions.sh status; source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; python benchmark/56_comparator_metrics.py $root $out --solvers-dir solvers_uot_only$arm_args && cd $root && tar czf comparator_metrics_log1p_dims.tgz comparator_metrics_log1p_dims && md5sum comparator_metrics_log1p_dims.tgz > comparator_metrics_log1p_dims.tgz.md5 && cat comparator_metrics_log1p_dims.tgz.md5"
+    after=$(IFS=:; echo "${ids[*]}")
+    id=$(submit --dependency=afterany:$after -p gg -N 1 -n 1 -c 16 -t 02:00:00 -A MCB26031 -J ld_score \
+        -o "$logs/ld_score_%j.out" -e "$logs/ld_score_%j.err" --wrap "$job")
+    echo "scoring: $id afterany all of the above -> $out ($total tasks in all)"
 fi
 echo "commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null || echo unknown)"
