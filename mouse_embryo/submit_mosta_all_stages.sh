@@ -3,8 +3,14 @@
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh prepare [--dry-run]
 #       The manifest and the common-depth equalisation, then the
-#       representations of every pair, then the equivalence check.  A step
-#       whose output is already complete is not redone.
+#       representations of every pair, then the equivalence check and the
+#       coupling check.  A step whose output is already complete is not redone.
+#
+#   bash mouse_embryo/submit_mosta_all_stages.sh coupling [--dry-run]
+#       The coupling check on its own (26_): the four smallest real pairs run
+#       through 23_ into coupling_verification/, and every saved coupling
+#       rebuilt from the files and checked.  Writes COUPLING_PASS or
+#       COUPLING_FAIL and coupling_verification/REPORT.md.
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh equivalence [--dry-run]
 #       The dense-against-blockwise check on the early pairs, on its own.
@@ -14,12 +20,19 @@
 #       Refuses unless equivalence/EQUIVALENCE_PASS exists for the device the
 #       run uses.  With MOSTA_GATE=float64-identity (cuda only) it instead
 #       accepts a recorded check in which every criterion-A (float64)
-#       comparison passed on all 52 test pairs, the configuration the run uses.  Then the OT workers (MOSTA_OT_JOBS jobs walking one pair
-#       list, largest pairs first) and, after them, the collection.
+#       comparison passed on all 52 test pairs, the configuration the run uses.
+#       Refuses too unless coupling_verification/COUPLING_PASS exists.  Then the
+#       OT workers (MOSTA_OT_JOBS jobs walking one pair list, largest pairs
+#       first) and, after them, the collection, and with MOSTA_COMPARE_WITH set
+#       the comparison against that run.
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh collect [--dry-run]
 #       The audit, tables, pseudobulks and download list again, for instance
 #       after a resubmission of run.
+#
+#   bash mouse_embryo/submit_mosta_all_stages.sh compare [--dry-run]
+#       27_: this run against MOSTA_COMPARE_WITH=<root of an earlier run>, every
+#       pair complete in both; written to comparison/<that run's name>/.
 #
 # MOSTA_PREPROCESSING names the representation (default ranknm256_noscale_ds_cos;
 # also logcpm, mosta_common.EXPECTED_PREPROCESSING); give each its own MOSTA_ROOT.
@@ -28,7 +41,15 @@
 # instead of rebuilding them, so both runs analyse the same bins; then builds this
 # run's representations and its own equivalence check.
 #
-#   MOSTA_PREPROCESSING=logcpm MOSTA_ROOT=.../mosta_all_stages_logcpm #   MOSTA_SHARED_INPUTS=.../mosta_all_stages bash mouse_embryo/submit_mosta_all_stages.sh prepare
+#   MOSTA_PREPROCESSING=logcpm MOSTA_ROOT=.../mosta_all_stages_logcpm \
+#   MOSTA_SHARED_INPUTS=.../mosta_all_stages bash mouse_embryo/submit_mosta_all_stages.sh prepare
+#
+# MOSTA_SHARED_REPRESENTATIONS=<root of a run with all its representations>, with
+# MOSTA_SHARED_INPUTS the same root: prepare also links that run's
+# representations (same MOSTA_PREPROCESSING; the label is checked) and copies its
+# equivalence record, then submits only the coupling check: a rerun of OT on
+# unchanged representations, nothing of the preprocessing recomputed.  The rerun
+# root must be new; the earlier run is only read.
 #
 # MOSTA_DEVICE picks the device for the equivalence check and the run; one run
 # uses one device for every pair.
@@ -63,17 +84,19 @@ data=${MOSTA_DATA:-/scratch/10119/ghzheng/OT_project/data}
 device=${MOSTA_DEVICE:-cuda}
 preprocessing=${MOSTA_PREPROCESSING:-ranknm256_noscale_ds_cos}
 shared=${MOSTA_SHARED_INPUTS:-}
+shared_representations=${MOSTA_SHARED_REPRESENTATIONS:-}
+compare_with=${MOSTA_COMPARE_WITH:-}
 representation_jobs=${MOSTA_REPRESENTATION_JOBS:-4}
 equivalence_shards=${MOSTA_EQUIVALENCE_SHARDS:-8}
 cap=${CONFIDENCEOT_JOB_CAP:-40}
 job=$repo/mouse_embryo/tacc_mosta_stage.slurm
 account=MCB26031
-names=mosta_prep,mosta_rep,mosta_equiv,mosta_equivm,mosta_ot,mosta_collect
+names=mosta_prep,mosta_rep,mosta_equiv,mosta_equivm,mosta_coupling,mosta_ot,mosta_collect,mosta_compare
 expected_pairs=464
 
 case "$phase" in
-    prepare|equivalence|run|collect) ;;
-    *) echo "usage: $0 prepare|equivalence|run|collect [--dry-run]" >&2; exit 2 ;;
+    prepare|equivalence|coupling|run|collect|compare) ;;
+    *) echo "usage: $0 prepare|equivalence|coupling|run|collect|compare [--dry-run]" >&2; exit 2 ;;
 esac
 case "$device" in
     cpu) compute=(-p gg -c 144); threads=144; ot_jobs=${MOSTA_OT_JOBS:-30} ;;
@@ -83,13 +106,15 @@ esac
 cpu_node=(-p gg -c 144)
 
 problems=0
-for path in "$job" "$repo/mouse_embryo/23_run_mosta_pair.py" "$repo/src/confidenceot/blockwise.py"; do
+for path in "$job" "$repo/mouse_embryo/23_run_mosta_pair.py" "$repo/src/confidenceot/blockwise.py" \
+    "$repo/mouse_embryo/mosta_coupling.py" "$repo/mouse_embryo/26_verify_coupling_reconstruction.py" \
+    "$repo/mouse_embryo/27_compare_mosta_runs.py"; do
     if [[ ! -f "$path" ]]; then
         echo "missing: $path  (git pull in $repo first)" >&2
         problems=1
     fi
 done
-if ! grep -q "equivalence_merge" "$job" 2> /dev/null; then
+if ! grep -q "coupling_check" "$job" 2> /dev/null; then
     echo "$job is older than this script: git pull in $repo first" >&2
     problems=1
 fi
@@ -98,6 +123,31 @@ if [[ -n "$shared" ]]; then
         [[ -e "$shared/$part" ]] || { echo "MOSTA_SHARED_INPUTS: missing $shared/$part" >&2; problems=1; }
     done
     [[ "$(cd "$shared" 2> /dev/null && pwd -P)" == "$(mkdir -p "$root" && cd "$root" && pwd -P)" ]] && { echo "MOSTA_SHARED_INPUTS is MOSTA_ROOT itself" >&2; problems=1; }
+fi
+if [[ -n "$shared_representations" ]]; then
+    if [[ "$shared_representations" != "$shared" ]]; then
+        echo "MOSTA_SHARED_REPRESENTATIONS needs MOSTA_SHARED_INPUTS set to the same root" >&2
+        problems=1
+    fi
+    found=$(ls "$shared_representations"/representations/*/REPRESENTATION_SUCCESS 2> /dev/null | wc -l) || found=0
+    if (( found < expected_pairs )); then
+        echo "MOSTA_SHARED_REPRESENTATIONS: $found of $expected_pairs representations complete in $shared_representations" >&2
+        problems=1
+    fi
+    sample=$(ls "$shared_representations"/representations/*/representation.json 2> /dev/null | head -n 1)
+    if [[ -z "$sample" ]] || ! grep -q "\"label\": \"$preprocessing\"" "$sample"; then
+        echo "MOSTA_SHARED_REPRESENTATIONS: $sample is not $preprocessing" >&2
+        problems=1
+    fi
+    [[ -f "$shared_representations/equivalence/report.csv" ]] || { echo "MOSTA_SHARED_REPRESENTATIONS: no equivalence/report.csv" >&2; problems=1; }
+fi
+if [[ -n "$compare_with" && ! -d "$compare_with/pairs" ]]; then
+    echo "MOSTA_COMPARE_WITH: no $compare_with/pairs" >&2
+    problems=1
+fi
+if [[ "$phase" == compare && -z "$compare_with" ]]; then
+    echo "compare needs MOSTA_COMPARE_WITH=<root of the earlier run>" >&2
+    problems=1
 fi
 if [[ "$root" == */mosta_all_stages && "$preprocessing" != ranknm256_noscale_ds_cos ]]; then
     echo "MOSTA_PREPROCESSING=$preprocessing would write into the production root $root; give it its own MOSTA_ROOT" >&2
@@ -164,7 +214,7 @@ clear_claims() {
 
 stage_args() {
     # $1 = stage. The environment every job of that stage gets.
-    echo "--export=ALL,MOSTA_STAGE=$1,MOSTA_ROOT=$root,MOSTA_DATA=$data,CONFIDENCEOT_REPO=$repo,MOSTA_DEVICE=$device,MOSTA_PREPROCESSING=$preprocessing"
+    echo "--export=ALL,MOSTA_STAGE=$1,MOSTA_ROOT=$root,MOSTA_DATA=$data,CONFIDENCEOT_REPO=$repo,MOSTA_DEVICE=$device,MOSTA_PREPROCESSING=$preprocessing,MOSTA_COMPARE_WITH=$compare_with"
 }
 
 check_cap() {
@@ -208,6 +258,20 @@ submit_equivalence() {
         "$(stage_args equivalence_merge)",MOSTA_THREADS=16 "$job" > /dev/null
 }
 
+submit_coupling() {
+    # $@ = optional dependency argument. Clears the previous coupling check's
+    # decision, then submits the check on $device.
+    if (( dry_run )); then
+        echo "would clear $root/coupling_verification/{COUPLING_PASS,COUPLING_FAIL}" >&2
+    else
+        rm -f -- "$root/coupling_verification/COUPLING_PASS" "$root/coupling_verification/COUPLING_FAIL"
+    fi
+    submit "coupling check (26_, $device)" \
+        "${compute[@]}" -t 06:00:00 -A "$account" -J mosta_coupling "$@" \
+        -o "$root/logs/coupling_%j.out" -e "$root/logs/coupling_%j.err" \
+        "$(stage_args coupling_check)",MOSTA_THREADS=$threads "$job" > /dev/null
+}
+
 equivalence_jobs() {
     if [[ "$device" == cuda ]]; then echo 1; else echo $(( equivalence_shards + 1 )); fi
 }
@@ -216,8 +280,31 @@ equivalence_jobs() {
 # exist before the first sbatch.
 (( dry_run )) || mkdir -p "$root/logs"
 
-if [[ "$phase" == prepare ]]; then
-    check_cap $(( representation_jobs + 1 + $(equivalence_jobs) ))
+if [[ "$phase" == prepare && -n "$shared_representations" ]]; then
+    # OT again on the representations of an earlier run: link, copy its
+    # equivalence record, check the saved couplings. Nothing is recomputed.
+    check_cap 1
+    for part in manifest equalisation equalised slices representations; do
+        if [[ -e "$root/$part" ]]; then
+            echo "$root/$part exists; left as it is" >&2
+        elif (( dry_run )); then
+            echo "would link $root/$part -> $shared_representations/$part" >&2
+        else
+            ln -s "$shared_representations/$part" "$root/$part"
+            echo "linked $root/$part -> $shared_representations/$part" >&2
+        fi
+    done
+    if (( dry_run )); then
+        echo "would copy $shared_representations/equivalence/{report.csv,summary.json} into $root/equivalence" >&2
+    elif [[ ! -f "$root/equivalence/report.csv" ]]; then
+        mkdir -p "$root/equivalence"
+        cp -p "$shared_representations/equivalence/report.csv" "$shared_representations/equivalence/summary.json" "$root/equivalence/"
+        printf 'copied from %s, %s\n' "$shared_representations/equivalence" "$(date --iso-8601=seconds)" > "$root/equivalence/COPIED_FROM"
+    fi
+    submit_coupling
+    echo "When the coupling check ends, read $root/coupling_verification/REPORT.md; submit run only after COUPLING_PASS." >&2
+elif [[ "$phase" == prepare ]]; then
+    check_cap $(( representation_jobs + 1 + $(equivalence_jobs) + 1 ))
     if [[ -n "$shared" ]]; then
         for part in manifest equalisation equalised slices; do
             if [[ -e "$root/$part" ]]; then
@@ -244,6 +331,7 @@ if [[ "$phase" == prepare ]]; then
     if (( ${#dependency[@]} == 0 && done_representations >= expected_pairs )); then
         echo "all $done_representations representations already done; not redone" >&2
         submit_equivalence
+        submit_coupling
     else
         clear_claims representation "$root/representations" REPRESENTATION_SUCCESS
         representation_ids=()
@@ -255,8 +343,16 @@ if [[ "$phase" == prepare ]]; then
         done
         after=$(IFS=:; echo "${representation_ids[*]}")
         submit_equivalence --dependency="afterany:$after"
+        submit_coupling --dependency="afterany:$after"
     fi
     echo "When the equivalence check ends, read $root/equivalence/summary.json; submit run only after it says PASS." >&2
+    echo "Read $root/coupling_verification/REPORT.md too; run also needs COUPLING_PASS." >&2
+fi
+
+if [[ "$phase" == coupling ]]; then
+    check_cap 1
+    submit_coupling
+    echo "When it ends, read $root/coupling_verification/REPORT.md; submit run only after COUPLING_PASS." >&2
 fi
 
 if [[ "$phase" == equivalence ]]; then
@@ -295,7 +391,13 @@ if [[ "$phase" == run ]]; then
         echo "the equivalence check that passed ran on cuda; check $device first" >&2
         (( dry_run )) || exit 3
     fi
-    check_cap $(( ot_jobs + 1 ))
+    if [[ ! -f "$root/coupling_verification/COUPLING_PASS" ]]; then
+        echo "no $root/coupling_verification/COUPLING_PASS: run the coupling check (phase coupling) and read its REPORT.md first" >&2
+        (( dry_run )) || exit 3
+    fi
+    compare_jobs=0
+    [[ -n "$compare_with" ]] && compare_jobs=1
+    check_cap $(( ot_jobs + 1 + compare_jobs ))
     clear_claims ot "$root/pairs" SUCCESS
     ot_ids=()
     for (( i = 1; i <= ot_jobs; i++ )); do
@@ -305,10 +407,24 @@ if [[ "$phase" == run ]]; then
             "$(stage_args ot)",MOSTA_THREADS=$threads,MOSTA_STOP_HOURS=40 "$job")")
     done
     after=$(IFS=:; echo "${ot_ids[*]}")
-    submit "collection (audit, tables, pseudobulks, download list)" \
+    collect_id=$(submit "collection (audit, tables, pseudobulks, download list)" \
         "${cpu_node[@]}" -t 24:00:00 -A "$account" -J mosta_collect --dependency="afterany:$after" \
         -o "$root/logs/collect_%j.out" -e "$root/logs/collect_%j.err" \
-        "$(stage_args collect)",MOSTA_THREADS=16 "$job" > /dev/null
+        "$(stage_args collect)",MOSTA_THREADS=16 "$job")
+    if [[ -n "$compare_with" ]]; then
+        submit "comparison against $compare_with" \
+            "${cpu_node[@]}" -t 08:00:00 -A "$account" -J mosta_compare --dependency="afterany:$collect_id" \
+            -o "$root/logs/compare_%j.out" -e "$root/logs/compare_%j.err" \
+            "$(stage_args compare)",MOSTA_THREADS=16 "$job" > /dev/null
+    fi
+fi
+
+if [[ "$phase" == compare ]]; then
+    check_cap 1
+    submit "comparison against $compare_with" \
+        "${cpu_node[@]}" -t 08:00:00 -A "$account" -J mosta_compare \
+        -o "$root/logs/compare_%j.out" -e "$root/logs/compare_%j.err" \
+        "$(stage_args compare)",MOSTA_THREADS=16 "$job" > /dev/null
 fi
 
 if [[ "$phase" == collect ]]; then

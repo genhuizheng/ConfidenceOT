@@ -22,7 +22,19 @@ every bin is used, with no per-side cap:
    blocks of a cost rebuilt from the coordinates (confidenceot/blockwise.py),
    with the same parameters and the same stopping rule.
 4. Summaries of the M4-E coupling on its retained x retained support and of
-   the balanced coupling everywhere, taken before the potentials are dropped.
+   the balanced coupling everywhere.
+5. The couplings themselves, as what determines them (mosta_coupling.py):
+   potentials.npz holds, for M4-E, M4-R and balanced OT, the two dual
+   potentials, the final gates, the weights, the rejection cost and epsilon,
+   with the bin ids in row order; coupling.json the representation they refer
+   to (path and SHA-256), the cost definition and scale, every solver setting
+   and the convergence record.  With representations/<pair_id>/representation.npz
+   these rebuild any block of any of the three couplings, entry for entry
+   (``mosta_coupling.reconstruct_coupling``), with no OT rerun.  Before the pair
+   is published the saved files are read back: the arrays must equal the
+   fits' bit for bit, and the row and column masses rebuilt from them must
+   match the in-memory M4-E and balanced summaries (coupling_check.json); a
+   mismatch fails the pair.
 
 ``--device`` picks the device and with it that device's production path.  The
 run uses one device for every pair.
@@ -51,6 +63,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mosta_coupling  # noqa: E402
 from mosta_common import (  # noqa: E402
     CALIBRATION_GRID_SIZE, CALIBRATION_MAX_BINS, EPSILON, LAMBDA,
     NULL_CALIBRATION_REPLICATES, NULL_VALIDATION_REPLICATES, PREPROCESSING_LABEL,
@@ -61,6 +74,11 @@ from mosta_common import (  # noqa: E402
 
 SUCCESS = "SUCCESS"
 FLOAT_FORMAT = "%.7g"
+# Read-back of the saved couplings (coupling_check.json): the rebuilt masses
+# against the in-memory summaries, relative to the largest mass.  Both come
+# from the same blocks of the same arithmetic; only the order of the column
+# sums across blocks differs.
+COUPLING_CHECK_TOLERANCE = 1e-12
 
 
 def side_table(layout: Layout, sample: str, expected_rows: int) -> pd.DataFrame:
@@ -205,7 +223,50 @@ def transition_rows(direction: str, method: str, own_categories: list[str], part
     return out
 
 
-def run_pair(layout: Layout, row: pd.Series, *, device: str, block_rows: int | None) -> Path:
+def relative_error(found: np.ndarray, expected: np.ndarray) -> float:
+    """max |found - expected| / max |expected|."""
+    scale = float(np.max(np.abs(expected))) if np.size(expected) else 0.0
+    return float(np.max(np.abs(found - expected)) / scale) if scale > 0 else float(np.max(np.abs(found), initial=0.0))
+
+
+def check_saved_coupling(staging: Path, representation: Path, fits: dict, co: dict, bot: dict, device: str) -> dict:
+    """Read the saved couplings back and hold them to the fits and the summaries."""
+    record = {"tolerance_relative_to_max": COUPLING_CHECK_TOLERANCE, "arrays_identical": {}, "masses": []}
+    with np.load(staging / mosta_coupling.POTENTIALS) as stored:
+        for method, fit in fits.items():
+            p = mosta_coupling.prefix(method)
+            record["arrays_identical"][method] = {
+                name: bool(np.array_equal(stored[f"{p}_{name}"], np.asarray(getattr(fit, name))))
+                for name in ("log_u", "log_v", "source_gate", "target_gate", "source_weights", "target_weights")
+            }
+            record["arrays_identical"][method]["rejection_cost"] = float(stored[f"{p}_rejection_cost"]) == float(fit.rejection_cost)
+            record["arrays_identical"][method]["epsilon"] = float(stored[f"{p}_epsilon"]) == float(fit.epsilon)
+    coupling = mosta_coupling.PairCoupling(staging, representation=representation, device=device)
+    for method, support, summary, keys in (
+        ("M4-E", "active", co, ("source_mass", "target_mass")),
+        ("M4-E", "all", co, ("source_total_mass", "target_total_mass")),
+        ("balanced", "all", bot, ("source_mass", "target_mass")),
+    ):
+        rows, columns = coupling.marginals(method, support=support)
+        for side, found, key in (("row", rows, keys[0]), ("column", columns, keys[1])):
+            error = relative_error(found, np.asarray(summary[key], dtype=np.float64))
+            record["masses"].append({"method": method, "support": support, "mass": side, "summary": key,
+                                     "relative_error": error, "pass": bool(error <= COUPLING_CHECK_TOLERANCE)})
+    identical = all(all(flags.values()) for flags in record["arrays_identical"].values())
+    record["pass"] = bool(identical and all(item["pass"] for item in record["masses"]))
+    write_json(staging / "coupling_check.json", record)
+    if not record["pass"]:
+        raise RuntimeError(f"the saved couplings do not read back: {staging / 'coupling_check.json'}")
+    return record
+
+
+def run_pair(layout: Layout, row: pd.Series, *, device: str, block_rows: int | None,
+             keep: dict | None = None) -> Path:
+    """Fit, summarise, save and check one pair into a staging directory.
+
+    ``keep``, when given, receives the in-memory fits, models, cost and
+    summaries (26_ compares the saved files against them).
+    """
     from confidenceot.blockwise import CoordinateCost, resolve_block_rows, transport_reductions
     import json
 
@@ -215,7 +276,9 @@ def run_pair(layout: Layout, row: pd.Series, *, device: str, block_rows: int | N
     representation_dir = layout.representation(pair_id)
     if not (representation_dir / "REPRESENTATION_SUCCESS").is_file():
         raise FileNotFoundError(f"no completed representation for {pair_id}")
-    stored = np.load(representation_dir / "representation.npz")
+    representation_file = representation_dir / "representation.npz"
+    representation_sha256 = mosta_coupling.sha256(representation_file)
+    stored = np.load(representation_file)
     source, target = stored["source"], stored["target"]
     representation = json.loads((representation_dir / "representation.json").read_text(encoding="utf-8"))
     if representation["preprocessing"]["label"] != PREPROCESSING_LABEL:
@@ -232,7 +295,8 @@ def run_pair(layout: Layout, row: pd.Series, *, device: str, block_rows: int | N
 
     fits = {}
     metrics = []
-    for method, model in models(rejection_cost, device).items():
+    fitted_models = models(rejection_cost, device)
+    for method, model in fitted_models.items():
         fit_started = time.perf_counter()
         fits[method] = model.fit_blockwise(cost, block_rows=rows_per_block)
         fit = fits[method]
@@ -365,6 +429,18 @@ def run_pair(layout: Layout, row: pd.Series, *, device: str, block_rows: int | N
         record["pair_seconds_shared"] = time.perf_counter() - started
     pd.DataFrame(metrics).to_csv(staging / "pair_metrics.csv", index=False)
     write_json(staging / "calibration.json", {**calibration.__dict__, **calibration_extra})
+    coupling_started = time.perf_counter()
+    coupling_files = mosta_coupling.save_coupling(
+        staging, fits, fitted_models, pair_id=pair_id,
+        representation_path=representation_file.relative_to(layout.root).as_posix(),
+        representation_sha256=representation_sha256,
+        representation_shapes=(source.shape, target.shape),
+        source_bin_ids=source_bins["bin_id"].to_numpy(dtype=str),
+        target_bin_ids=target_bins["bin_id"].to_numpy(dtype=str),
+        cost_scale=scale, block_rows=rows_per_block,
+    )
+    check_saved_coupling(staging, representation_file, fits, co, bot, device)
+    coupling_seconds = time.perf_counter() - coupling_started
     gpu = None
     if device == "cuda":
         import torch
@@ -390,10 +466,15 @@ def run_pair(layout: Layout, row: pd.Series, *, device: str, block_rows: int | N
             "target": representation["target_bins_encoded_under_rank_top_n"],
         },
         "code_commit": os.environ.get("CONFIDENCEOT_COMMIT", "unknown"),
+        "coupling_format": mosta_coupling.FORMAT, "coupling_files": coupling_files + ["coupling_check.json"],
+        "coupling_seconds": coupling_seconds,
         "gpu": gpu, "summary_seconds": summary_seconds,
         "pipeline_seconds": time.perf_counter() - started,
     })
     write_json(staging / SUCCESS, {"pair_id": pair_id, "files": file_inventory(staging)})
+    if keep is not None:
+        keep.update(fits=fits, models=fitted_models, cost=cost, co=co, bot=bot,
+                    source_bins=source_bins, target_bins=target_bins, representation=representation_file)
     del fits, co, bot
     gc.collect()
     return staging

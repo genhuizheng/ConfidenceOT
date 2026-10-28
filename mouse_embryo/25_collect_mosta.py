@@ -3,7 +3,10 @@
 **Status.**  Every expected pair in manifest/pairs.csv gets exactly one:
 
 * ``completed``: pairs/<id>/SUCCESS is present, and every file it lists is
-  present, readable and of the expected length;
+  present, readable and of the expected length; for a pair whose run.json
+  names a coupling format (23_ from 2026-10-28), potentials.npz, coupling.json
+  and coupling_check.json too, with one potential per bin and a passing
+  read-back;
 * ``corrupted``: SUCCESS is present but a file is missing, unreadable or the
   wrong length;
 * ``failed``: a traceback was recorded (pairs/<id>.FAILED, or the
@@ -59,6 +62,8 @@ RAW_DATA = "/scratch/10119/ghzheng/OT_project/data"
 EXPECTED_FILES = ("bins_source.csv.gz", "bins_target.csv.gz", "transport_source.npz", "transport_target.npz",
                   "annotation_fractions.csv", "annotation_transitions.csv.gz", "pair_metrics.csv",
                   "calibration.json", "run.json")
+# Written by 23_ from 2026-10-28 (run.json "coupling_format"); older runs have none.
+COUPLING_FILES = ("potentials.npz", "coupling.json", "coupling_check.json")
 
 
 def check_pair(layout: Layout, row: pd.Series) -> dict:
@@ -84,12 +89,21 @@ def check_pair(layout: Layout, row: pd.Series) -> dict:
         listed = {item["file"]: item["bytes"] for item in json.loads((directory / "SUCCESS").read_text(encoding="utf-8"))["files"]}
         run = json.loads((directory / "run.json").read_text(encoding="utf-8"))
         n, m = int(run["source_bins"]), int(run["target_bins"])
-        for name in EXPECTED_FILES:
+        expected = EXPECTED_FILES + (COUPLING_FILES if run.get("coupling_format") else ())
+        for name in expected:
             path = directory / name
             if not path.is_file():
                 problems.append(f"{name} missing")
             elif name in listed and path.stat().st_size != listed[name]:
                 problems.append(f"{name} size changed")
+        if run.get("coupling_format") and not problems:
+            if not json.loads((directory / "coupling_check.json").read_text(encoding="utf-8")).get("pass"):
+                problems.append("coupling_check.json does not pass")
+            with np.load(directory / "potentials.npz") as arrays:
+                for key, count in (("source_bin_ids", n), ("target_bin_ids", m), ("m4e_log_u", n), ("m4e_log_v", m),
+                                   ("m4r_log_u", n), ("m4r_log_v", m), ("balanced_log_u", n), ("balanced_log_v", m)):
+                    if key not in arrays.files or arrays[key].shape != (count,):
+                        problems.append(f"potentials.npz:{key} missing or not {count} long")
         for side, count, partner_count in (("source", n, len(run["target_categories"])),
                                            ("target", m, len(run["source_categories"]))):
             bins = pd.read_csv(directory / f"bins_{side}.csv.gz")
@@ -226,7 +240,7 @@ def package(layout: Layout) -> dict:
     include = []
     for pattern in ("manifest/*.csv", "equalisation/*", "slices/*", "representations/*/representation.json",
                     "representations/*.FAILED", "pairs/*/*", "pairs/*.FAILED", "pseudobulk/*/*.npz",
-                    "equivalence/*", "audit/*", "logs/*"):
+                    "equivalence/*", "coupling_verification/*", "audit/*", "logs/*"):
         include += [path for path in root.glob(pattern) if path.is_file() and not path.name.startswith(".")]
     layout.package.mkdir(parents=True, exist_ok=True)
     readme = layout.package / "README.md"
@@ -258,6 +272,8 @@ Built {time.strftime('%Y-%m-%d %H:%M')} by mouse_embryo/25_collect_mosta.py.
     - `co_partner_distribution` and `bot_partner_distribution`, each row summing to 1 (NaN for a bin without supported mass);
     - `co_pullback`, `bot_pullback` and `bot_pullback_co_rejected`: the nominal mass of each target annotation pulled back onto each source bin, by M4-E retained targets, by every target under balanced OT, and by the targets M4-E rejected, under balanced OT.
   - `transport_target.npz`: the same for target bins over source annotations, with `co_pushforward`, `bot_pushforward` and `bot_pushforward_co_rejected`.
+  - `potentials.npz`, `coupling.json`, `coupling_check.json` (runs from 2026-10-28): the bin-to-bin couplings of M4-E, M4-R and balanced OT, as their dual potentials, final gates, weights, rejection cost and epsilon, with the bin ids in row order, the solver settings and convergence, and the read-back check. With `representations/<pair_id>/representation.npz` (download step 3) any block of any coupling is rebuilt exactly by `mouse_embryo/mosta_coupling.py`:
+    `reconstruct_coupling(pair_dir, "M4-E", source_bins, target_bins, support="all"|"active", normalise=None|"source"|"target")`, where `normalise="source"` gives P_ij / sum_j P_ij over every target bin. coupling_verification/ holds the check that this rebuild is exact on real pairs.
   - `annotation_fractions.csv`: per side and annotation:
     - M4-E and M4-R retained and rejected counts and fractions;
     - partner presence (reported, not used to include or exclude);

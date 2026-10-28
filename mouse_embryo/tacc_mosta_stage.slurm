@@ -14,8 +14,12 @@
 #                      cuda: all of them, then, only on PASS, 23_ on the
 #                      largest pair as a scale probe (a normal, published result)
 #   equivalence_merge  24_ --merge: the shards' reports into one PASS or FAIL  gg
-#   ot                 23_ calibration, M4-E, M4-R, balanced OT, summaries   gg (cpu) / gh (cuda)
+#   coupling_check     26_ the saved couplings rebuilt and checked on the     gg (cpu) / gh (cuda)
+#                      four smallest real pairs (COUPLING_PASS gates ot)
+#   ot                 23_ calibration, M4-E, M4-R, balanced OT, summaries,  gg (cpu) / gh (cuda)
+#                      potentials
 #   collect            25_ audit, tables, pseudobulks, download list         gg
+#   compare            27_ this run against MOSTA_COMPARE_WITH, pair by pair gg
 #
 # MOSTA_DEVICE (cuda or cpu, default cuda) selects the device and with it the
 # production path of that device: on the CPU, calibration through the NumPy
@@ -78,11 +82,17 @@ case "$stage" in
         python mouse_embryo/23_run_mosta_pair.py "$root" --device "$device" \
             --stop-claiming-after-hours "${MOSTA_STOP_HOURS:-40}"
         ;;
+    coupling_check)
+        python mouse_embryo/26_verify_coupling_reconstruction.py "$root" --device "$device"
+        ;;
     collect)
         python mouse_embryo/25_collect_mosta.py "$root"
         ;;
+    compare)
+        python mouse_embryo/27_compare_mosta_runs.py "${MOSTA_COMPARE_WITH:?MOSTA_COMPARE_WITH is not set}" "$root" --workers "$threads"
+        ;;
     *)
-        echo "MOSTA_STAGE must be prepare, representation, equivalence, equivalence_merge, ot or collect; got '$stage'" >&2
+        echo "MOSTA_STAGE must be prepare, representation, equivalence, equivalence_merge, coupling_check, ot, collect or compare; got '$stage'" >&2
         exit 2
         ;;
 esac
