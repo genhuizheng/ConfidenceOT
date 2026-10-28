@@ -10,7 +10,8 @@
 #       The coupling check on its own (26_): the four smallest real pairs run
 #       through 23_ into coupling_verification/, and every saved coupling
 #       rebuilt from the files and checked.  Writes COUPLING_PASS or
-#       COUPLING_FAIL and coupling_verification/REPORT.md.
+#       COUPLING_FAIL and coupling_verification/REPORT.md.  MOSTA_AFTER=<id:id:...>
+#       makes it wait for those jobs (afterany), e.g. representation workers.
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh equivalence [--dry-run]
 #       The dense-against-blockwise check on the early pairs, on its own.
@@ -86,6 +87,9 @@ preprocessing=${MOSTA_PREPROCESSING:-ranknm256_noscale_ds_cos}
 shared=${MOSTA_SHARED_INPUTS:-}
 shared_representations=${MOSTA_SHARED_REPRESENTATIONS:-}
 compare_with=${MOSTA_COMPARE_WITH:-}
+# coupling phase only: job ids (colon-separated) the check waits for, e.g. the
+# representation workers of a prepare submitted before the check existed.
+after_jobs=${MOSTA_AFTER:-}
 representation_jobs=${MOSTA_REPRESENTATION_JOBS:-4}
 equivalence_shards=${MOSTA_EQUIVALENCE_SHARDS:-8}
 cap=${CONFIDENCEOT_JOB_CAP:-40}
@@ -356,7 +360,11 @@ fi
 
 if [[ "$phase" == coupling ]]; then
     check_cap 1
-    submit_coupling
+    if [[ -n "$after_jobs" ]]; then
+        submit_coupling --dependency="afterany:$after_jobs"
+    else
+        submit_coupling
+    fi
     echo "When it ends, read $root/coupling_verification/REPORT.md; submit run only after COUPLING_PASS." >&2
 fi
 
