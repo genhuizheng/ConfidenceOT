@@ -491,6 +491,158 @@ def step_calibration(prs):
                  "method_comparison_heatmap_values.csv and method_comparison_f1.csv for M4-E on ranknm256_noscale_ds_cos.")
 
 
+def math_ladder(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    title(slide, "Math background 1 | From optimal transport to Confidence-UOT",
+          "Four objectives, each fixing what the previous one cannot express")
+    rows = [
+        ("Optimal transport (Kantorovich)",
+         r"\min_{P\geq 0}\ \langle P,C\rangle\quad \mathrm{s.t.}\ P\mathbf{1}=a,\ P^{\mathsf{T}}\mathbf{1}=b",
+         "every unit of mass must move: a cell with no counterpart is still forced onto someone"),
+        ("+ entropy (Cuturi 2013)",
+         r"\min_{P}\ \langle P,C\rangle+\varepsilon\,\mathrm{KL}(P\,\|\,ab^{\mathsf{T}})\quad \mathrm{same\ constraints}",
+         "strictly convex; the solution is P = diag(u) K diag(v), found by matrix scaling (Sinkhorn)"),
+        ("+ soft marginals (unbalanced OT)",
+         r"\min_{P}\ \langle P,C\rangle+\varepsilon\,\mathrm{KL}(P\,\|\,ab^{\mathsf{T}})+\lambda_s\mathrm{KL}(P\mathbf{1}\,\|\,a)+\lambda_t\mathrm{KL}(P^{\mathsf{T}}\mathbf{1}\,\|\,b)",
+         "mass may be created or destroyed at a price: abundance can change, but no cell is ever refused"),
+        ("+ binary gates (Confidence-UOT)",
+         r"C\ \rightarrow\ \widetilde C_{ij}=\delta_i\eta_jC_{ij}+(1-\delta_i\eta_j)\,c",
+         "an explicit decision per cell: is its correspondence trusted (retain) or abstained from (reject)?"),
+    ]
+    y = 1.68
+    for k, (head, latex, meaning) in enumerate(rows):
+        fill = "EEF4FA" if k == 3 else WHITE
+        box(slide, 0.55, y, 12.25, 1.18, fill=fill, border=RETAIN if k == 3 else RULE, width=1.5 if k == 3 else 1.0)
+        textbox(slide, 0.72, y + 0.08, 3.4, 0.4, [(head, {"size": 14.5, "bold": True, "colour": RETAIN if k == 3 else NAVY})])
+        place_equation(slide, latex, f"ladder{k}", 0.75, y + 0.45, size=17, max_w=8.0)
+        textbox(slide, 8.95, y + 0.12, 3.75, 0.98, [(meaning, {"size": 12.5, "colour": MUTED})], anchor=MSO_ANCHOR.MIDDLE)
+        y += 1.3
+    textbox(slide, 0.55, 6.93, 12.2, 0.4, [("KL(x‖y) = Σ x log(x/y) − x + y, the generalised KL for vectors that need not sum to the same total.",
+                                            {"size": 12, "colour": MUTED})])
+    notes(slide, "OT forces a full matching; entropy makes it smooth and fast; KL marginals let abundance change; the gates "
+                 "add the one thing the others lack, an explicit per-cell abstention decision.")
+
+
+def math_sinkhorn(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    title(slide, "Math background 2 | Where the Sinkhorn updates come from",
+          "Gates fixed: set the derivative of the objective in P to zero")
+    textbox(slide, 0.55, 1.65, 12.2, 0.4, [("1. First-order condition for every entry P_{ij}", {"size": 15, "bold": True, "colour": NAVY})])
+    place_equation(slide, r"\widetilde C_{ij}+\varepsilon\log\frac{P_{ij}}{a_ib_j}+\lambda_s\log\frac{(P\mathbf{1})_i}{a_i}+\lambda_t\log\frac{(P^{\mathsf{T}}\mathbf{1})_j}{b_j}=0",
+                   "foc", 0.8, 2.08, size=20, max_w=11.5)
+    textbox(slide, 0.55, 2.95, 12.2, 0.4, [("2. So the plan factorises into a kernel and two scalings", {"size": 15, "bold": True, "colour": NAVY})])
+    place_equation(slide, r"P_{ij}=u_i\,K_{ij}\,v_j,\qquad K_{ij}=a_ib_j\,e^{-\widetilde C_{ij}/\varepsilon},\qquad u_i=\left(\frac{(P\mathbf{1})_i}{a_i}\right)^{-\lambda_s/\varepsilon},\quad v_j=\left(\frac{(P^{\mathsf{T}}\mathbf{1})_j}{b_j}\right)^{-\lambda_t/\varepsilon}",
+                   "factor", 0.8, 3.38, size=19, max_w=11.8)
+    textbox(slide, 0.55, 4.3, 12.2, 0.4, [("3. Insert (P1)_{i} = u_{i}(Kv)_{i} and solve for u_{i}: the fixed point that Sinkhorn iterates", {"size": 15, "bold": True, "colour": NAVY})])
+    place_equation(slide, r"u_i^{\,1+\lambda_s/\varepsilon}=\left(\frac{a_i}{(Kv)_i}\right)^{\lambda_s/\varepsilon}\ \Longrightarrow\ u_i=\left(\frac{a_i}{(Kv)_i}\right)^{\alpha},\quad \alpha=\frac{\lambda_s}{\lambda_s+\varepsilon};\qquad v_j=\left(\frac{b_j}{(K^{\mathsf{T}}u)_j}\right)^{\beta},\quad \beta=\frac{\lambda_t}{\lambda_t+\varepsilon}",
+                   "fixed", 0.8, 4.75, size=19, max_w=11.8)
+    textbox(slide, 0.55, 5.75, 12.2, 1.5, [
+        ("λ → ∞: α → 1, the balanced Sinkhorn with exact marginals;  λ → 0: α → 0, the marginals are free.", {"bullet": True, "size": 14}),
+        ("Production ε = 0.1, λ_{s} = λ_{t} = 1: α = β = 1/1.1 ≈ 0.909, so a cell's total mass may move away from 1/n, at a KL price.", {"bullet": True, "size": 14}),
+        ("Alternating the two updates is block coordinate ascent on the dual; it is run in log space for stability.", {"bullet": True, "size": 14})])
+    notes(slide, "d/dP of eps*KL(P||ab^T) is eps*log(P/ab); of lambda*KL(P1||a) is lambda*log((P1)_i/a_i). Exponentiating "
+                 "gives the scaling form; substituting (P1)_i = u_i (Kv)_i gives the fixed point in cuda.py / unbalanced.py.")
+
+
+def math_gate(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    title(slide, "Math background 3 | Why the gate step is exact",
+          "With P fixed, only the linear term depends on the gates, and it is separable cell by cell")
+    textbox(slide, 0.55, 1.65, 12.2, 0.4, [("1. Split the gated cost", {"size": 15, "bold": True, "colour": NAVY})])
+    place_equation(slide, r"\langle P,\widetilde C\rangle=c\sum_{ij}P_{ij}+\sum_{ij}\delta_i\eta_jP_{ij}(C_{ij}-c)=c\sum_{ij}P_{ij}+\sum_i\delta_i\,s_i",
+                   "split", 0.8, 2.07, size=20, max_w=11.5)
+    textbox(slide, 0.55, 2.95, 12.2, 0.45, [("Entropy and the KL marginals depend on P only, so for fixed P and η the best δ minimises Σ_{i} δ_{i}s_{i} one cell at a time:",
+                                            {"size": 14})])
+    place_equation(slide, r"\delta_i^{\star}=\arg\min_{\delta_i\in\{0,1\}}\ \delta_i\,s_i=\mathbf{1}[s_i<0],\qquad \eta_j^{\star}=\mathbf{1}[t_j<0]\ \ \mathrm{(with\ the\ new\ }\delta\mathrm{)}",
+                   "argmin", 0.8, 3.42, size=20, max_w=11.5)
+    textbox(slide, 0.55, 4.3, 12.2, 2.95, [
+        ("2. Descent. Each block (P by Sinkhorn, then δ, then η) is an exact minimiser given the others, so ℒ never increases "
+         "across rounds (M4-E). Gates take finitely many values: the loop stops when no gate changes; a repeat is flagged as a cycle. "
+         "Descent holds up to the Sinkhorn tolerance, which is the question of Area B.", {"size": 14, "after": 8}),
+        ("3. Positivity. Entropy makes every P_{ij} > 0, so m_{i} = Σ_{j} P_{ij}η_{j} > 0 whenever one target gate is open, "
+         "and s_{i} < 0 ⇔ d_{i} < c: the rule of Step 4.", {"size": 14, "after": 8}),
+        ("4. Calibration as an inverse. On the null, A(c) = mean share of rows (columns) with s < 0, non-decreasing in c (checked "
+         "before bisection); c*(m) = min{ c : A_{rows}(c) ≥ m and A_{cols}(c) ≥ m }, m = 0.99.", {"size": 14})])
+    notes(slide, "This is why the exact variant (M4-E) has a monotone objective and the reversible one (M4-R) does not: M4-R "
+                 "scores with counterfactual ungated costs, which is not the block minimiser.")
+
+
+def acceptance_curve() -> Path:
+    """Schematic only: acceptance on the null rises with the price c; the three minimums pick three c."""
+    ASSETS.mkdir(parents=True, exist_ok=True)
+    path = ASSETS / "acceptance_curve.png"
+    centre, width = 0.3, 0.12
+    c = np.linspace(0, 1, 400)
+    acc = 1 / (1 + np.exp(-(c - centre) / width))
+    fig, ax = plt.subplots(figsize=(5.6, 3.7))
+    ax.plot(c, acc, color="#" + NAVY, lw=2.2)
+    for level, colour in ((0.90, "#9AA3AE"), (0.95, "#6B7280"), (0.99, "#" + CALIB)):
+        x = centre + width * np.log(level / (1 - level))
+        ax.plot([0, x], [level, level], ls="--", lw=1, color=colour)
+        ax.plot([x, x], [0.6, level], ls=":", lw=1.3, color=colour)
+        ax.text(x, 0.585, f"$c_{{{level:.2f}}}$", ha="center", va="top", fontsize=13, color=colour)
+        ax.text(0.012, level + 0.004, f"m = {level:.2f}", fontsize=10.5, color=colour, va="bottom")
+    ax.set_xlim(0, 1); ax.set_ylim(0.6, 1.01)
+    ax.set_xticks([]); ax.set_yticks([0.6, 0.8, 1.0])
+    ax.set_xlabel("price of abstaining c  (larger c = rejecting is dearer)", fontsize=11, labelpad=26)
+    ax.set_ylabel("acceptance on the within-side null", fontsize=11)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.text(0.02, 0.62, "schematic: shape only, not data\n(axis starts at 0.6)", ha="left", fontsize=9.5,
+            color="#" + MUTED, style="italic")
+    fig.tight_layout()
+    fig.savefig(path, dpi=250, transparent=True)
+    plt.close(fig)
+    return path
+
+
+def step_acceptance(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    title(slide, "Acceptance: what 0.99, 0.95 and 0.90 set",
+          "One number for how strict the gate is, fixed on cells that certainly have a counterpart")
+    box(slide, 0.55, 1.7, 6.05, 2.05, fill=PANEL)
+    textbox(slide, 0.75, 1.8, 5.7, 1.9, [
+        ("acceptance = the share of cells the gate keeps", {"size": 16, "bold": True, "colour": NAVY, "after": 6}),
+        ("Measured on the within-side null (one sample split in halves), where every cell has a true partner: "
+         "there, 1 − acceptance is exactly the false-rejection rate.", {"size": 13.5, "after": 6}),
+        ("The minimum m ∈ {0.99, 0.95, 0.90} picks c: the smallest price with null acceptance ≥ m.", {"size": 13.5})])
+    textbox(slide, 0.55, 3.95, 6.1, 2.2, [
+        ("Higher m → larger c → a looser gate:", {"size": 14, "bold": True, "colour": NAVY, "after": 4}),
+        ("m = 0.99: on average ≤ 1% of null cells (all with a partner) rejected", {"bullet": True, "size": 13.5}),
+        ("m = 0.95: ≤ 5%;  m = 0.90: ≤ 10%; a smaller c, so more is rejected", {"bullet": True, "size": 13.5}),
+        ("On real pairs the rejected share is what the data give, not 1, 5 or 10%", {"bullet": True, "size": 13.5})])
+    slide.shapes.add_picture(str(acceptance_curve()), Inches(6.95), Inches(1.6), Inches(5.85), Inches(3.76))
+    # real data: the same pairs at the three minimums
+    textbox(slide, 0.55, 5.55, 12.2, 0.4, [("Real pairs, primary cells retained (mean over pairs), RNA-only gate, ranknm256_noscale_ds_cos", {"size": 13, "bold": True, "colour": NAVY})])
+    header = ["acceptance ≥", "0.99", "0.95", "0.90"]
+    data = [("ovarian GSE180661 (85 pairs)", ["60%", "49%", "42%"]),
+            ("colorectal GSE225857 (4 pairs)", ["95%", "81%", "73%"]),
+            ("prostate GSE271675 (24 pairs)", ["24%", "19%", "15%"])]
+    table = slide.shapes.add_table(len(data) + 1, 4, Inches(0.55), Inches(5.92), Inches(7.2), Inches(1.3)).table
+    for k, w in enumerate((3.6, 1.2, 1.2, 1.2)):
+        table.columns[k].width = Inches(w)
+    for r, row in enumerate([header] + [[a] + b for a, b in data]):
+        for c_, value in enumerate(row):
+            cell = table.cell(r, c_)
+            cell.text = ""
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = rgb(NAVY if r == 0 else (WHITE if r % 2 else "EDF0F4"))
+            p = cell.text_frame.paragraphs[0]
+            p.alignment = PP_ALIGN.LEFT if c_ == 0 else PP_ALIGN.CENTER
+            rich(p, value, 12, WHITE if r == 0 else INK, bold=(r == 0))
+            cell.margin_left = cell.margin_right = Inches(0.06)
+            cell.margin_top = cell.margin_bottom = Inches(0.02)
+    box(slide, 8.05, 5.62, 4.75, 1.55, fill="FFF6EC", border="E9C9A6")
+    textbox(slide, 8.2, 5.7, 4.5, 1.42, [
+        ("Not the same 0.95:", {"size": 13, "bold": True, "colour": REJECT, "after": 2}),
+        ("budget_0.95 in the run folders is the rejection budget (at most 95% rejected). It is recorded but not "
+         "enforced, so it plays no part in any result.", {"size": 12})])
+    notes(slide, "Acceptance minimum = within_side_acceptance_minimum in calibrate_confidence_cost; 0.99 for every real-data "
+                 "result. The curve is a schematic of the monotone acceptance-versus-c relation, not data. The real-data "
+                 "table is the mean over pairs of the retained share of primary cells under the RNA-only gate "
+                 "(cnv_rna_strategies export_20261021b, state_rates).")
+
+
 # --- the proposal's Areas, as written ---------------------------------------------------
 
 def area_a(prs):
@@ -580,10 +732,14 @@ def main() -> None:
     cover(prs)
     figure_one(prs)
     step_space(prs)
+    math_ladder(prs)
     step_objective(prs)
+    math_sinkhorn(prs)
     step_solver(prs)
     step_decision(prs)
+    math_gate(prs)
     step_calibration(prs)
+    step_acceptance(prs)
     area_a(prs)
     area_b(prs)
     positioning(prs)
