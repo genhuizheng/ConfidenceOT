@@ -30,11 +30,10 @@
 # Several representation or ot jobs walk the same pair list; claim files keep
 # them off each other's pairs.
 #
-# No set -u, as everywhere in this repo: TACC's module files and conda's shell
-# functions read variables they do not define.
-set -eo pipefail
+# No set -e, set -u or pipefail (user 2026-10-28): every step checks its own
+# exit status, and a failing step ends the job with that status.
 source /home1/10119/ghzheng/.bashrc
-conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}" || exit 1
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${MOSTA_ROOT:-/scratch/10119/ghzheng/OT_project/mouse_embryo_results/mosta_all_stages}
@@ -47,7 +46,7 @@ export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=$threads OPENBLAS_NUM_THREADS=$threads MKL_NUM_THREADS=$threads NUMEXPR_NUM_THREADS=$threads
 CONFIDENCEOT_COMMIT=$(git -C "$repo" rev-parse HEAD 2> /dev/null || echo unknown)
 export CONFIDENCEOT_COMMIT
-cd "$repo"
+cd "$repo" || exit 1
 echo "stage=$stage preprocessing=${MOSTA_PREPROCESSING:-ranknm256_noscale_ds_cos} device=$device threads=$threads root=$root commit=$CONFIDENCEOT_COMMIT host=$(hostname) start=$(date --iso-8601=seconds)"
 if [[ "$device" != cpu && "$device" != cuda ]]; then
     echo "MOSTA_DEVICE must be cpu or cuda; got '$device'" >&2
@@ -59,37 +58,37 @@ fi
 
 case "$stage" in
     prepare)
-        python mouse_embryo/20_build_mosta_manifest.py "$data" "$root"
-        python mouse_embryo/21_equalise_mosta_depth.py "$root" --workers "${MOSTA_WORKERS:-4}"
+        python mouse_embryo/20_build_mosta_manifest.py "$data" "$root" || exit $?
+        python mouse_embryo/21_equalise_mosta_depth.py "$root" --workers "${MOSTA_WORKERS:-4}" || exit $?
         ;;
     representation)
-        python mouse_embryo/22_prepare_mosta_representation.py "$root" --workers "${MOSTA_WORKERS:-4}"
+        python mouse_embryo/22_prepare_mosta_representation.py "$root" --workers "${MOSTA_WORKERS:-4}" || exit $?
         ;;
     equivalence)
         if [[ "$device" == cuda ]]; then
-            python mouse_embryo/24_check_blockwise_equivalence.py "$root" --device cuda
-            # Reached only on PASS: set -e stops the job when 24_ exits 1.
-            python mouse_embryo/23_run_mosta_pair.py "$root" --device cuda --largest
+            # The largest pair only on PASS: 24_ exits 1 on FAIL.
+            python mouse_embryo/24_check_blockwise_equivalence.py "$root" --device cuda || exit $?
+            python mouse_embryo/23_run_mosta_pair.py "$root" --device cuda --largest || exit $?
         else
             python mouse_embryo/24_check_blockwise_equivalence.py "$root" --device cpu \
-                --shard "${MOSTA_SHARD:-0}" --n-shards "${MOSTA_N_SHARDS:-1}"
+                --shard "${MOSTA_SHARD:-0}" --n-shards "${MOSTA_N_SHARDS:-1}" || exit $?
         fi
         ;;
     equivalence_merge)
-        python mouse_embryo/24_check_blockwise_equivalence.py "$root" --merge
+        python mouse_embryo/24_check_blockwise_equivalence.py "$root" --merge || exit $?
         ;;
     ot)
         python mouse_embryo/23_run_mosta_pair.py "$root" --device "$device" \
-            --stop-claiming-after-hours "${MOSTA_STOP_HOURS:-40}"
+            --stop-claiming-after-hours "${MOSTA_STOP_HOURS:-40}" || exit $?
         ;;
     coupling_check)
-        python mouse_embryo/26_verify_coupling_reconstruction.py "$root" --device "$device"
+        python mouse_embryo/26_verify_coupling_reconstruction.py "$root" --device "$device" || exit $?
         ;;
     collect)
-        python mouse_embryo/25_collect_mosta.py "$root"
+        python mouse_embryo/25_collect_mosta.py "$root" || exit $?
         ;;
     compare)
-        python mouse_embryo/27_compare_mosta_runs.py "${MOSTA_COMPARE_WITH:?MOSTA_COMPARE_WITH is not set}" "$root" --workers "$threads"
+        python mouse_embryo/27_compare_mosta_runs.py "${MOSTA_COMPARE_WITH:?MOSTA_COMPARE_WITH is not set}" "$root" --workers "$threads" || exit $?
         ;;
     *)
         echo "MOSTA_STAGE must be prepare, representation, equivalence, equivalence_merge, coupling_check, ot, collect or compare; got '$stage'" >&2

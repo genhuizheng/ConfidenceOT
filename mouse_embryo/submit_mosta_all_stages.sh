@@ -69,8 +69,8 @@
 # also why a phase refuses while any MOSTA job of the same MOSTA_ROOT is still
 # queued or running: two workers would otherwise share a pair.
 #
-# No set -u, as everywhere in this repo.
-set -eo pipefail
+# No set -e, set -u or pipefail (user 2026-10-28): every step that has to stop
+# the script checks its own exit status.
 
 phase=${1:-}
 [[ $# -gt 0 ]] && shift
@@ -141,8 +141,6 @@ if [[ -n "$shared_representations" ]]; then
         echo "MOSTA_SHARED_REPRESENTATIONS: $found of $expected_pairs representations complete in $shared_representations" >&2
         problems=1
     fi
-    # A glob, not ls | head: head closing the pipe early kills ls with SIGPIPE,
-    # which pipefail and set -e turn into a silent exit.
     samples=("$shared_representations"/representations/*/representation.json)
     sample=${samples[0]}
     if [[ ! -f "$sample" ]] || ! grep -q "\"label\": \"$preprocessing\"" "$sample"; then
@@ -200,8 +198,9 @@ submit() {
     fi
     local id
     id=$(sbatch --parsable --comment="$tag" "$@" | tail -n 1)
-    # Inside $(...) set -e does not stop the script, so a refused submission
-    # has to end it here, before anything is made to wait on it.
+    # A refused submission ends the script here, before anything is made to
+    # wait on it.  Called inside $(...), this exit only leaves the subshell, so
+    # every such caller ends with || exit 1 as well.
     if [[ ! "$id" =~ ^[0-9]+$ ]]; then
         echo "sbatch returned no job id for $what; stopping. Already submitted above." >&2
         exit 1
@@ -222,7 +221,7 @@ clear_claims() {
         if (( dry_run )); then
             echo "would clear stale claim $directory" >&2
         else
-            rm -rf -- "$directory"
+            rm -rf -- "$directory" || exit 1
         fi
     done
 }
@@ -245,13 +244,13 @@ check_cap() {
 submit_equivalence() {
     # $@ = optional dependency argument. Clears the previous check's output,
     # then submits the check for $device.
-    local dependency=("$@") ids=() shard after
+    local dependency=("$@") ids=() shard after id
     if (( dry_run )); then
         echo "would clear $root/equivalence/{report.csv,summary.json,EQUIVALENCE_PASS,EQUIVALENCE_FAIL,shards}" >&2
     else
-        rm -rf -- "$root/equivalence/shards"
+        rm -rf -- "$root/equivalence/shards" || exit 1
         rm -f -- "$root/equivalence/report.csv" "$root/equivalence/summary.json" \
-            "$root/equivalence/EQUIVALENCE_PASS" "$root/equivalence/EQUIVALENCE_FAIL"
+            "$root/equivalence/EQUIVALENCE_PASS" "$root/equivalence/EQUIVALENCE_FAIL" || exit 1
     fi
     if [[ "$device" == cuda ]]; then
         submit "equivalence check (gh, then the largest pair as a scale probe)" \
@@ -261,10 +260,11 @@ submit_equivalence() {
         return 0
     fi
     for (( shard = 0; shard < equivalence_shards; shard++ )); do
-        ids+=("$(submit "equivalence shard $shard of $equivalence_shards (gg)" \
+        id=$(submit "equivalence shard $shard of $equivalence_shards (gg)" \
             "${compute[@]}" -t 24:00:00 -A "$account" -J mosta_equiv "${dependency[@]}" \
             -o "$root/logs/equivalence_%j.out" -e "$root/logs/equivalence_%j.err" \
-            "$(stage_args equivalence)",MOSTA_THREADS=$threads,MOSTA_SHARD=$shard,MOSTA_N_SHARDS=$equivalence_shards "$job")")
+            "$(stage_args equivalence)",MOSTA_THREADS=$threads,MOSTA_SHARD=$shard,MOSTA_N_SHARDS=$equivalence_shards "$job") || exit 1
+        ids+=("$id")
     done
     after=$(IFS=:; echo "${ids[*]}")
     submit "equivalence merge" \
@@ -279,7 +279,7 @@ submit_coupling() {
     if (( dry_run )); then
         echo "would clear $root/coupling_verification/{COUPLING_PASS,COUPLING_FAIL}" >&2
     else
-        rm -f -- "$root/coupling_verification/COUPLING_PASS" "$root/coupling_verification/COUPLING_FAIL"
+        rm -f -- "$root/coupling_verification/COUPLING_PASS" "$root/coupling_verification/COUPLING_FAIL" || exit 1
     fi
     submit "coupling check (26_, $device)" \
         "${compute[@]}" -t 06:00:00 -A "$account" -J mosta_coupling "$@" \
@@ -293,7 +293,9 @@ equivalence_jobs() {
 
 # SLURM opens the log files before the job starts, so the directory has to
 # exist before the first sbatch.
-(( dry_run )) || mkdir -p "$root/logs"
+if (( ! dry_run )); then
+    mkdir -p "$root/logs" || exit 1
+fi
 
 if [[ "$phase" == prepare && -n "$shared_representations" ]]; then
     # OT again on the representations of an earlier run: link, copy its
@@ -312,7 +314,7 @@ if [[ "$phase" == prepare && -n "$shared_representations" ]]; then
         elif (( dry_run )); then
             echo "would link $root/$part -> $shared_representations/$part" >&2
         else
-            ln -s "$shared_representations/$part" "$root/$part"
+            ln -s "$shared_representations/$part" "$root/$part" || exit 1
             echo "linked $root/$part -> $shared_representations/$part" >&2
         fi
     done
@@ -322,8 +324,8 @@ if [[ "$phase" == prepare && -n "$shared_representations" ]]; then
     elif (( dry_run )); then
         echo "would copy $shared_representations/equivalence/{report.csv,summary.json} into $root/equivalence" >&2
     elif [[ ! -f "$root/equivalence/report.csv" ]]; then
-        mkdir -p "$root/equivalence"
-        cp -p "$shared_representations/equivalence/report.csv" "$shared_representations/equivalence/summary.json" "$root/equivalence/"
+        mkdir -p "$root/equivalence" || exit 1
+        cp -p "$shared_representations/equivalence/report.csv" "$shared_representations/equivalence/summary.json" "$root/equivalence/" || exit 1
         printf 'copied from %s, %s\n' "$shared_representations/equivalence" "$(date --iso-8601=seconds)" > "$root/equivalence/COPIED_FROM"
     fi
     submit_coupling
@@ -337,7 +339,7 @@ elif [[ "$phase" == prepare ]]; then
             elif (( dry_run )); then
                 echo "would link $root/$part -> $shared/$part" >&2
             else
-                ln -s "$shared/$part" "$root/$part"
+                ln -s "$shared/$part" "$root/$part" || exit 1
                 echo "linked $root/$part -> $shared/$part" >&2
             fi
         done
@@ -349,7 +351,7 @@ elif [[ "$phase" == prepare ]]; then
         prep=$(submit "prepare (manifest + common-depth equalisation)" \
             "${cpu_node[@]}" -t 12:00:00 -A "$account" -J mosta_prep \
             -o "$root/logs/prepare_%j.out" -e "$root/logs/prepare_%j.err" \
-            "$(stage_args prepare)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job")
+            "$(stage_args prepare)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job") || exit 1
         dependency=(--dependency="afterok:$prep")
     fi
     done_representations=$(ls "$root"/representations/*/REPRESENTATION_SUCCESS 2> /dev/null | wc -l) || done_representations=0
@@ -361,10 +363,11 @@ elif [[ "$phase" == prepare ]]; then
         clear_claims representation "$root/representations" REPRESENTATION_SUCCESS
         representation_ids=()
         for (( i = 1; i <= representation_jobs; i++ )); do
-            representation_ids+=("$(submit "representation worker $i" \
+            id=$(submit "representation worker $i" \
                 "${cpu_node[@]}" -t 24:00:00 -A "$account" -J mosta_rep "${dependency[@]}" \
                 -o "$root/logs/representation_%j.out" -e "$root/logs/representation_%j.err" \
-                "$(stage_args representation)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job")")
+                "$(stage_args representation)",MOSTA_WORKERS=3,MOSTA_THREADS=16 "$job") || exit 1
+            representation_ids+=("$id")
         done
         after=$(IFS=:; echo "${representation_ids[*]}")
         submit_equivalence --dependency="afterany:$after"
@@ -430,16 +433,17 @@ if [[ "$phase" == run ]]; then
     clear_claims ot "$root/pairs" SUCCESS
     ot_ids=()
     for (( i = 1; i <= ot_jobs; i++ )); do
-        ot_ids+=("$(submit "OT worker $i ($device)" \
+        id=$(submit "OT worker $i ($device)" \
             "${compute[@]}" -t 48:00:00 -A "$account" -J mosta_ot \
             -o "$root/logs/ot_%j.out" -e "$root/logs/ot_%j.err" \
-            "$(stage_args ot)",MOSTA_THREADS=$threads,MOSTA_STOP_HOURS=40 "$job")")
+            "$(stage_args ot)",MOSTA_THREADS=$threads,MOSTA_STOP_HOURS=40 "$job") || exit 1
+        ot_ids+=("$id")
     done
     after=$(IFS=:; echo "${ot_ids[*]}")
     collect_id=$(submit "collection (audit, tables, pseudobulks, download list)" \
         "${cpu_node[@]}" -t 24:00:00 -A "$account" -J mosta_collect --dependency="afterany:$after" \
         -o "$root/logs/collect_%j.out" -e "$root/logs/collect_%j.err" \
-        "$(stage_args collect)",MOSTA_THREADS=16 "$job")
+        "$(stage_args collect)",MOSTA_THREADS=16 "$job") || exit 1
     if [[ -n "$compare_with" ]]; then
         submit "comparison against $compare_with" \
             "${cpu_node[@]}" -t 08:00:00 -A "$account" -J mosta_compare --dependency="afterany:$collect_id" \
