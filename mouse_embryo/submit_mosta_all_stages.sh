@@ -48,17 +48,20 @@
 # MOSTA_SHARED_REPRESENTATIONS=<root of a run with all its representations>, with
 # MOSTA_SHARED_INPUTS the same root: prepare also links that run's
 # representations (same MOSTA_PREPROCESSING; the label is checked) and copies its
-# equivalence record, then submits only the coupling check: a rerun of OT on
-# unchanged representations, nothing of the preprocessing recomputed.  The rerun
-# root must be new; the earlier run is only read.
+# equivalence record when that check ran on MOSTA_DEVICE (a summary without
+# "devices" ran on cuda), otherwise submits this root's own equivalence check on
+# MOSTA_DEVICE; then the coupling check: a rerun of OT on unchanged
+# representations, nothing of the preprocessing recomputed.  The rerun root must
+# be new; the earlier run is only read.
 #
 # MOSTA_DEVICE picks the device for the equivalence check and the run; one run
 # uses one device for every pair.
 #   cuda (default, the production run): gh nodes, the GPU production path
 #                  (torch CUDA, float64).
-#   cpu:           gg nodes, for validation and reference comparisons only:
-#                  the CPU production path (NumPy reference calibration, torch
-#                  solvers in float64), MOSTA_THREADS 144.
+#   cpu:           gg nodes: the CPU production path (NumPy reference
+#                  calibration, torch solvers in float64), MOSTA_THREADS 144.
+#                  The logcpm run and the ds rerun use it (user 2026-10-28: the
+#                  gh queue is too long).
 # Everything else runs on gg.
 #
 # Resubmitting a phase continues where the last one stopped: finished pairs
@@ -292,7 +295,14 @@ equivalence_jobs() {
 if [[ "$phase" == prepare && -n "$shared_representations" ]]; then
     # OT again on the representations of an earlier run: link, copy its
     # equivalence record, check the saved couplings. Nothing is recomputed.
-    check_cap 1
+    shared_summary=$shared_representations/equivalence/summary.json
+    if grep -q '"devices"' "$shared_summary" 2> /dev/null; then
+        grep -q "\"$device\"" "$shared_summary" && reuse_equivalence=1 || reuse_equivalence=0
+    else
+        # A summary without "devices" comes from 2b5f3bb, whose check ran on the GPU only.
+        [[ "$device" == cuda ]] && reuse_equivalence=1 || reuse_equivalence=0
+    fi
+    if (( reuse_equivalence )); then check_cap 1; else check_cap $(( $(equivalence_jobs) + 1 )); fi
     for part in manifest equalisation equalised slices representations; do
         if [[ -e "$root/$part" ]]; then
             echo "$root/$part exists; left as it is" >&2
@@ -303,7 +313,10 @@ if [[ "$phase" == prepare && -n "$shared_representations" ]]; then
             echo "linked $root/$part -> $shared_representations/$part" >&2
         fi
     done
-    if (( dry_run )); then
+    if (( ! reuse_equivalence )); then
+        echo "the equivalence check of $shared_representations did not run on $device; this root gets its own" >&2
+        submit_equivalence
+    elif (( dry_run )); then
         echo "would copy $shared_representations/equivalence/{report.csv,summary.json} into $root/equivalence" >&2
     elif [[ ! -f "$root/equivalence/report.csv" ]]; then
         mkdir -p "$root/equivalence"
