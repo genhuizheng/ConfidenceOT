@@ -26,6 +26,11 @@
 #       OT workers (MOSTA_OT_JOBS jobs walking one pair list, largest pairs
 #       first) and, after them, the collection, and with MOSTA_COMPARE_WITH set
 #       the comparison against that run.
+#       MOSTA_AFTER=<id:id:...> (the equivalence merge and the coupling check of
+#       this root, still queued or running) submits the run before those checks
+#       end: the OT workers wait afterok on them, so a check that fails (exit 1)
+#       keeps them from ever starting, and each worker checks EQUIVALENCE_PASS
+#       and COUPLING_PASS again when it starts (tacc_mosta_stage.slurm).
 #
 #   bash mouse_embryo/submit_mosta_all_stages.sh collect [--dry-run]
 #       The audit, tables, pseudobulks and download list again, for instance
@@ -90,8 +95,10 @@ preprocessing=${MOSTA_PREPROCESSING:-ranknm256_noscale_ds_cos}
 shared=${MOSTA_SHARED_INPUTS:-}
 shared_representations=${MOSTA_SHARED_REPRESENTATIONS:-}
 compare_with=${MOSTA_COMPARE_WITH:-}
-# coupling phase only: job ids (colon-separated) the check waits for, e.g. the
+# coupling phase: job ids (colon-separated) the check waits for, e.g. the
 # representation workers of a prepare submitted before the check existed.
+# run phase: this root's equivalence merge and coupling check, which the OT
+# workers wait for (afterok).
 after_jobs=${MOSTA_AFTER:-}
 representation_jobs=${MOSTA_REPRESENTATION_JOBS:-4}
 equivalence_shards=${MOSTA_EQUIVALENCE_SHARDS:-8}
@@ -172,16 +179,47 @@ for name in MOSTA_STAGE MOSTA_WORKERS MOSTA_THREADS MOSTA_STOP_HOURS MOSTA_SHARD
         problems=1
     fi
 done
+if [[ -n "$after_jobs" && ! "$after_jobs" =~ ^[0-9]+(:[0-9]+)*$ ]]; then
+    echo "MOSTA_AFTER must be job ids separated by colons; got '$after_jobs'" >&2
+    problems=1
+fi
+if [[ -n "$after_jobs" && "$phase" != coupling && "$phase" != run ]]; then
+    echo "MOSTA_AFTER is read by the coupling and run phases only" >&2
+    problems=1
+fi
 if (( problems && ! dry_run )); then
     exit 2
 fi
 
 # Every job carries --comment=mosta:<root>, so runs in different roots (the
 # logcpm arm, a rerun) can be queued side by side; a MOSTA job without that
-# comment (submitted before it existed) is counted against every root.
+# comment (submitted before it existed) is counted against every root.  For
+# run with MOSTA_AFTER, each job it names has to be this root's equivalence
+# merge or coupling check, queued or running, and this root's checks
+# (mosta_equiv, mosta_equivm, mosta_coupling) are not counted: they write
+# only equivalence/ and coupling_verification/, never pairs/ or the OT claims.
 root=${root%/}
 tag="mosta:$root"
-active=$(squeue -u "$USER" -h -n "$names" -o "%k" 2> /dev/null | awk -v me="$tag" '$0 == me || $0 == "(null)" || $0 == ""' | wc -l) || active=0
+counted=$names
+if [[ "$phase" == run && -n "$after_jobs" ]]; then
+    counted=mosta_prep,mosta_rep,mosta_ot,mosta_collect,mosta_compare
+    for id in ${after_jobs//:/ }; do
+        line=$(squeue -u "$USER" -h -j "$id" -o "%j %k" 2> /dev/null)
+        if [[ "$line" != "mosta_equivm $tag" && "$line" != "mosta_coupling $tag" ]]; then
+            echo "MOSTA_AFTER: job $id is not a queued or running equivalence merge or coupling check of $root (squeue says '${line}'); if the checks have ended, read their reports and submit run without MOSTA_AFTER" >&2
+            (( dry_run )) || exit 3
+        else
+            echo "the run waits for job $id (${line%% *})" >&2
+        fi
+    done
+    for name in mosta_equivm mosta_coupling; do
+        if ! squeue -u "$USER" -h -j "${after_jobs//:/,}" -o "%j" 2> /dev/null | grep -qx "$name"; then
+            echo "MOSTA_AFTER names no $name job; the run has to wait for both the equivalence merge and the coupling check" >&2
+            (( dry_run )) || exit 3
+        fi
+    done
+fi
+active=$(squeue -u "$USER" -h -n "$counted" -o "%k" 2> /dev/null | awk -v me="$tag" '$0 == me || $0 == "(null)" || $0 == ""' | wc -l) || active=0
 if (( active > 0 && ! dry_run )); then
     echo "$active MOSTA jobs of $root are still queued or running (squeue -u $USER -n $names -o '%i %j %k'); wait for them or scancel them" >&2
     exit 3
@@ -407,25 +445,33 @@ float64_identity_passed() {
 }
 
 if [[ "$phase" == run ]]; then
-    if [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" && "$device" == cuda && "${MOSTA_GATE:-}" == float64-identity ]] && float64_identity_passed; then
-        echo "gate: every float64 comparison in the recorded equivalence check passed (MOSTA_GATE=float64-identity)" >&2
-        (( dry_run )) || printf 'run gated on criterion A of %s, %s\n' "$root/equivalence/report.csv" "$(date --iso-8601=seconds)" > "$root/equivalence/RUN_GATE_FLOAT64_IDENTITY"
-    elif [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" ]]; then
-        echo "no $root/equivalence/EQUIVALENCE_PASS: run the equivalence check and read equivalence/summary.json first" >&2
-        (( dry_run )) || exit 3
-    elif grep -q '"devices"' "$root/equivalence/summary.json" 2> /dev/null; then
-        if ! grep -q "\"$device\"" "$root/equivalence/summary.json"; then
-            echo "the equivalence check that passed did not run on $device; check $device first (MOSTA_DEVICE=$device ... equivalence)" >&2
+    ot_dependency=()
+    if [[ -n "$after_jobs" ]]; then
+        # The checks have not ended: the gate is the afterok dependency, and
+        # every OT worker reads the PASS files again when it starts.
+        echo "gate: the OT workers wait afterok:$after_jobs and check EQUIVALENCE_PASS and COUPLING_PASS when they start" >&2
+        ot_dependency=(--dependency="afterok:$after_jobs")
+    else
+        if [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" && "$device" == cuda && "${MOSTA_GATE:-}" == float64-identity ]] && float64_identity_passed; then
+            echo "gate: every float64 comparison in the recorded equivalence check passed (MOSTA_GATE=float64-identity)" >&2
+            (( dry_run )) || printf 'run gated on criterion A of %s, %s\n' "$root/equivalence/report.csv" "$(date --iso-8601=seconds)" > "$root/equivalence/RUN_GATE_FLOAT64_IDENTITY"
+        elif [[ ! -f "$root/equivalence/EQUIVALENCE_PASS" ]]; then
+            echo "no $root/equivalence/EQUIVALENCE_PASS: run the equivalence check and read equivalence/summary.json first" >&2
+            (( dry_run )) || exit 3
+        elif grep -q '"devices"' "$root/equivalence/summary.json" 2> /dev/null; then
+            if ! grep -q "\"$device\"" "$root/equivalence/summary.json"; then
+                echo "the equivalence check that passed did not run on $device; check $device first (MOSTA_DEVICE=$device ... equivalence)" >&2
+                (( dry_run )) || exit 3
+            fi
+        elif [[ "$device" != cuda ]]; then
+            # A summary without "devices" comes from 2b5f3bb, whose check ran on the GPU only.
+            echo "the equivalence check that passed ran on cuda; check $device first" >&2
             (( dry_run )) || exit 3
         fi
-    elif [[ "$device" != cuda ]]; then
-        # A summary without "devices" comes from 2b5f3bb, whose check ran on the GPU only.
-        echo "the equivalence check that passed ran on cuda; check $device first" >&2
-        (( dry_run )) || exit 3
-    fi
-    if [[ ! -f "$root/coupling_verification/COUPLING_PASS" ]]; then
-        echo "no $root/coupling_verification/COUPLING_PASS: run the coupling check (phase coupling) and read its REPORT.md first" >&2
-        (( dry_run )) || exit 3
+        if [[ ! -f "$root/coupling_verification/COUPLING_PASS" ]]; then
+            echo "no $root/coupling_verification/COUPLING_PASS: run the coupling check (phase coupling) and read its REPORT.md first" >&2
+            (( dry_run )) || exit 3
+        fi
     fi
     compare_jobs=0
     [[ -n "$compare_with" ]] && compare_jobs=1
@@ -434,7 +480,7 @@ if [[ "$phase" == run ]]; then
     ot_ids=()
     for (( i = 1; i <= ot_jobs; i++ )); do
         id=$(submit "OT worker $i ($device)" \
-            "${compute[@]}" -t 48:00:00 -A "$account" -J mosta_ot \
+            "${compute[@]}" -t 48:00:00 -A "$account" -J mosta_ot "${ot_dependency[@]}" \
             -o "$root/logs/ot_%j.out" -e "$root/logs/ot_%j.err" \
             "$(stage_args ot)",MOSTA_THREADS=$threads,MOSTA_STOP_HOURS=40 "$job") || exit 1
         ot_ids+=("$id")

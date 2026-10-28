@@ -78,6 +78,21 @@ case "$stage" in
         python mouse_embryo/24_check_blockwise_equivalence.py "$root" --merge || exit $?
         ;;
     ot)
+        # The gates again, at the start: a run submitted with MOSTA_AFTER was
+        # submitted before the checks ended.
+        if [[ ! -f "$root/coupling_verification/COUPLING_PASS" ]]; then
+            echo "no $root/coupling_verification/COUPLING_PASS; OT not started" >&2
+            exit 3
+        fi
+        if [[ -f "$root/equivalence/EQUIVALENCE_PASS" ]]; then
+            if grep -q '"devices"' "$root/equivalence/summary.json" 2> /dev/null && ! grep -q "\"$device\"" "$root/equivalence/summary.json"; then
+                echo "the equivalence check that passed did not run on $device; OT not started" >&2
+                exit 3
+            fi
+        elif [[ ! -f "$root/equivalence/RUN_GATE_FLOAT64_IDENTITY" ]]; then
+            echo "no $root/equivalence/EQUIVALENCE_PASS (nor a float64-identity gate record); OT not started" >&2
+            exit 3
+        fi
         python mouse_embryo/23_run_mosta_pair.py "$root" --device "$device" \
             --stop-claiming-after-hours "${MOSTA_STOP_HOURS:-40}" || exit $?
         ;;
