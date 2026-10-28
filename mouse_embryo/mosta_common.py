@@ -26,7 +26,28 @@ STAGES = ("E9.5", "E10.5", "E11.5", "E12.5", "E13.5", "E14.5", "E15.5", "E16.5")
 # Fixed analysis settings.  The label is written out in full: the shorthand
 # rank256_nm_ds_cos parses as a 'precomputed' pass-through, and
 # ranknm256_ds_cos is gene-scaled (checked locally, 2026-10-08).
-PREPROCESSING_LABEL = "ranknm256_noscale_ds_cos"
+#
+# One run is one representation, named by MOSTA_PREPROCESSING (default the
+# production ranknm256_noscale_ds_cos); each gets its own MOSTA_ROOT.  Only the
+# configurations in EXPECTED_PREPROCESSING run, and each is checked field by
+# field.  logcpm (user, 2026-10-27) is the conventional log1p arm: library size
+# 1e4, log1p, 2,000 HVGs, per-gene z-score, PCA 30, squared Euclidean, on the
+# original counts (no equalisation).
+EXPECTED_PREPROCESSING = {
+    "ranknm256_noscale_ds_cos": {
+        "label": "ranknm256_noscale_ds_cos", "normalisation": "rank_no_median", "rank_top_n": 256,
+        "scale_genes": False, "equalise_depth": True, "cost": "cosine", "scale": "median_sampled_pair",
+        "n_hvg": 2000, "n_pcs": 30, "minimum_detection_rate": 0.0, "regress_out": [],
+    },
+    "logcpm": {
+        "label": "logcpm", "normalisation": "log_cpm", "scale_genes": True, "equalise_depth": False,
+        "cost": "squared_euclidean", "scale": "median_sampled_pair", "n_hvg": 2000, "n_pcs": 30,
+        "minimum_detection_rate": 0.0, "regress_out": [],
+    },
+}
+PREPROCESSING_LABEL = os.environ.get("MOSTA_PREPROCESSING", "ranknm256_noscale_ds_cos")
+if PREPROCESSING_LABEL not in EXPECTED_PREPROCESSING:
+    raise SystemExit(f"MOSTA_PREPROCESSING={PREPROCESSING_LABEL!r}; expected one of {sorted(EXPECTED_PREPROCESSING)}")
 EXCLUDED_ANNOTATIONS = ("Cavity",)
 # cancer_metastasis/27_downsample_counts.py: one shared target, the 10th
 # percentile of every analysed bin's depth pooled over all slices, and its
@@ -58,20 +79,8 @@ SOLVER_DTYPE = {"cuda": "float64", "cpu": "float64"}
 
 
 def check_preprocessing(configuration: Any) -> None:
-    """Stop unless the configuration is exactly ranknm256_noscale_ds_cos."""
-    expected = {
-        "label": PREPROCESSING_LABEL,
-        "normalisation": "rank_no_median",
-        "rank_top_n": 256,
-        "scale_genes": False,
-        "equalise_depth": True,
-        "cost": "cosine",
-        "scale": "median_sampled_pair",
-        "n_hvg": 2000,
-        "n_pcs": 30,
-        "minimum_detection_rate": 0.0,
-        "regress_out": [],
-    }
+    """Stop unless the configuration is exactly the one registered for this run's label."""
+    expected = EXPECTED_PREPROCESSING[PREPROCESSING_LABEL]
     found = configuration.as_dict()
     wrong = {key: (found.get(key), value) for key, value in expected.items() if found.get(key) != value}
     if wrong:

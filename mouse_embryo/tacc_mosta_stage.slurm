@@ -44,7 +44,7 @@ export OMP_NUM_THREADS=$threads OPENBLAS_NUM_THREADS=$threads MKL_NUM_THREADS=$t
 CONFIDENCEOT_COMMIT=$(git -C "$repo" rev-parse HEAD 2> /dev/null || echo unknown)
 export CONFIDENCEOT_COMMIT
 cd "$repo"
-echo "stage=$stage device=$device threads=$threads root=$root commit=$CONFIDENCEOT_COMMIT host=$(hostname) start=$(date --iso-8601=seconds)"
+echo "stage=$stage preprocessing=${MOSTA_PREPROCESSING:-ranknm256_noscale_ds_cos} device=$device threads=$threads root=$root commit=$CONFIDENCEOT_COMMIT host=$(hostname) start=$(date --iso-8601=seconds)"
 if [[ "$device" != cpu && "$device" != cuda ]]; then
     echo "MOSTA_DEVICE must be cpu or cuda; got '$device'" >&2
     exit 2

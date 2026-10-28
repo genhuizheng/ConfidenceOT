@@ -1,4 +1,7 @@
-"""Build the ranknm256_noscale_ds_cos representation of every MOSTA pair.
+"""Build the representation (MOSTA_PREPROCESSING, default ranknm256_noscale_ds_cos) of every MOSTA pair.
+
+With a configuration that does not equalise depth (logcpm), each slice's original counts
+are read for exactly the equalised slice's bins, so both runs analyse the same bins.
 
 Each pair takes its two equalised slices whole: every analysed bin, with no
 per-side cap.  The counts go to ``confidenceot.Preprocessing`` the way
@@ -40,7 +43,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mosta_common import (  # noqa: E402
     PREPROCESSING_LABEL, SEED, Layout, check_preprocessing, claim, publish,
-    read_equalised_slice, read_pairs, staging_directory, write_json,
+    read_equalised_slice, read_pairs, read_slices, staging_directory, write_json,
 )
 
 SUCCESS = "REPRESENTATION_SUCCESS"
@@ -58,6 +61,26 @@ def common_columns(source_genes: np.ndarray, target_genes: np.ndarray):
     return common, [source_first[key] for key in common], [target_first[key] for key in common]
 
 
+def original_counts(layout: Layout, sample: str, equalised: dict) -> dict:
+    """The same analysed bins with their original counts, for a configuration without equalisation.
+
+    Rows follow the equalised slice's bin order and columns its genes, so both runs of the study
+    see exactly the same bins; any bin or gene the original file lacks is an error, never a guess.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("equalise21", Path(__file__).resolve().parent / "21_equalise_mosta_depth.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    path = read_slices(layout).set_index("sample").loc[sample, "path"]
+    counts, bin_ids, _, _, genes = module.read_counts(path)
+    rows = pd.Index(bin_ids).get_indexer(equalised["bin_ids"])
+    columns = pd.Index(genes).get_indexer(equalised["genes"])
+    if (rows < 0).any() or (columns < 0).any():
+        raise SystemExit(f"{sample}: {int((rows < 0).sum())} bins / {int((columns < 0).sum())} genes of the "
+                         f"equalised slice are not in {path}")
+    return {**equalised, "counts": counts[rows][:, columns]}
+
+
 def prepare_pair(layout: Layout, row: pd.Series) -> dict:
     from confidenceot import Preprocessing
 
@@ -66,10 +89,15 @@ def prepare_pair(layout: Layout, row: pd.Series) -> dict:
     started = time.perf_counter()
     source = read_equalised_slice(layout.equalised_h5ad(row["source_sample"]))
     target = read_equalised_slice(layout.equalised_h5ad(row["target_sample"]))
+    if not configuration.equalise_depth:
+        # same bins, original counts: the equalised slices fix which bins are analysed
+        source = original_counts(layout, row["source_sample"], source)
+        target = original_counts(layout, row["target_sample"], target)
     loaded = time.perf_counter() - started
     common, source_columns, target_columns = common_columns(source["genes"], target["genes"])
-    rank_short = {
-        side: int(np.sum(np.diff(data["counts"][:, columns].indptr) < configuration.rank_top_n))
+    rank_short = {  # the rank-cut check means nothing without a rank encoding
+        side: (int(np.sum(np.diff(data["counts"][:, columns].indptr) < configuration.rank_top_n))
+               if configuration.rank_top_n else None)
         for side, data, columns in (("source", source, source_columns), ("target", target, target_columns))
     }
     seed = SEED + int(row["index"])
@@ -78,7 +106,9 @@ def prepare_pair(layout: Layout, row: pd.Series) -> dict:
         source_genes=source["genes"], target_genes=target["genes"],
         extra_provenance={
             "equalise_applied_here": False,
-            "equalise_note": "counts equalised at the file level by mouse_embryo/21_equalise_mosta_depth.py",
+            "equalise_note": ("counts equalised at the file level by mouse_embryo/21_equalise_mosta_depth.py"
+                              if configuration.equalise_depth else
+                              "original counts of the equalised slices' bins (no equalisation)"),
         },
     )
     if representation.provenance["label"] != PREPROCESSING_LABEL:

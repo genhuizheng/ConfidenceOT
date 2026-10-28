@@ -21,6 +21,15 @@
 #       The audit, tables, pseudobulks and download list again, for instance
 #       after a resubmission of run.
 #
+# MOSTA_PREPROCESSING names the representation (default ranknm256_noscale_ds_cos;
+# also logcpm, mosta_common.EXPECTED_PREPROCESSING); give each its own MOSTA_ROOT.
+# MOSTA_SHARED_INPUTS=<root of a run whose prepare finished>: prepare links that
+# run's manifest, equalisation, equalised slices and slice tables into MOSTA_ROOT
+# instead of rebuilding them, so both runs analyse the same bins; then builds this
+# run's representations and its own equivalence check.
+#
+#   MOSTA_PREPROCESSING=logcpm MOSTA_ROOT=.../mosta_all_stages_logcpm #   MOSTA_SHARED_INPUTS=.../mosta_all_stages bash mouse_embryo/submit_mosta_all_stages.sh prepare
+#
 # MOSTA_DEVICE picks the device for the equivalence check and the run; one run
 # uses one device for every pair.
 #   cuda (default, the production run): gh nodes, the GPU production path
@@ -52,6 +61,8 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${MOSTA_ROOT:-/scratch/10119/ghzheng/OT_project/mouse_embryo_results/mosta_all_stages}
 data=${MOSTA_DATA:-/scratch/10119/ghzheng/OT_project/data}
 device=${MOSTA_DEVICE:-cuda}
+preprocessing=${MOSTA_PREPROCESSING:-ranknm256_noscale_ds_cos}
+shared=${MOSTA_SHARED_INPUTS:-}
 representation_jobs=${MOSTA_REPRESENTATION_JOBS:-4}
 equivalence_shards=${MOSTA_EQUIVALENCE_SHARDS:-8}
 cap=${CONFIDENCEOT_JOB_CAP:-40}
@@ -80,6 +91,16 @@ for path in "$job" "$repo/mouse_embryo/23_run_mosta_pair.py" "$repo/src/confiden
 done
 if ! grep -q "equivalence_merge" "$job" 2> /dev/null; then
     echo "$job is older than this script: git pull in $repo first" >&2
+    problems=1
+fi
+if [[ -n "$shared" ]]; then
+    for part in manifest equalisation equalised slices; do
+        [[ -e "$shared/$part" ]] || { echo "MOSTA_SHARED_INPUTS: missing $shared/$part" >&2; problems=1; }
+    done
+    [[ "$(cd "$shared" 2> /dev/null && pwd -P)" == "$(mkdir -p "$root" && cd "$root" && pwd -P)" ]] && { echo "MOSTA_SHARED_INPUTS is MOSTA_ROOT itself" >&2; problems=1; }
+fi
+if [[ "$root" == */mosta_all_stages && "$preprocessing" != ranknm256_noscale_ds_cos ]]; then
+    echo "MOSTA_PREPROCESSING=$preprocessing would write into the production root $root; give it its own MOSTA_ROOT" >&2
     problems=1
 fi
 if [[ "$phase" == prepare && ! -d "$data" ]]; then
@@ -143,7 +164,7 @@ clear_claims() {
 
 stage_args() {
     # $1 = stage. The environment every job of that stage gets.
-    echo "--export=ALL,MOSTA_STAGE=$1,MOSTA_ROOT=$root,MOSTA_DATA=$data,CONFIDENCEOT_REPO=$repo,MOSTA_DEVICE=$device"
+    echo "--export=ALL,MOSTA_STAGE=$1,MOSTA_ROOT=$root,MOSTA_DATA=$data,CONFIDENCEOT_REPO=$repo,MOSTA_DEVICE=$device,MOSTA_PREPROCESSING=$preprocessing"
 }
 
 check_cap() {
@@ -197,6 +218,18 @@ equivalence_jobs() {
 
 if [[ "$phase" == prepare ]]; then
     check_cap $(( representation_jobs + 1 + $(equivalence_jobs) ))
+    if [[ -n "$shared" ]]; then
+        for part in manifest equalisation equalised slices; do
+            if [[ -e "$root/$part" ]]; then
+                echo "$root/$part exists; left as it is" >&2
+            elif (( dry_run )); then
+                echo "would link $root/$part -> $shared/$part" >&2
+            else
+                ln -s "$shared/$part" "$root/$part"
+                echo "linked $root/$part -> $shared/$part" >&2
+            fi
+        done
+    fi
     dependency=()
     if [[ -f "$root/equalisation/report.json" ]]; then
         echo "equalisation already done ($root/equalisation/report.json); not redone" >&2
