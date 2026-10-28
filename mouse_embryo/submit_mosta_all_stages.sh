@@ -62,8 +62,8 @@
 #
 # Resubmitting a phase continues where the last one stopped: finished pairs
 # are skipped, and the claims of unfinished pairs are cleared first.  That is
-# also why a phase refuses while any MOSTA job is still queued or running: two
-# workers would otherwise share a pair.
+# also why a phase refuses while any MOSTA job of the same MOSTA_ROOT is still
+# queued or running: two workers would otherwise share a pair.
 #
 # No set -u, as everywhere in this repo.
 set -eo pipefail
@@ -168,9 +168,14 @@ if (( problems && ! dry_run )); then
     exit 2
 fi
 
-active=$(squeue -u "$USER" -h -n "$names" -o %i 2> /dev/null | wc -l) || active=0
+# Every job carries --comment=mosta:<root>, so runs in different roots (the
+# logcpm arm, a rerun) can be queued side by side; a MOSTA job without that
+# comment (submitted before it existed) is counted against every root.
+root=${root%/}
+tag="mosta:$root"
+active=$(squeue -u "$USER" -h -n "$names" -o "%k" 2> /dev/null | awk -v me="$tag" '$0 == me || $0 == "(null)" || $0 == ""' | wc -l) || active=0
 if (( active > 0 && ! dry_run )); then
-    echo "$active MOSTA jobs are still queued or running (squeue -u $USER -n $names); wait for them or scancel them" >&2
+    echo "$active MOSTA jobs of $root are still queued or running (squeue -u $USER -n $names -o '%i %j %k'); wait for them or scancel them" >&2
     exit 3
 fi
 
@@ -179,12 +184,12 @@ submit() {
     local what=$1; shift
     if (( dry_run )); then
         echo "DRY RUN  $what" >&2
-        echo "         sbatch $*" >&2
+        echo "         sbatch --comment=$tag $*" >&2
         echo "DRYRUN"
         return 0
     fi
     local id
-    id=$(sbatch --parsable "$@" | tail -n 1)
+    id=$(sbatch --parsable --comment="$tag" "$@" | tail -n 1)
     # Inside $(...) set -e does not stop the script, so a refused submission
     # has to end it here, before anything is made to wait on it.
     if [[ ! "$id" =~ ^[0-9]+$ ]]; then
