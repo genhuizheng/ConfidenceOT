@@ -141,8 +141,11 @@ if [[ -n "$shared_representations" ]]; then
         echo "MOSTA_SHARED_REPRESENTATIONS: $found of $expected_pairs representations complete in $shared_representations" >&2
         problems=1
     fi
-    sample=$(ls "$shared_representations"/representations/*/representation.json 2> /dev/null | head -n 1)
-    if [[ -z "$sample" ]] || ! grep -q "\"label\": \"$preprocessing\"" "$sample"; then
+    # A glob, not ls | head: head closing the pipe early kills ls with SIGPIPE,
+    # which pipefail and set -e turn into a silent exit.
+    samples=("$shared_representations"/representations/*/representation.json)
+    sample=${samples[0]}
+    if [[ ! -f "$sample" ]] || ! grep -q "\"label\": \"$preprocessing\"" "$sample"; then
         echo "MOSTA_SHARED_REPRESENTATIONS: $sample is not $preprocessing" >&2
         problems=1
     fi
