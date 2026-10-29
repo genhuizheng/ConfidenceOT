@@ -13,8 +13,8 @@ prints, for every completed pair (nothing is filtered):
    side, with the number of those pairs and of partner-absent ones;
 4. per transition: the nominal-mass split of the source side into retained
    with a same-annotation partner, retained with another annotation, retained
-   without supported mass, and rejected (median over pairs; the four parts of
-   one pair sum to 1);
+   without supported mass, and rejected (mean over pairs, so the four parts
+   still sum to 1, as the figure design's bars do);
 5. per transition: where the bins M4-E rejects go under balanced OT (same
    annotation share of their mass), beside the same-annotation share of the
    M4-E retained mass;
@@ -98,7 +98,7 @@ def main() -> None:
             print(f"--- {group} {side}")
             print(ranked.head(args.top).round(3).to_string())
 
-    print("\n=== 4. source-side nominal mass split, median over pairs (adjacent)")
+    print("\n=== 4. source-side nominal mass split, mean over pairs (adjacent)")
     source = adjacent[adjacent["side"] == "source"].copy()
     weight = source["n_bins"]
     parts = {"retained_same": source["co_same_share"], "retained_other": source["co_other_share"],
@@ -113,8 +113,9 @@ def main() -> None:
     rows = []
     for group in ordered(per_pair.index.get_level_values("group")):
         part = per_pair.loc[group]
-        rows.append({"group": group, "pairs": len(part), **{name: f"{part[name].median():.3f}" for name in parts},
-                     "sum_of_medians_check": f"{sum(part[name].median() for name in parts):.3f}"})
+        rows.append({"group": group, "pairs": len(part), **{name: f"{part[name].mean():.3f}" for name in parts},
+                     "sum": f"{sum(part[name].mean() for name in parts):.3f}",
+                     "rejected per pair": spread(part["rejected"])})
     print(pd.DataFrame(rows).to_string(index=False))
 
     print("\n=== 5. same-annotation share: M4-E retained mass vs the M4-E rejected bins under balanced OT (adjacent, source)")
