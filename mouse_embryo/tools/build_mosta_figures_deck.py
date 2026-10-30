@@ -245,8 +245,16 @@ def main() -> None:
         "相邻组分早、中、晚三个时期；同期对照取 E11.5 和 E14.5",
     ], size=13, colour=MUTED)
 
-    # 5-9 retain / reject maps
+    # 5 rejection bars
     d = main_dir / "Fig3_spatial_retain_reject"
+    bars = pd.read_csv(TAB / "Fig3_rejection_bar.tsv", sep="\t")
+    src_adj = bars[(bars["kind"] == "adjacent") & (bars["side"] == "source")].set_index("group")["mean"]
+    slide = deck.slide(f"每个 bin 被拒绝的比例：相邻时期 source 平均 {src_adj.min():.2f}–{src_adj.max():.2f}",
+                       "柱 = 所有 pair 的平均拒绝率，误差线 = SD，点 = 每个 pair；左相邻时期，右同期对照；空心圆 = source 全部被拒绝",
+                       "Fig. 3")
+    deck.row(slide, [d / "Fig3_rejection_bar_adjacent.png", d / "Fig3_rejection_bar_same_stage.png"], 1.6, 5.3)
+
+    # 6-10 retain / reject maps
     for group, r in chosen.iterrows():
         folder = d / (f"{stem(group)}_adjacent" if r["kind"] == "adjacent" else f"{group}_same_stage")
         src, tgt = r["source_sample"], r["target_sample"]

@@ -529,6 +529,48 @@ def stage_fig3(ctx: Context) -> None:
     status_legend_file(ctx, f"{folder}/Fig3_legend_status")
     annotation_legend_file(ctx, [a for a in ctx.annotation_order() if a in shown], f"{folder}/Fig3_legend_annotations")
     ctx.out.table(pd.DataFrame(agreement), "tables/FigS7_m4e_m4r_agreement.tsv")
+    rejection_bars(ctx, folder)
+
+
+def rejection_bars(ctx: Context, folder: str) -> None:
+    """M4-E rejected fraction per group as bars: mean over every pair, error bar = SD, pairs as dots.
+
+    Source and target side by side; one panel per kind.  The pairs whose gate rejects every source bin
+    are kept and drawn as open circles, as in Fig. 5D.
+    """
+    metrics = pd.read_csv(ctx.run.root / "audit" / "pair_metrics.csv")
+    m4e = metrics[metrics["method"] == "M4-E"]
+    rows = []
+    for kind, label in (("adjacent", "adjacent-stage pairs"), ("same_stage", "same-stage pairs")):
+        part = m4e[m4e["kind"] == kind]
+        groups = sorted(part["group"].unique(), key=mv.group_order)
+        x = np.arange(len(groups))
+        figure, ax = plt.subplots(figsize=(3.6, 2.4))
+        rng = np.random.default_rng(1)
+        for offset, side, colour in ((-0.2, "source", mv.REJECTED), (0.2, "target", "#F2A285")):
+            values = [part.loc[part["group"] == g, f"{side}_final_rejection_rate"].to_numpy() for g in groups]
+            hollow = [source_all_rejected(part[part["group"] == g]).to_numpy() for g in groups]
+            means = np.array([v.mean() for v in values])
+            sds = np.array([v.std(ddof=1) if len(v) > 1 else 0.0 for v in values])
+            ax.bar(x + offset, means, width=0.38, color=colour, label=side, yerr=sds, capsize=1.5,
+                   error_kw=dict(lw=0.6, ecolor=mv.TEXT))
+            for xi, v, h in zip(x + offset, values, hollow):
+                jitter = xi + rng.uniform(-0.1, 0.1, len(v))
+                ax.scatter(jitter[~h], v[~h], s=1.5, color=mv.TEXT, alpha=0.45, linewidths=0, zorder=3)
+                ax.scatter(jitter[h], v[h], s=8, facecolors="none", edgecolors=mv.TEXT, linewidths=0.5, zorder=3)
+            for g, v in zip(groups, values):
+                rows.append({"kind": kind, "group": g, "side": side, "pairs": len(v), "mean": float(v.mean()),
+                             "sd": float(v.std(ddof=1)) if len(v) > 1 else np.nan, "median": float(np.median(v)),
+                             "all_source_rejected_pairs": int(source_all_rejected(part[part["group"] == g]).sum())})
+        ax.set_xticks(x, [arrow(g) for g in groups], rotation=45, ha="right")
+        ax.set_ylim(0, 1.05)
+        ax.set_ylabel("M4-E rejected fraction")
+        note = all_rejected_note(part)
+        ax.set_title(f"{label}: bar = mean over pairs, error bar = SD ({len(part)} pairs)"
+                     + (f"\n{note}" if note else ""), fontsize=6)
+        ax.legend(frameon=False, fontsize=5.5, loc="upper left", bbox_to_anchor=(1.0, 1.0))
+        ctx.out.figure(figure, f"{folder}/Fig3_rejection_bar_{kind}")
+    ctx.out.table(pd.DataFrame(rows), "tables/Fig3_rejection_bar.tsv")
 
 
 # ---------------------------------------------------------------- fig4
@@ -1089,7 +1131,9 @@ def stage_reports(ctx: Context) -> None:
             "own scale, x/y equal aspect, Cavity grey. Separate sections, not a 3D reconstruction.",
         "Fig3_spatial_retain_reject": f"M4-E retain/reject on the selected pairs ({pair_text}). Same-stage controls compare two "
             "sections of the same stage. Rejected means no supported correspondence in that comparison, under this "
-            "representation and calibration; it does not mean absence of developmental descendants.",
+            "representation and calibration; it does not mean absence of developmental descendants. Bars: M4-E "
+            "rejected fraction of every pair of a transition (adjacent) or stage (same-stage), mean with SD, each pair "
+            "a dot (tables/Fig3_rejection_bar.tsv).",
         "Fig4_spatial_correspondence": "For the three adjacent pairs of Fig. 3: retained source bins; their transport-weighted "
             "partner centroids and the push-forward density of their mass on the target section, for ConfidenceOT and for "
             "balanced OT on the same bins; distribution of partner spread. Summaries, not tracked positions.",
