@@ -173,6 +173,7 @@ def main() -> None:
     adjacent = rejection[rejection["kind"] == "adjacent"]
     same = rejection[rejection["kind"] == "same_stage"]
     every = rejection[rejection["source_final_rejection_rate"] >= 1.0]
+    higher = int((rejection["source_final_rejection_rate"] > rejection["target_final_rejection_rate"]).sum())
     order = ["E9.5->E10.5", "E10.5->E11.5", "E11.5->E12.5", "E12.5->E13.5", "E13.5->E14.5", "E14.5->E15.5",
              "E15.5->E16.5"]
     med = adjacent.groupby("group")[["source_final_rejection_rate", "target_final_rejection_rate"]].median()
@@ -336,7 +337,7 @@ def main() -> None:
         ("不能读出的 / 要注意的", {"bold": True, "colour": NAVY, "size": 15}),
         (f"同期对照也拒绝很多：source 拒绝中位数 {same_med.min():.2f}–{same_med.max():.2f}。拒绝反映的不只是发育变化，"
          "还有不同胚胎、不同切面之间的差异", {"bullet": True}),
-        (f"source 拒绝率总是高于 target；和 bin 数之比几乎无关（相邻 ρ = {rho[('adjacent', 'log2_size_ratio')]:.2f}），"
+        (f"{higher}/{len(rejection)} 个 pair 的 source 拒绝率高于 target；和 bin 数之比几乎无关（相邻 ρ = {rho[('adjacent', 'log2_size_ratio')]:.2f}），"
          f"和注释种类之差弱相关（相邻 ρ = {rho[('adjacent', 'annotation_difference')]:.2f}）；只是相关，不是原因",
          {"bullet": True}),
         ("同注释份额衡量的是一致性，不是真值；拒绝不证明没有发育后代", {"bullet": True}),
@@ -373,7 +374,8 @@ def main() -> None:
     deck.row(slide, [d / "FigS2_same_stage_source.png", d / "FigS2_same_stage_target.png"], 4.3, 2.75)
 
     d = supp / "FigS3_source_target_asymmetry"
-    slide = deck.slide("source 拒绝率高于 target：每个 pair 都在对角线上方", "B、C 只是相关，不是原因", "Fig. S3")
+    slide = deck.slide(f"{higher}/{len(rejection)} 个 pair 的 source 拒绝率高于 target（A 中对角线上方）",
+                       "B、C 只是相关，不是原因", "Fig. S3")
     deck.row(slide, [d / "FigS3A_source_vs_target.png", d / "FigS3B_log2_size_ratio.png",
                      d / "FigS3C_annotation_difference.png"], 1.6, 4.6)
     textbox(slide, 0.6, 6.35, 12.2, 0.7, ["  ".join(
