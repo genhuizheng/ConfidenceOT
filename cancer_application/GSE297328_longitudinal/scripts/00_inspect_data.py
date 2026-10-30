@@ -256,7 +256,10 @@ def main() -> None:
     for name in OTHER_H5AD:
         p = args.data / name
         if p.exists():
-            report[name] = h5ad_summary(p, None if obs is None else obs.index)
+            try:  # a file still downloading is reported, not fatal
+                report[name] = h5ad_summary(p, None if obs is None else obs.index)
+            except Exception as exc:
+                report[name] = {"error": f"{type(exc).__name__}: {exc}"}
     rds = args.data / "GSE297328_LTL331.RDS"
     if rds.exists():
         with open(rds, "rb") as f:
@@ -290,6 +293,9 @@ def main() -> None:
     for name in OTHER_H5AD:
         if name in report:
             r = report[name]
+            if "error" in r:
+                lines += ["", f"## {name}", "", f"- could not read: {r['error']}"]
+                continue
             lines += ["", f"## {name}", "", f"- shape {r['shape']}, X {r['X']}, raw {r['raw']}, layers {r['layers']}, obsm {r['obsm']}",
                       f"- uns keys {r['uns']}", f"- cells shared with annotated: {r.get('cells_shared_with_annotated')}",
                       f"- var names examples {r['var_names_examples']}", "", "### obs columns", ""]
