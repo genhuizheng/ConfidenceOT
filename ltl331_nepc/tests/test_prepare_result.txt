@@ -1,0 +1,13 @@
+PASS  01_convert_geo exits 0
+PASS  counts are the integer .raw
+PASS  time points ordered, relapse last: w00_preCX_1, w04_4wkCX_1, w20_20wkCX_1_R
+PASS  RAW cross-check: every author cell found in its CellRanger matrix, counts equal  ({'preCX_1': {'archive_cells': 64, 'author_cells': 60, 'author_cells_found': 60, 'genes_compared': 400, 'cells_compared': 60, 'counts_equal': True, 'max_abs_difference': 0.0}, '4wkCX_1': {'archive_cells': 64, 'author_cells': 60, 'author_cells_found': 60, 'genes_compared': 400, 'cells_compared': 60, ')
+PASS  per time point: malignant column, sample_id, time_weeks, raw counts equal to .raw
+PASS  02: adjacent pairs only (preCX->4wk, 4wk->20wk R)
+PASS  27_downsample_counts.py runs on the manifest
+PASS  27_ QC removed the mitochondria-heavy cells  (55 of 60 kept)
+PASS  03 exits 0
+PASS  03: the equalised file's cells in its order, with the original (not equalised) counts
+PASS  03: same pairs as the equalised manifest
+
+11 passed, 0 failed
