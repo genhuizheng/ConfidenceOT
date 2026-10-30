@@ -196,6 +196,105 @@ def main() -> None:
         ("读法：拒绝 = 这次比较、这个表示和校准下没有可支持的对应；不等于没有发育后代", {"bullet": True, "bold": True}),
     ], size=17, after=10)
 
+    # bar plots first, one per slide, numbers beside each
+    d3, d6 = main_dir / "Fig3_spatial_retain_reject", main_dir / "Fig6_key_results"
+    bars = pd.read_csv(TAB / "Fig3_rejection_bar.tsv", sep="\t")
+    key = pd.read_csv(TAB / "Fig6_key_results.tsv", sep="\t")
+
+    def bar_slide(heading, kicker, path, lines, section):
+        slide = deck.slide(heading, kicker, section)
+        deck.image(slide, path, 0.5, 1.6, 8.4, 5.4)
+        box = panel_box(slide, 9.05, 1.65, 3.8, 5.3)
+        box.text_frame.text = ""
+        textbox(slide, 9.2, 1.75, 3.55, 5.1, lines, size=12, after=4)
+
+    def bar_means(kind, side):
+        part = bars[(bars["kind"] == kind) & (bars["side"] == side)].set_index("group")
+        return part.reindex(sorted(part.index, key=lambda g: order.index(g) if g in order else
+                                   float(g[1:])))["mean"]
+
+    def key_mean(panel, series, stage, side="source"):
+        row = key[(key["panel"] == panel) & (key["series"] == series) & (key["stage"] == stage) & (key["side"] == side)]
+        return float(row["mean"].iloc[0])
+
+    header = lambda text: (text, {"bold": True, "colour": NAVY, "size": 13})
+
+    def signed(value):
+        """Two decimals with a sign, and no -0.00."""
+        value = round(value, 2)
+        return f"{value + 0.0:+.2f}" if value != 0 else "0.00"
+    for kind, name in (("adjacent", "相邻时期"), ("same_stage", "同期对照")):
+        src, tgt = bar_means(kind, "source"), bar_means(kind, "target")
+        n_every = int(bars.loc[(bars["kind"] == kind) & (bars["side"] == "source"), "all_source_rejected_pairs"].sum())
+        lines = [header("平均拒绝率 source / target")]
+        lines += [(f"{arrow(g)}：{src[g]:.2f} / {tgt[g]:.2f}", {"bullet": True}) for g in src.index]
+        if n_every:
+            lines.append((f"空心圆：{n_every} 个 pair 的 source 全部被拒绝，它们 target 的 0 不是匹配率", {"colour": MUTED,
+                                                                                         "size": 11}))
+        bar_slide(f"{name}：每个 bin 被拒绝的比例，source {src.min():.2f}–{src.max():.2f}，target "
+                  f"{tgt.min():.2f}–{tgt.max():.2f}",
+                  "柱 = 所有 pair 的平均拒绝率，误差线 = SD，点 = 每个 pair", d3 / f"Fig3_rejection_bar_{kind}.png", lines,
+                  "柱状图 · Fig. 3")
+
+    early, late = ["E9.5", "E10.5", "E11.5"], ["E12.5", "E13.5", "E14.5", "E15.5"]
+    adj_label, same_label = "adjacent pairs (k → k+1)", "same-stage pairs (k)"
+    for letter, side in (("A", "source"), ("B", "target")):
+        adj = {s: key_mean(f"6{letter}", adj_label, s, side) for s in early + late}
+        ctl = {s: key_mean(f"6{letter}", same_label, s, side) for s in early + late}
+        gap_early = [adj[s] - ctl[s] for s in early]
+        gap_late = [adj[s] - ctl[s] for s in late]
+        lines = [header("相邻时期 / 同期对照（差）")]
+        lines += [(f"{s}：{adj[s]:.2f} / {ctl[s]:.2f}（{signed(adj[s] - ctl[s])}）", {"bullet": True})
+                  for s in early + late]
+        lines.append(("同期对照 = 同一时期两张切片之间的比较", {"colour": MUTED, "size": 11}))
+        heading = (f"{side}：相邻减同期，早期 {signed(min(gap_early))} 到 {signed(max(gap_early))}，"
+                   f"后期 {signed(min(gap_late))} 到 {signed(max(gap_late))}")
+        bar_slide(heading, "早期 = E9.5–E11.5，后期 = E12.5 以后；x 轴 = 转换的起始时期 k；橙 = 相邻时期 k → k+1，灰 = k 时期的同期对照",
+                  d6 / f"Fig6{letter}_transition_vs_same_stage_{side}.png", lines, f"柱状图 · Fig. 6{letter}")
+
+    counts = key[(key["panel"] == "6C") & (key["series"] == "pairs with absent > present")].set_index(["stage", "side"])
+    absent_label, present_label = "annotation absent from the partner section", "annotation present in the partner section"
+    lines = [header("平均拒绝率：不存在 / 存在")]
+    for kind, name in (("adjacent", "相邻时期"), ("same_stage", "同期对照")):
+        for side in ("source", "target"):
+            c = counts.loc[(kind, side)]
+            lines.append((f"{name} {side}：{key_mean('6C', absent_label, kind, side):.2f} / "
+                          f"{key_mean('6C', present_label, kind, side):.2f}（{int(c['mean'])}/{int(c['pairs'])} 个 pair "
+                          "不存在的更高）", {"bullet": True}))
+    lines += [("闸门没有用到注释，这是独立的一致性检查", {"size": 11, "colour": MUTED}),
+              ("存在的组织也被拒绝很多，注释缺失只解释一部分拒绝", {"size": 11, "colour": MUTED})]
+    c = counts.loc[("adjacent", "source")]
+    bar_slide(f"伙伴切片上没有的组织被拒绝得更多：相邻时期 source {int(c['mean'])}/{int(c['pairs'])} 个 pair",
+              "每个 pair 内比较：注释在伙伴切片上不存在的 bin 对存在的 bin；柱上数字 = 不存在的更高的 pair 数",
+              d6 / "Fig6C_partner_absent_vs_present.png", lines, "柱状图 · Fig. 6C")
+
+    share = key[key["panel"] == "6D"].pivot(index="stage", columns="series", values="mean")
+    share = share.reindex([g for g in order if g in share.index])
+    co, same_bins, rej_bins = ("ConfidenceOT, retained bins", "balanced OT, same retained bins",
+                               "balanced OT, rejected bins")
+    ordered = int(((share[co] > share[same_bins]) & (share[same_bins] > share[rej_bins])).sum())
+    lines = [header("ConfidenceOT / balanced 同一批 / balanced 被拒")]
+    lines += [(f"{arrow(g)}：{share.loc[g, co]:.2f} / {share.loc[g, same_bins]:.2f} / {share.loc[g, rej_bins]:.2f}",
+               {"bullet": True}) for g in share.index]
+    lines.append(("同注释份额衡量一致性，不是真值", {"colour": MUTED, "size": 11}))
+    bar_slide(f"同注释份额：{ordered}/{len(share)} 个转换里 ConfidenceOT 最高、被拒的 bin 最低",
+              "source 质量里运到同一种注释的比例：ConfidenceOT 保留的 bin，balanced OT 在同一批 bin 上，balanced OT 在被拒的 bin 上",
+              d6 / "Fig6D_same_annotation_share.png", lines, "柱状图 · Fig. 6D")
+
+    sp = key[key["panel"] == "6E"]
+    sp_mean = sp[sp["series"] != "pairs where ConfidenceOT is narrower"].pivot(index="stage", columns="series",
+                                                                                values="mean")
+    sp_count = sp[sp["series"] == "pairs where ConfidenceOT is narrower"].set_index("stage")
+    sp_mean = sp_mean.reindex([g for g in order if g in sp_mean.index])
+    lines = [header("ConfidenceOT / balanced OT（更窄的 pair）")]
+    lines += [(f"{arrow(g)}：{sp_mean.loc[g, 'ConfidenceOT']:.0f} / {sp_mean.loc[g, 'balanced OT, same bins']:.0f}"
+               f"（{int(sp_count.loc[g, 'mean'])}/{int(sp_count.loc[g, 'pairs'])}）", {"bullet": True})
+              for g in sp_mean.index]
+    lines.append(("离散度按各自切片的坐标单位，跨转换不可直接比", {"colour": MUTED, "size": 11}))
+    bar_slide(f"伙伴更集中：{int(sp_count['mean'].sum())}/{int(sp_count['pairs'].sum())} 个相邻 pair 中 ConfidenceOT 的伙伴离散度更窄",
+              "每个保留 bin 在 target 上伙伴位置的离散度，每个 pair 取中位数；balanced OT 在同一批 bin 上",
+              d6 / "Fig6E_partner_spread.png", lines, "柱状图 · Fig. 6E")
+
     # 2 overview
     per_stage = composition.set_index("stage")["analysed"]
     slide = deck.slide(f"{int(composition['slices'].sum())} 张切片覆盖 E9.5–E16.5，每期分析 bin 数从 "
@@ -214,51 +313,6 @@ def main() -> None:
         f"合计 {int(composition['analysed'].sum()):,} 个分析 bin，Cavity {int(composition['cavity'].sum()):,} 个排除",
         "代表切片规则：注释种类最多，然后 bin 最多，然后按名字",
     ], size=12, colour=INK, after=6)
-
-    # key results (Fig. 6), right after the overview
-    d = main_dir / "Fig6_key_results"
-    key = pd.read_csv(TAB / "Fig6_key_results.tsv", sep="\t")
-
-    def key_mean(panel, series, stage, side="source"):
-        row = key[(key["panel"] == panel) & (key["series"] == series) & (key["stage"] == stage) & (key["side"] == side)]
-        return float(row["mean"].iloc[0])
-
-    early, late = ["E9.5", "E10.5", "E11.5"], ["E12.5", "E13.5", "E14.5", "E15.5"]
-    adj_label, same_label = "adjacent pairs (k → k+1)", "same-stage pairs (k)"
-    early_adj = [key_mean("6A", adj_label, s) for s in early]
-    late_adj = [key_mean("6A", adj_label, s) for s in late]
-    early_gap = [key_mean("6A", adj_label, s) - key_mean("6A", same_label, s) for s in early]
-    late_gap = [key_mean("6A", adj_label, s) - key_mean("6A", same_label, s) for s in late]
-    slide = deck.slide(f"重点 1：早期转换几乎全部拒绝（source {min(early_adj):.2f}–{max(early_adj):.2f}），"
-                       f"后期降到 {min(late_adj):.2f}–{max(late_adj):.2f}",
-                       f"比同期对照高：E9.5–E11.5 为 {min(early_gap):+.2f} 到 {max(early_gap):+.2f}，E12.5 以后为 "
-                       f"{min(late_gap):+.2f} 到 {max(late_gap):+.2f}，后期和两张同期切片之间的拒绝接近", "重点结果 · Fig. 6A–B")
-    deck.row(slide, [d / "Fig6A_transition_vs_same_stage_source.png", d / "Fig6B_transition_vs_same_stage_target.png"],
-             1.6, 5.3, captions=["source", "target"])
-    counts = key[(key["panel"] == "6C") & (key["series"] == "pairs with absent > present")].set_index(["stage", "side"])
-    absent_label, present_label = "annotation absent from the partner section", "annotation present in the partner section"
-    slide = deck.slide("重点 2：伙伴切片上没有的组织，被拒绝得更多",
-                       "每个 pair 内比较：注释在伙伴切片上不存在的 bin 对存在的 bin；数字 = 不存在的更高的 pair 数", "重点结果 · Fig. 6C")
-    deck.image(slide, d / "Fig6C_partner_absent_vs_present.png", 0.5, 1.6, 8.2, 5.3)
-    lines = []
-    for kind, name in (("adjacent", "相邻时期"), ("same_stage", "同期对照")):
-        for side in ("source", "target"):
-            c = counts.loc[(kind, side)]
-            lines.append((f"{name} {side}：{key_mean('6C', absent_label, kind, side):.2f} 对 "
-                          f"{key_mean('6C', present_label, kind, side):.2f}，{int(c['mean'])}/{int(c['pairs'])} 个 pair",
-                          {"bullet": True}))
-    textbox(slide, 8.9, 1.8, 3.95, 5.0, [("平均拒绝率（不存在 对 存在）", {"bold": True, "colour": NAVY})] + lines + [
-        ("闸门没有用到注释，这是一个独立的一致性检查", {"after": 2}),
-        ("存在的组织也被拒绝很多，所以注释缺失只解释一部分拒绝", {}),
-    ], size=13, after=8)
-    spread_counts = key[(key["panel"] == "6E") & (key["series"] == "pairs where ConfidenceOT is narrower")]
-    slide = deck.slide("重点 3：保留下来的 bin 上，ConfidenceOT 的对应更一致、更集中",
-                       f"D 同注释份额：ConfidenceOT 保留的 bin > balanced OT 同一批 bin > balanced OT 被拒的 bin；"
-                       f"E 伙伴离散度：{int(spread_counts['mean'].sum())}/{int(spread_counts['pairs'].sum())} 个相邻 pair "
-                       "中 ConfidenceOT 更窄", "重点结果 · Fig. 6D–E")
-    deck.row(slide, [d / "Fig6D_same_annotation_share.png", d / "Fig6E_partner_spread.png"], 1.6, 5.0)
-    textbox(slide, 0.6, 6.65, 12.2, 0.4, ["同注释份额是一致性，不是真值；伙伴离散度按各自切片的坐标单位"], size=11,
-            colour=MUTED)
 
     # 3 atlas
     slide = deck.slide("代表切片的注释图谱", "每张切片用自己的比例尺；Cavity 为灰色；彼此是不同胚胎的切片，不是 3D 重建",
@@ -292,14 +346,7 @@ def main() -> None:
         "相邻组分早、中、晚三个时期；同期对照取 E11.5 和 E14.5",
     ], size=13, colour=MUTED)
 
-    # 5 rejection bars
     d = main_dir / "Fig3_spatial_retain_reject"
-    bars = pd.read_csv(TAB / "Fig3_rejection_bar.tsv", sep="\t")
-    src_adj = bars[(bars["kind"] == "adjacent") & (bars["side"] == "source")].set_index("group")["mean"]
-    slide = deck.slide(f"每个 bin 被拒绝的比例：相邻时期 source 平均 {src_adj.min():.2f}–{src_adj.max():.2f}",
-                       "柱 = 所有 pair 的平均拒绝率，误差线 = SD，点 = 每个 pair；左相邻时期，右同期对照；空心圆 = source 全部被拒绝",
-                       "Fig. 3")
-    deck.row(slide, [d / "Fig3_rejection_bar_adjacent.png", d / "Fig3_rejection_bar_same_stage.png"], 1.6, 5.3)
 
     # 6-10 retain / reject maps
     for group, r in chosen.iterrows():
