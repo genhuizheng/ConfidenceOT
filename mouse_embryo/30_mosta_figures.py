@@ -56,6 +56,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import textwrap
 import time
 import traceback
 
@@ -413,9 +414,9 @@ def stage_fig1(ctx: Context) -> None:
     ax.axis("off")
     steps = [
         ("MOSTA Stereo-seq\nsections", f"{len(per_slice)} sections\nE9.5–E16.5"),
-        ("Bins and\nrepresentation", f"Cavity removed\ndepth equalised to {target_depth}\nranknm256_noscale_ds_cos"),
-        ("Pairwise OT", f"{int(adjacent.sum())} adjacent + {int(same.sum())} same-stage\nM4-E, M4-R, balanced OT"),
-        ("M4-E gate", "each bin retained\nor rejected\n(calibrated, acceptance 0.99)"),
+        ("Bins and\nrepresentation", f"Cavity removed\ndepth equalised\nto {target_depth} counts\nranknm256_noscale_ds_cos"),
+        ("Pairwise OT", f"{int(adjacent.sum())} adjacent\n+ {int(same.sum())} same-stage\nM4-E, M4-R, balanced OT"),
+        ("M4-E gate", "each bin retained\nor rejected\n(calibrated,\nacceptance 0.99)"),
         ("Summaries", "spatial maps\npartner positions\nannotation correspondence"),
     ]
     width = 0.165
@@ -423,7 +424,7 @@ def stage_fig1(ctx: Context) -> None:
         x0 = 0.01 + i * 0.2
         ax.add_patch(plt.Rectangle((x0, 0.2), width, 0.7, facecolor="#F2F5F8", edgecolor="#5B7FA6", lw=0.8))
         ax.text(x0 + width / 2, 0.76, head, ha="center", va="center", fontsize=7, fontweight="bold")
-        ax.text(x0 + width / 2, 0.44, body, ha="center", va="center", fontsize=5.8, color=mv.TEXT)
+        ax.text(x0 + width / 2, 0.42, body, ha="center", va="center", fontsize=5.3, color=mv.TEXT, linespacing=1.15)
         if i < len(steps) - 1:
             ax.annotate("", xy=(x0 + 0.2, 0.55), xytext=(x0 + width, 0.55),
                         arrowprops=dict(arrowstyle="-|>", color=mv.TEXT, lw=0.8))
@@ -604,7 +605,7 @@ def stage_fig4(ctx: Context) -> None:
         ax.set_xlabel("partner spread (coordinate units)")
         ax.set_ylabel("density")
         ax.set_title(f"{arrow(group)}: spread of partners, {int(supported.sum()):,} retained bins", fontsize=6.5)
-        ax.legend(frameon=False)
+        ax.legend(frameon=False, fontsize=5.5, loc="upper left", bbox_to_anchor=(1.0, 1.0))
         ctx.out.figure(figure, f"{prefix}/Fig4F_partner_spread")
         summary.append({"pair_id": row.pair_id, "group": group, "source_retained": float(retained.mean()),
                         "retained_with_supported_mass": int(supported.sum()),
@@ -764,22 +765,38 @@ def stage_fig5(ctx: Context) -> None:
     metrics = pd.read_csv(audit / "pair_metrics.csv")
     m4e = metrics[(metrics["method"] == "M4-E") & (metrics["kind"] == "adjacent")]
     figure, ax = plt.subplots(figsize=(3.0, 2.4))
-    strip(ax, [m4e.loc[m4e["group"] == g, "target_final_rejection_rate"].to_numpy() for g in groups], x, mv.REJECTED)
+    strip(ax, [m4e.loc[m4e["group"] == g, "target_final_rejection_rate"].to_numpy() for g in groups], x, mv.REJECTED,
+          hollow=[source_all_rejected(m4e[m4e["group"] == g]).to_numpy() for g in groups])
     ax.set_xticks(x, [arrow(g) for g in groups], rotation=45, ha="right")
     ax.set_ylim(0, 1)
     ax.set_ylabel("target rejected fraction")
-    ax.set_title("Target side: M4-E rejected fraction per pair")
+    note = all_rejected_note(m4e)
+    ax.set_title("Target side: M4-E rejected fraction per pair" + (f"\n{note}" if note else ""), fontsize=6.5)
     ctx.out.figure(figure, f"{folder}/Fig5D_target_rejection")
 
 
 # ---------------------------------------------------------------- supplementary
 
-def strip(ax, data, positions, colour):
+def strip(ax, data, positions, colour, hollow=None):
+    """Box + jittered points; ``hollow`` (one boolean array per box) draws those points as open black circles."""
     ax.boxplot(data, positions=positions, widths=0.55, showfliers=False, medianprops=dict(color=mv.TEXT, lw=0.8),
                boxprops=dict(lw=0.6), whiskerprops=dict(lw=0.6), capprops=dict(lw=0.6))
     rng = np.random.default_rng(1)
-    for xi, values in zip(positions, data):
-        ax.scatter(xi + rng.uniform(-0.18, 0.18, len(values)), values, s=2.5, color=colour, alpha=0.55, linewidths=0)
+    for i, (xi, values) in enumerate(zip(positions, data)):
+        jitter = xi + rng.uniform(-0.18, 0.18, len(values))
+        mask = np.zeros(len(values), bool) if hollow is None else np.asarray(hollow[i], bool)
+        ax.scatter(jitter[~mask], values[~mask], s=2.5, color=colour, alpha=0.55, linewidths=0)
+        ax.scatter(jitter[mask], values[mask], s=9, facecolors="none", edgecolors=mv.TEXT, linewidths=0.5)
+
+
+def source_all_rejected(frame: pd.DataFrame) -> pd.Series:
+    """Pairs whose M4-E gate rejects every source bin: nothing is asserted, so the target's rate is not a match rate."""
+    return frame["source_final_rejection_rate"] >= 1.0
+
+
+def all_rejected_note(frame: pd.DataFrame) -> str:
+    n = int(source_all_rejected(frame).sum())
+    return f"open circles: {n} pairs with every source bin rejected (target rate not a match rate)" if n else ""
 
 
 def stage_supp(ctx: Context) -> None:
@@ -797,12 +814,14 @@ def stage_supp(ctx: Context) -> None:
         for side in ("source", "target"):
             figure, ax = plt.subplots(figsize=(3.4, 2.4))
             strip(ax, [part.loc[part["group"] == g, f"{side}_final_rejection_rate"].to_numpy() for g in groups],
-                  np.arange(len(groups)), mv.REJECTED if kind == "adjacent" else "#8C8C8C")
+                  np.arange(len(groups)), mv.REJECTED if kind == "adjacent" else "#8C8C8C",
+                  hollow=[source_all_rejected(part[part["group"] == g]).to_numpy() for g in groups])
             ax.set_xticks(range(len(groups)), [arrow(g) for g in groups], rotation=45, ha="right")
             ax.set_ylim(0, 1)
             ax.set_ylabel("M4-E rejected fraction")
+            note = all_rejected_note(part)
             ax.set_title(f"{'adjacent-stage' if kind == 'adjacent' else 'same-stage'} pairs, {side} side "
-                         f"({len(part)} pairs)")
+                         f"({len(part)} pairs)" + (f"\n{note}" if note else ""), fontsize=6.5)
             ctx.out.figure(figure, f"{folder}/FigS2_{kind}_{side}")
     ctx.out.table(m4e[["pair_id", "kind", "group", "source_bins", "target_bins", "source_final_rejection_rate",
                        "target_final_rejection_rate"]], "tables/FigS2_rejection_per_pair.tsv")
@@ -819,11 +838,16 @@ def stage_supp(ctx: Context) -> None:
         part = m4e[m4e["kind"] == kind]
         ax.scatter(part["target_final_rejection_rate"], part["source_final_rejection_rate"], s=3, color=colour,
                    alpha=0.6, linewidths=0, label=kind.replace("_", "-"))
+    every = m4e[source_all_rejected(m4e)]
+    if len(every):
+        ax.scatter(every["target_final_rejection_rate"], every["source_final_rejection_rate"], s=14,
+                   facecolors="none", edgecolors=mv.TEXT, linewidths=0.5,
+                   label=f"every source bin rejected ({len(every)})")
     ax.plot([0, 1], [0, 1], color=mv.MUTED, lw=0.6, ls="--")
     ax.set_xlabel("target rejected fraction")
     ax.set_ylabel("source rejected fraction")
     ax.set_title("M4-E, every pair (same-stage source = earlier section name)", fontsize=6)
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, fontsize=5, loc="lower right")
     ctx.out.figure(figure, f"{folder}/FigS3A_source_vs_target")
     rows = []
     for column, name, letter in (("log2_size_ratio", "log2(source bins / target bins)", "B"),
@@ -989,9 +1013,9 @@ def stage_supp(ctx: Context) -> None:
     ctx.out.table(counts.rename_axis("warning").reset_index(name="pairs"),
                   "tables/FigS6_m4e_inference_invalid_warnings.tsv")
     top = counts.head(8)
-    figure, ax = plt.subplots(figsize=(5.0, 0.25 * len(top) + 0.9))
+    figure, ax = plt.subplots(figsize=(5.0, 0.45 * len(top) + 0.9))
     ax.barh(range(len(top)), top.to_numpy(), color=mv.REJECTED)
-    ax.set_yticks(range(len(top)), [w[:70] + ("…" if len(w) > 70 else "") for w in top.index], fontsize=5)
+    ax.set_yticks(range(len(top)), [textwrap.fill(w, 48) for w in top.index], fontsize=5.5)
     ax.invert_yaxis()
     ax.set_xlabel("pairs")
     ax.set_title(f"Warnings recorded for the {len(invalid)} pairs with m4e_inference_valid false "
@@ -1074,6 +1098,13 @@ def stage_reports(ctx: Context) -> None:
             "source-side mass breakdown per transition and target-side rejected fraction per pair. Source and target "
             "rejection are shown separately, never as one conserved flow.",
     }
+    metrics = pd.read_csv(ctx.run.root / "audit" / "pair_metrics.csv")
+    every = metrics[(metrics["method"] == "M4-E") & source_all_rejected(metrics)]
+    if len(every):
+        captions["Fig5_annotation_transitions"] += (
+            f" Open circles in D, S2 and S3A: the {len(every)} pairs whose M4-E gate rejects every source bin "
+            f"({', '.join(every['pair_id'])}). With no retained source nothing is asserted, so the target rate of "
+            "these pairs is not a match rate; they are shown, not removed.")
     for name, text in captions.items():
         lines += [f"## {name}", "", text, ""]
     lines += ["Supplementary: S1 all sections; S2 rejection per pair; S3 source/target asymmetry (association only); "

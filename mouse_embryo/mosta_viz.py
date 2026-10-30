@@ -198,10 +198,30 @@ def build_palette(annotations: list[str]) -> dict[str, str]:
 
 # ---------------------------------------------------------------- drawing
 
+def grid_pitch(x: np.ndarray, y: np.ndarray, sample: int = 20000) -> float:
+    """Side of an axis-aligned square that covers one bin of the grid.
+
+    The bin spacing is the median nearest-neighbour distance and the grid angle
+    the median angle of those neighbour vectors modulo 90 degrees, so registered
+    (rotated, non-integer) coordinates tile as well as integer ones; spacing
+    from the unique x values alone collapses to ~0 on a rotated grid.
+    """
+    from scipy.spatial import cKDTree
+    points = np.column_stack([x, y]).astype(float)
+    if len(points) < 2:
+        return 1.0
+    query = points
+    if len(points) > sample:
+        query = points[np.random.default_rng(0).choice(len(points), sample, replace=False)]
+    distance, index = cKDTree(points).query(query, k=2)
+    vector = points[index[:, 1]] - query
+    angle = float(np.median(np.mod(np.arctan2(vector[:, 1], vector[:, 0]), np.pi / 2)))
+    return float(np.median(distance[:, 1])) * (abs(np.cos(angle)) + abs(np.sin(angle)))
+
+
 def marker_size(ax, x: np.ndarray, y: np.ndarray) -> float:
     """Square marker area (pt^2) that tiles the bin grid at the axis' current scale."""
-    ux = np.unique(np.round(x, 6))
-    pitch = float(np.median(np.diff(ux))) if len(ux) > 1 else 1.0
+    pitch = grid_pitch(x, y)
     figure = ax.figure
     figure.canvas.draw_idle()
     bbox = ax.get_window_extent().transformed(figure.dpi_scale_trans.inverted())
