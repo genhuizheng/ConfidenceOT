@@ -27,6 +27,10 @@ Stages (``--stages``, comma-separated; ``all`` = every stage in this order):
   supp      S2 rejection summary, S3 source/target asymmetry, S4 rejection
             by annotation and partner presence, S5 balanced OT on the same
             bins, S6 calibration, convergence and validity
+  key       Fig. 6, the results worth stating as bars: transitions against
+            same-stage controls, partner-absent against partner-present
+            annotations, same-annotation share and partner spread against
+            balanced OT on the same bins
   reports   FIGURE_DESIGN.md, FIGURE_CAPTIONS.md, VISUALIZATION_REPORT.md,
             README.md, DATA_PROVENANCE.tsv, PAIR_SELECTION.tsv; scripts copied
   package   one tar.gz of figures, tables, reports, scripts and manifests
@@ -84,7 +88,7 @@ HEATMAP_GROUP = "E14.5->E15.5"
 SANKEY_MIN_NODE = 0.01   # annotations under 1% of the slice's mass are pooled into "Other"
 SANKEY_MIN_LINK = 0.002  # links under 0.2% of the slice's mass go to one pooled grey node
 SMALL_LINKS = "links < 0.2% each (pooled)"
-STAGE_ORDER = ["audit", "select", "fig1", "fig2", "s1", "fig3", "fig4", "fig5", "supp", "reports", "package"]
+STAGE_ORDER = ["audit", "select", "fig1", "fig2", "s1", "fig3", "fig4", "fig5", "supp", "key", "reports", "package"]
 
 
 def arrow(group: str) -> str:
@@ -1067,6 +1071,146 @@ def stage_supp(ctx: Context) -> None:
         record_blockers(ctx, blockers)
 
 
+# ---------------------------------------------------------------- key results
+
+def mean_sd_bars(ax, values, positions, colour, label, width, hollow=None, rng=None):
+    """Bars = mean over pairs, error bar = SD, each pair a dot; ``hollow`` marks dots drawn as open circles."""
+    rng = rng or np.random.default_rng(1)
+    means = [float(np.mean(v)) if len(v) else np.nan for v in values]
+    sds = [float(np.std(v, ddof=1)) if len(v) > 1 else 0.0 for v in values]
+    ax.bar(positions, means, width=width, color=colour, label=label, yerr=sds, capsize=1.5,
+           error_kw=dict(lw=0.6, ecolor=mv.TEXT))
+    for i, (xi, v) in enumerate(zip(positions, values)):
+        v = np.asarray(v, float)
+        jitter = xi + rng.uniform(-width / 3, width / 3, len(v))
+        mask = np.zeros(len(v), bool) if hollow is None else np.asarray(hollow[i], bool)
+        ax.scatter(jitter[~mask], v[~mask], s=1.5, color=mv.TEXT, alpha=0.4, linewidths=0, zorder=3)
+        ax.scatter(jitter[mask], v[mask], s=8, facecolors="none", edgecolors=mv.TEXT, linewidths=0.5, zorder=3)
+    return means, sds
+
+
+def stage_key(ctx: Context) -> None:
+    """Fig. 6: the results worth stating, as bars (mean over pairs, SD, every pair a dot).
+
+    A/B adjacent pairs against same-stage pairs of the source stage, per side; C rejection of bins whose annotation
+    the partner section lacks against bins whose annotation it has, within each pair; D same-annotation share of
+    ConfidenceOT against balanced OT on the same retained bins and on the rejected bins; E median partner spread,
+    ConfidenceOT against balanced OT on the same retained bins.  C reads the audit; D and E read the S5 tables, so
+    the supp stage runs first.
+    """
+    folder = "figures/main/Fig6_key_results"
+    audit = ctx.run.root / "audit"
+    metrics = pd.read_csv(audit / "pair_metrics.csv")
+    m4e = metrics[metrics["method"] == "M4-E"]
+    rows = []
+
+    # A, B: adjacent (source stage k) against same-stage at k
+    stages = list(mv.STAGES[:-1])
+    x = np.arange(len(stages))
+    for letter, side in (("A", "source"), ("B", "target")):
+        figure, ax = plt.subplots(figsize=(3.6, 2.4))
+        adjacent = [m4e[(m4e["kind"] == "adjacent") & (m4e["group"] == f"{s}->{mv.STAGES[i + 1]}")]
+                    for i, s in enumerate(stages)]
+        same = [m4e[(m4e["kind"] == "same_stage") & (m4e["group"] == s)] for s in stages]
+        for frames, offset, colour, label in ((adjacent, -0.2, mv.REJECTED, "adjacent pairs (k → k+1)"),
+                                              (same, 0.2, "#9A9A9A", "same-stage pairs (k)")):
+            values = [f[f"{side}_final_rejection_rate"].to_numpy() for f in frames]
+            means, sds = mean_sd_bars(ax, values, x + offset, colour, label, 0.38,
+                                      hollow=[source_all_rejected(f).to_numpy() for f in frames])
+            for s, f, mean, sd in zip(stages, frames, means, sds):
+                rows.append({"panel": f"6{letter}", "side": side, "stage": s, "series": label, "pairs": len(f),
+                             "mean": mean, "sd": sd, "median": float(f[f"{side}_final_rejection_rate"].median())})
+        ax.set_xticks(x, stages)
+        ax.set_xlabel("source stage k")
+        ax.set_ylim(0, 1.05)
+        ax.set_ylabel(f"{side}: M4-E rejected fraction")
+        ax.set_title(f"{side} side: transitions against same-stage controls\nbar = mean over pairs, error bar = SD",
+                     fontsize=6.5)
+        ax.legend(frameon=False, fontsize=5.5, loc="upper left", bbox_to_anchor=(1.0, 1.0))
+        ctx.out.figure(figure, f"{folder}/Fig6{letter}_transition_vs_same_stage_{side}")
+
+    # C: partner lacks the annotation against partner has it, within each pair
+    fractions = pd.read_csv(audit / "annotation_fractions.csv.gz")
+    fractions = fractions[fractions["n_bins"] > 0].assign(
+        rejected=lambda d: d["m4e_rejected_fraction"] * d["n_bins"])
+    summed = fractions.groupby(["pair_id", "kind", "side", "partner_present"])[["rejected", "n_bins"]].sum()
+    per_pair = (summed["rejected"] / summed["n_bins"]).unstack("partner_present").dropna(subset=[False, True])
+    cases = [("adjacent", "source"), ("adjacent", "target"), ("same_stage", "source"), ("same_stage", "target")]
+    figure, ax = plt.subplots(figsize=(3.6, 2.4))
+    x = np.arange(len(cases))
+    for present, offset, colour, label in ((False, -0.2, mv.REJECTED, "annotation absent from the partner section"),
+                                           (True, 0.2, "#F2A285", "annotation present in the partner section")):
+        values = [per_pair.xs((k, s), level=("kind", "side"))[present].to_numpy() for k, s in cases]
+        means, sds = mean_sd_bars(ax, values, x + offset, colour, label, 0.38)
+        for (k, s), v, mean, sd in zip(cases, values, means, sds):
+            rows.append({"panel": "6C", "side": s, "stage": k, "series": label, "pairs": len(v), "mean": mean, "sd": sd,
+                         "median": float(np.median(v))})
+    for i, (k, s) in enumerate(cases):
+        part = per_pair.xs((k, s), level=("kind", "side"))
+        higher = int((part[False] > part[True]).sum())
+        rows.append({"panel": "6C", "side": s, "stage": k, "series": "pairs with absent > present", "pairs": len(part),
+                     "mean": higher, "sd": np.nan, "median": np.nan})
+        ax.text(i, 1.1, f"{higher}/{len(part)}", ha="center", fontsize=5.5, color=mv.TEXT)
+    ax.set_xticks(x, [f"{k.replace('_', '-')}\n{s}" for k, s in cases])
+    ax.set_ylim(0, 1.17)
+    ax.set_ylabel("rejected fraction of those bins")
+    ax.set_title("bins of annotations the partner section lacks are rejected more\n"
+                 "per pair with both kinds; number = pairs with absent > present", fontsize=6.5)
+    ax.legend(frameon=False, fontsize=5.5, loc="upper left", bbox_to_anchor=(1.0, 1.0))
+    ctx.out.figure(figure, f"{folder}/Fig6C_partner_absent_vs_present")
+
+    # D: same-annotation share
+    shares = pd.read_csv(ctx.out.root / "tables" / "FigS5_same_annotation_shares.tsv", sep="\t")
+    groups = sorted(shares["group"].unique(), key=mv.group_order)
+    x = np.arange(len(groups))
+    columns = (("ConfidenceOT, retained bins", mv.RETAINED, -0.27),
+               ("balanced OT, same retained bins", "#7B4FA0", 0.0),
+               ("balanced OT, rejected bins", "#C9B3DE", 0.27))
+    figure, ax = plt.subplots(figsize=(3.8, 2.4))
+    for column, colour, offset in columns:
+        values = [shares.loc[shares["group"] == g, column].dropna().to_numpy() for g in groups]
+        means, sds = mean_sd_bars(ax, values, x + offset, colour, column, 0.26)
+        for g, v, mean, sd in zip(groups, values, means, sds):
+            rows.append({"panel": "6D", "side": "source", "stage": g, "series": column, "pairs": len(v), "mean": mean,
+                         "sd": sd, "median": float(np.median(v)) if len(v) else np.nan})
+    ax.set_xticks(x, [arrow(g) for g in groups], rotation=45, ha="right")
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("source mass on the same annotation")
+    ax.set_title("same-annotation share of the transported source mass\nbar = mean over adjacent pairs, error bar = SD",
+                 fontsize=6.5)
+    ax.legend(frameon=False, fontsize=5.5, loc="upper left", bbox_to_anchor=(1.0, 1.0))
+    ctx.out.figure(figure, f"{folder}/Fig6D_same_annotation_share")
+
+    # E: partner spread
+    spread = pd.read_csv(ctx.out.root / "tables" / "FigS5_spread_and_coverage.tsv", sep="\t")
+    groups = sorted(spread["group"].unique(), key=mv.group_order)
+    x = np.arange(len(groups))
+    figure, ax = plt.subplots(figsize=(3.8, 2.4))
+    top = 0.0
+    for column, colour, offset, label in (("median_spread_co", mv.RETAINED, -0.2, "ConfidenceOT"),
+                                          ("median_spread_bot_same_bins", "#7B4FA0", 0.2, "balanced OT, same bins")):
+        values = [spread.loc[spread["group"] == g, column].dropna().to_numpy() for g in groups]
+        means, sds = mean_sd_bars(ax, values, x + offset, colour, label, 0.38)
+        top = max(top, max(float(np.max(v)) for v in values if len(v)))
+        for g, v, mean, sd in zip(groups, values, means, sds):
+            rows.append({"panel": "6E", "side": "source", "stage": g, "series": label, "pairs": len(v), "mean": mean,
+                         "sd": sd, "median": float(np.median(v))})
+    for i, g in enumerate(groups):
+        part = spread[spread["group"] == g].dropna(subset=["median_spread_co", "median_spread_bot_same_bins"])
+        narrower = int((part["median_spread_co"] < part["median_spread_bot_same_bins"]).sum())
+        rows.append({"panel": "6E", "side": "source", "stage": g, "series": "pairs where ConfidenceOT is narrower",
+                     "pairs": len(part), "mean": narrower, "sd": np.nan, "median": np.nan})
+        ax.text(i, top * 1.04, f"{narrower}/{len(part)}", ha="center", fontsize=5.5, color=mv.TEXT)
+    ax.set_xticks(x, [arrow(g) for g in groups], rotation=45, ha="right")
+    ax.set_ylim(0, top * 1.12)
+    ax.set_ylabel("median partner spread per pair\n(coordinate units)")
+    ax.set_title("spread of each retained bin's partners on the target\nnumber = pairs where ConfidenceOT is narrower",
+                 fontsize=6.5)
+    ax.legend(frameon=False, fontsize=5.5, loc="upper left", bbox_to_anchor=(1.0, 1.0))
+    ctx.out.figure(figure, f"{folder}/Fig6E_partner_spread")
+    ctx.out.table(pd.DataFrame(rows), "tables/Fig6_key_results.tsv")
+
+
 # ---------------------------------------------------------------- reports
 
 FIGURE_DESIGN = """# MOSTA figure design (as built)
@@ -1141,6 +1285,14 @@ def stage_reports(ctx: Context) -> None:
             "ConfidenceOT (with the rejected share) and balanced OT. B, alluvials, mean over all pairs of a transition. C, "
             "source-side mass breakdown per transition and target-side rejected fraction per pair. Source and target "
             "rejection are shown separately, never as one conserved flow.",
+        "Fig6_key_results": "Bars = mean over pairs, error bars = SD, every pair a dot (tables/Fig6_key_results.tsv). "
+            "A, B, M4-E rejected fraction of the adjacent pairs k → k+1 beside the same-stage pairs of k, source and "
+            "target. C, within each pair, rejected fraction of the bins whose annotation the partner section lacks and "
+            "of those whose annotation it has; the number is the pairs with absent > present. D, same-annotation share "
+            "of the transported source mass: ConfidenceOT on its retained bins, balanced OT on the same bins and on the "
+            "M4-E-rejected bins. E, median partner spread per pair, ConfidenceOT against balanced OT on the same "
+            "retained bins; the number is the pairs where ConfidenceOT is narrower. Annotation agreement is a "
+            "consistency check, not ground truth.",
     }
     metrics = pd.read_csv(ctx.run.root / "audit" / "pair_metrics.csv")
     every = metrics[(metrics["method"] == "M4-E") & source_all_rejected(metrics)]
@@ -1208,7 +1360,7 @@ def stage_package(ctx: Context) -> None:
 
 
 STAGES = {"audit": stage_audit, "select": stage_select, "fig1": stage_fig1, "fig2": stage_fig2, "s1": stage_s1,
-          "fig3": stage_fig3, "fig4": stage_fig4, "fig5": stage_fig5, "supp": stage_supp,
+          "fig3": stage_fig3, "fig4": stage_fig4, "fig5": stage_fig5, "supp": stage_supp, "key": stage_key,
           "reports": stage_reports, "package": stage_package}
 
 

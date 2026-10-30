@@ -179,6 +179,7 @@ def main() -> None:
     med = adjacent.groupby("group")[["source_final_rejection_rate", "target_final_rejection_rate"]].median()
     share_med = shares.groupby("group")[["ConfidenceOT, retained bins", "balanced OT, same retained bins",
                                          "balanced OT, rejected bins"]].median()
+    spread = spread.dropna(subset=["median_spread_co", "median_spread_bot_same_bins"])
     narrower = int((spread["median_spread_co"] < spread["median_spread_bot_same_bins"]).sum())
 
     # 1 title
@@ -213,6 +214,51 @@ def main() -> None:
         f"合计 {int(composition['analysed'].sum()):,} 个分析 bin，Cavity {int(composition['cavity'].sum()):,} 个排除",
         "代表切片规则：注释种类最多，然后 bin 最多，然后按名字",
     ], size=12, colour=INK, after=6)
+
+    # key results (Fig. 6), right after the overview
+    d = main_dir / "Fig6_key_results"
+    key = pd.read_csv(TAB / "Fig6_key_results.tsv", sep="\t")
+
+    def key_mean(panel, series, stage, side="source"):
+        row = key[(key["panel"] == panel) & (key["series"] == series) & (key["stage"] == stage) & (key["side"] == side)]
+        return float(row["mean"].iloc[0])
+
+    early, late = ["E9.5", "E10.5", "E11.5"], ["E12.5", "E13.5", "E14.5", "E15.5"]
+    adj_label, same_label = "adjacent pairs (k → k+1)", "same-stage pairs (k)"
+    early_adj = [key_mean("6A", adj_label, s) for s in early]
+    late_adj = [key_mean("6A", adj_label, s) for s in late]
+    early_gap = [key_mean("6A", adj_label, s) - key_mean("6A", same_label, s) for s in early]
+    late_gap = [key_mean("6A", adj_label, s) - key_mean("6A", same_label, s) for s in late]
+    slide = deck.slide(f"重点 1：早期转换几乎全部拒绝（source {min(early_adj):.2f}–{max(early_adj):.2f}），"
+                       f"后期降到 {min(late_adj):.2f}–{max(late_adj):.2f}",
+                       f"比同期对照高：E9.5–E11.5 为 {min(early_gap):+.2f} 到 {max(early_gap):+.2f}，E12.5 以后为 "
+                       f"{min(late_gap):+.2f} 到 {max(late_gap):+.2f}，后期和两张同期切片之间的拒绝接近", "重点结果 · Fig. 6A–B")
+    deck.row(slide, [d / "Fig6A_transition_vs_same_stage_source.png", d / "Fig6B_transition_vs_same_stage_target.png"],
+             1.6, 5.3, captions=["source", "target"])
+    counts = key[(key["panel"] == "6C") & (key["series"] == "pairs with absent > present")].set_index(["stage", "side"])
+    absent_label, present_label = "annotation absent from the partner section", "annotation present in the partner section"
+    slide = deck.slide("重点 2：伙伴切片上没有的组织，被拒绝得更多",
+                       "每个 pair 内比较：注释在伙伴切片上不存在的 bin 对存在的 bin；数字 = 不存在的更高的 pair 数", "重点结果 · Fig. 6C")
+    deck.image(slide, d / "Fig6C_partner_absent_vs_present.png", 0.5, 1.6, 8.2, 5.3)
+    lines = []
+    for kind, name in (("adjacent", "相邻时期"), ("same_stage", "同期对照")):
+        for side in ("source", "target"):
+            c = counts.loc[(kind, side)]
+            lines.append((f"{name} {side}：{key_mean('6C', absent_label, kind, side):.2f} 对 "
+                          f"{key_mean('6C', present_label, kind, side):.2f}，{int(c['mean'])}/{int(c['pairs'])} 个 pair",
+                          {"bullet": True}))
+    textbox(slide, 8.9, 1.8, 3.95, 5.0, [("平均拒绝率（不存在 对 存在）", {"bold": True, "colour": NAVY})] + lines + [
+        ("闸门没有用到注释，这是一个独立的一致性检查", {"after": 2}),
+        ("存在的组织也被拒绝很多，所以注释缺失只解释一部分拒绝", {}),
+    ], size=13, after=8)
+    spread_counts = key[(key["panel"] == "6E") & (key["series"] == "pairs where ConfidenceOT is narrower")]
+    slide = deck.slide("重点 3：保留下来的 bin 上，ConfidenceOT 的对应更一致、更集中",
+                       f"D 同注释份额：ConfidenceOT 保留的 bin > balanced OT 同一批 bin > balanced OT 被拒的 bin；"
+                       f"E 伙伴离散度：{int(spread_counts['mean'].sum())}/{int(spread_counts['pairs'].sum())} 个相邻 pair "
+                       "中 ConfidenceOT 更窄", "重点结果 · Fig. 6D–E")
+    deck.row(slide, [d / "Fig6D_same_annotation_share.png", d / "Fig6E_partner_spread.png"], 1.6, 5.0)
+    textbox(slide, 0.6, 6.65, 12.2, 0.4, ["同注释份额是一致性，不是真值；伙伴离散度按各自切片的坐标单位"], size=11,
+            colour=MUTED)
 
     # 3 atlas
     slide = deck.slide("代表切片的注释图谱", "每张切片用自己的比例尺；Cavity 为灰色；彼此是不同胚胎的切片，不是 3D 重建",
