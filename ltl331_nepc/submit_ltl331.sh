@@ -3,15 +3,16 @@
 #
 #   bash ltl331_nepc/submit_ltl331.sh [--dry-run] convert|prepare|run|all
 #
-# convert  01_convert_geo.py on a compute node: one raw-count H5AD per time point (the authors' QC cells and labels),
-#          cross-checked against the per-sample CellRanger matrices of GSE297328_RAW.tar
+# convert  01_convert_geo.py on a compute node: one raw-count H5AD per time point, the CellRanger counts of
+#          GSE297328_RAW.tar for the authors' QC cells, with their labels (annotated, harmony coarse_celltype,
+#          velocity phase / latent_time); the counts must reproduce the authors' log-normalised .raw
 # prepare  02_build_manifest.py (7 adjacent time-point pairs), 27_downsample_counts.py (project QC, depth equalised to
 #          the pooled 10th percentile), 03_raw_on_ds_cells.py (original counts of exactly the equalised cells)
 # run      tacc_preprocessing_factorial.slurm, one array task per label: ranknm256_noscale_ds_cos (equalised counts)
 #          and logcpm (original counts, the same cells); ConfidenceOT M4-E / M4-R, within-side split null,
 #          acceptance 0.99, no cell cap, couplings saved
 # all      convert -> prepare -> run, each afterok the previous
-# Download first, once, on the login node (commands at the end). Nothing outside $data and $root is written; a stage
+# Download first: cancer_application/GSE297328_longitudinal/scripts/download_gse297328.sh. Nothing outside $data and $root is written; a stage
 # whose output exists is refused, never overwritten. No set -e / -u / pipefail (TACC rules); each step checks itself.
 
 dry_run=0; stage=""
@@ -54,11 +55,13 @@ if (( ! dry_run && queued + need > cap )); then echo "$queued queued; $need more
 
 dep=()
 if [[ $stage == convert || $stage == all ]]; then
-    [[ -f "$annotated" ]] || { echo "missing $annotated (download first)" >&2; exit 1; }
+    for f in "$annotated" "$data/GSE297328_ltl331_harmony_integrated.h5ad" "$data/GSE297328_ltl331_velocity.h5ad"; do
+        [[ -f "$f" ]] || { echo "missing $f (download first)" >&2; exit 1; }
+    done
     [[ -d "$data/raw" ]] || { echo "missing $data/raw (extract GSE297328_RAW.tar first)" >&2; exit 1; }
     [[ -f "$converted/conversion_report.json" ]] && { echo "$converted/conversion_report.json exists; not converted again" >&2; exit 2; }
     id=$(submit -p gg -N 1 -n 1 -t 02:00:00 -A MCB26031 -J ltl_conv -o "$data/logs/convert_%j.out" \
-        --wrap "$activate && python ltl331_nepc/01_convert_geo.py --annotated $annotated --raw-dir $data/raw --out $converted") || exit 1
+        --wrap "$activate && python ltl331_nepc/01_convert_geo.py --data $data --out $converted") || exit 1
     echo "convert job $id" >&2
     dep=(--dependency=afterok:$id)
 fi
@@ -84,10 +87,3 @@ if [[ $stage == run || $stage == all ]]; then
     echo "run array $id: task 0 ranknm256_noscale_ds_cos, task 1 logcpm; out $root/runs/acc0.99/ltl331/<label>/" >&2
 fi
 (( dry_run )) || echo "$stage submitted $(date -Iseconds), commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null)" >> "$root/SUBMITTED.txt"
-
-# Download, once, on the login node (about 3.3 GB):
-#   D=/scratch/10119/ghzheng/OT_project/data/ltl331_GSE297328 && mkdir -p $D/raw && cd $D
-#   U=https://ftp.ncbi.nlm.nih.gov/geo/series/GSE297nnn/GSE297328/suppl
-#   wget -q $U/GSE297328_README.txt $U/filelist.txt $U/GSE297328_RAW.tar $U/GSE297328_ltl331_annotated.h5ad
-#   test $(stat -c %s GSE297328_RAW.tar) -eq 694087680 && tar -xf GSE297328_RAW.tar -C raw
-#   test $(stat -c %s GSE297328_ltl331_annotated.h5ad) -eq $(curl -sI $U/GSE297328_ltl331_annotated.h5ad | awk 'tolower($1)=="content-length:"{print $2+0}')

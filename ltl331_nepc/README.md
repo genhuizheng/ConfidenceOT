@@ -10,12 +10,13 @@
   - it then commits mostly to an ASCL1− fate.
 
 **Pipeline** (`submit_ltl331.sh`; the project's chain for a new dataset):
-1. **Download** on the login node: `GSE297328_RAW.tar` (per-sample CellRanger matrices, 662 MB) and `GSE297328_ltl331_annotated.h5ad` (2.6 GB). Commands are at the end of `submit_ltl331.sh`.
-2. **`01_convert_geo.py`:**
-   - one H5AD per time point holding the authors' raw integer UMIs (`.raw`) for their QC cells;
-   - their labels (`cell_type`, `leiden`, `phase`, `model`), plus `time_weeks`, `relapse` and `malignant`;
-   - every cell is a human tumour cell in a PDX with human-specific reads, so `malignant` is set for all;
-   - cross-checked against the RAW matrices.
+1. **Download** every GEO file (`cancer_application/GSE297328_longitudinal/scripts/download_gse297328.sh`, sizes checked).
+2. **`01_convert_geo.py`** (the files as checked on TACC on 2026-10-30, `00_inspect_data.py` and `00b_match_cells.py`):
+   - the annotated h5ad does not match its README: `.raw` is log1p(1e4 × counts / nCount_RNA) on the authors' 26,175 genes, not counts, there is no counts layer, and obs is a Seurat export without `cell_type` or `phase`;
+   - the counts therefore come from the RAW CellRanger matrices: every one of the 51,726 annotated cells is found by barcode in the archive of its week, and its counts reproduce `.raw` to 1e-15;
+   - one H5AD per time point holds those integer counts (all 29,622 features) for the authors' QC cells;
+   - labels: the authors' annotated columns (`seurat_clusters`, `nCount_RNA`, `percent.mt`, …), `coarse_celltype` from the harmony object (linked by `cellid`, all cells), and `phase`, `S_score`, `G2M_score`, `latent_time` from the velocity object (51,499 cells; missing for the other 227);
+   - plus `time_weeks`, `relapse` (`is_regrowth`) and `malignant` (every cell: human-specific reads of a PDX).
 3. **`02_build_manifest.py`:** the 7 adjacent time-point pairs.
 4. **`cancer_metastasis/27_downsample_counts.py`:** the project's QC and depth equalisation.
 5. **`03_raw_on_ds_cells.py`:** the original counts of exactly the equalised cells.
@@ -23,6 +24,6 @@
    - two representations on the same cells: **`ranknm256_noscale_ds_cos`** (the project's preprocessing, equalised counts) and **`logcpm`** (library size → log1p → HVG → PCA with gene scaling, original counts; as MOSTA's logcpm arm);
    - M4-E / M4-R, within-side split null, acceptance 0.99, no cell cap, couplings saved.
 
-**Not used.** The authors' log-normalised `.X`, PCA, UMAP, Harmony integration and velocity objects. The biological question and any further pairing (e.g. non-adjacent time points) come later.
+**Not used.** The authors' log-normalised `.X` / `.raw`, PCA, UMAP, Harmony embedding, velocity layers and the RDS (only obs labels are read from the harmony and velocity objects). The biological question and any further pairing (e.g. non-adjacent time points) come later.
 
-**Test:** `tests/test_prepare.py` runs on fake data (11 / 11).
+**Test:** `tests/test_prepare.py` runs on fake data shaped like the real files (14 / 14).
