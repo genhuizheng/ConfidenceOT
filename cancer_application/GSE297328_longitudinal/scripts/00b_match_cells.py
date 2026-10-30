@@ -156,7 +156,10 @@ def main() -> None:
                        nFeature_ratio_median=float(np.median(ndet / nf)))
             # annotated .raw against log1p(1e4 * counts / total) on the common genes
             sym = pd.Index([f[1] if len(f) > 1 else f[0] for f in feats])
-            common = pd.Index(var).intersection(sym[~sym.duplicated()])
+            # gene symbols that occur once on each side (CellRanger repeats some; Seurat makes them unique)
+            s_ok = ~sym.duplicated(keep=False); v_idx = pd.Index(var); v_ok = ~v_idx.duplicated(keep=False)
+            common = v_idx[v_ok].intersection(sym[s_ok])
+            rec["raw_symbols_duplicated"] = int((~s_ok).sum()); rec["annotated_genes_not_in_raw_symbols"] = int((~v_idx.isin(sym)).sum())
             take = np.sort(rng.choice(len(found), min(args.check_cells, len(found)), replace=False))
             rows = ann.index.get_indexer(found.index[take])
             with h5py.File(args.data / ANN, "r") as f:
@@ -167,7 +170,8 @@ def main() -> None:
                     s, e = ip[rr], ip[rr + 1]
                     R[i, ind[s:e]] = data[s:e]
             C = M[:, pos[take]].T.toarray()
-            ci = sym.get_indexer(common); vi = pd.Index(var).get_indexer(common)
+            ci = np.flatnonzero(s_ok)[sym[s_ok].get_indexer(common)]
+            vi = np.flatnonzero(v_ok)[v_idx[v_ok].get_indexer(common)]
             for label, tot in (("total_all_raw_genes", C.sum(1)), ("total_common_genes", C[:, ci].sum(1)), ("nCount_RNA", nc[take])):
                 L = np.log1p(1e4 * C[:, ci] / tot[:, None])
                 rec[f"raw_vs_log1p_{label}_max_abs_diff"] = float(np.abs(L - R[:, vi]).max())
@@ -178,7 +182,8 @@ def main() -> None:
                      f"features {feats[0]}; author cells {len(mine)}, found via obs_name {rec['via_obs_name_found']} / via cellid {rec['via_cellid_found']}; "
                      f"nCount equal {rec.get('nCount_equal_fraction')} (ratio {rec.get('nCount_ratio_median')}), nFeature equal {rec.get('nFeature_equal_fraction')}; "
                      f".raw vs log1p: all genes {rec.get('raw_vs_log1p_total_all_raw_genes_max_abs_diff')}, common {rec.get('raw_vs_log1p_total_common_genes_max_abs_diff')}, "
-                     f"nCount {rec.get('raw_vs_log1p_nCount_RNA_max_abs_diff')}; expm1 row sum {rec.get('annotated_raw_expm1_row_sum_median')}")
+                     f"nCount {rec.get('raw_vs_log1p_nCount_RNA_max_abs_diff')}; expm1 row sum {rec.get('annotated_raw_expm1_row_sum_median')}; "
+                     f"common genes {rec.get('common_genes')}, RAW symbols duplicated {rec.get('raw_symbols_duplicated')}, annotated genes not in RAW {rec.get('annotated_genes_not_in_raw_symbols')}")
     rep["raw"] = raw_rep
 
     # 3. harmony and 4. velocity against annotated
