@@ -10,7 +10,9 @@ and any of README / filelist / velocity / harmony / RDS that is present). Nothin
                    gene naming (symbols / Ensembl, MT- genes), obs_names format per sample
   raw/             per GSM archive: members and sizes, matrix dimensions, barcode count, features head; how many of the
                    authors' cells (16-nt barcode) each archive holds
-  other files      velocity / harmony h5ad: obs columns and obsm / layers keys (HDF5 only, nothing loaded)
+  other files      harmony / velocity h5ad (h5py only, nothing large loaded): shape, X / raw / layers encoding and
+                   dtype, obsm / uns keys, obs columns with value counts, cells shared with annotated.h5ad; RDS size and
+                   gzip header (not opened: needs R + Seurat); README and filelist text
 Writes OUT_DIR/inspect_report.json and OUT_DIR/INSPECT_SUMMARY.md and prints the summary.
 """
 
@@ -29,6 +31,75 @@ import numpy as np
 import pandas as pd
 
 SAMPLE_ROWS = 3000
+OTHER_H5AD = ("GSE297328_ltl331_harmony_integrated.h5ad", "GSE297328_ltl331_velocity.h5ad")
+
+
+def h5_strings(ds) -> np.ndarray:
+    v = ds[()]
+    return np.array([x.decode() if isinstance(x, bytes) else str(x) for x in np.ravel(v)])
+
+
+def h5_matrix_info(obj) -> dict | None:
+    if obj is None:
+        return None
+    if isinstance(obj, h5py.Dataset):
+        return {"dense": list(obj.shape), "dtype": str(obj.dtype)}
+    enc = obj.attrs.get("encoding-type", "")
+    enc = enc.decode() if isinstance(enc, bytes) else str(enc)
+    rec = {"encoding": enc, "shape": [int(x) for x in obj.attrs.get("shape", [])]}
+    if "data" in obj:
+        d = obj["data"]
+        rec["dtype"] = str(d.dtype); rec["nnz"] = int(d.shape[0])
+        x = d[: min(200000, d.shape[0])]
+        rec["first_values_integer"] = bool(np.allclose(x, np.round(x))) if x.size else None
+    return rec
+
+
+def h5ad_summary(path: Path, annotated_cells: pd.Index | None) -> dict:
+    """Layout of an h5ad read with h5py only (nothing large is loaded): shapes, keys, obs columns with value counts."""
+    rep = {"bytes": path.stat().st_size}
+    with h5py.File(path, "r") as f:
+        obs = f["obs"]
+        idx_key = obs.attrs.get("_index", "_index")
+        idx_key = idx_key.decode() if isinstance(idx_key, bytes) else str(idx_key)
+        cells = h5_strings(obs[idx_key]) if idx_key in obs else np.array([])
+        var = f["var"]
+        vkey = var.attrs.get("_index", "_index")
+        vkey = vkey.decode() if isinstance(vkey, bytes) else str(vkey)
+        genes = h5_strings(var[vkey]) if vkey in var else np.array([])
+        rep["shape"] = [int(len(cells)), int(len(genes))]
+        rep["var_names_examples"] = genes[:8].tolist()
+        rep["X"] = h5_matrix_info(f.get("X"))
+        rep["raw"] = h5_matrix_info(f["raw"].get("X")) if "raw" in f else None
+        rep["layers"] = {k: h5_matrix_info(f["layers"][k]) for k in f["layers"].keys()} if "layers" in f else {}
+        rep["obsm"] = {k: (list(f["obsm"][k].shape) if isinstance(f["obsm"][k], h5py.Dataset) else "group") for k in f["obsm"].keys()} if "obsm" in f else {}
+        rep["uns"] = list(f["uns"].keys()) if "uns" in f else []
+        if annotated_cells is not None and len(cells):
+            rep["cells_shared_with_annotated"] = int(pd.Index(cells).isin(annotated_cells).sum())
+        rep["obs_columns"] = []
+        for k in obs.keys():
+            if k == idx_key:
+                continue
+            o = obs[k]
+            if isinstance(o, h5py.Group) and "categories" in o:
+                cats = h5_strings(o["categories"]); codes = o["codes"][()]
+                rec = {"column": k, "kind": "categorical", "n_categories": int(len(cats)), "missing": int((codes < 0).sum())}
+                if len(cats) < 100:
+                    counts = np.bincount(codes[codes >= 0], minlength=len(cats))
+                    rec["values"] = {str(c): int(n) for c, n in zip(cats, counts)}
+            elif isinstance(o, h5py.Dataset) and np.issubdtype(o.dtype, np.number):
+                v = o[()].astype(float)
+                rec = {"column": k, "kind": str(o.dtype), "missing": int(np.isnan(v).sum()),
+                       "quantiles": {q: float(np.nanquantile(v, q)) for q in (0, 0.01, 0.5, 0.99, 1)} if np.isfinite(v).any() else {}}
+            elif isinstance(o, h5py.Dataset):
+                s = pd.Series(h5_strings(o))
+                rec = {"column": k, "kind": "string", "n_unique": int(s.nunique())}
+                if s.nunique() < 100:
+                    rec["values"] = {str(a): int(b) for a, b in s.value_counts().items()}
+            else:
+                rec = {"column": k, "kind": "group", "keys": list(o.keys())}
+            rep["obs_columns"].append(rec)
+    return rep
 
 
 def h5_layout(path: Path, max_depth: int = 3) -> list[dict]:
@@ -182,12 +253,20 @@ def main() -> None:
     else:
         report["annotated"] = "missing"
     report["raw"] = inspect_raw_dir(args.data / "raw", obs)
-    for name in ("GSE297328_ltl331_velocity.h5ad", "GSE297328_ltl331_harmony_integrated.h5ad"):
+    for name in OTHER_H5AD:
         p = args.data / name
         if p.exists():
-            with h5py.File(p, "r") as f:
-                report[name] = {"obs": list(f["obs"].keys()) if "obs" in f else [], "obsm": list(f["obsm"].keys()) if "obsm" in f else [],
-                                "layers": list(f["layers"].keys()) if "layers" in f else [], "uns": list(f["uns"].keys()) if "uns" in f else []}
+            report[name] = h5ad_summary(p, None if obs is None else obs.index)
+    rds = args.data / "GSE297328_LTL331.RDS"
+    if rds.exists():
+        with open(rds, "rb") as f:
+            head = f.read(2)
+        report["rds"] = {"bytes": rds.stat().st_size, "gzip_magic": head == b"\x1f\x8b",
+                         "note": "not opened here (needs R + Seurat); the RNA analysis uses the annotated h5ad"}
+    for name in ("GSE297328_README.txt", "filelist.txt"):
+        p = args.data / name
+        if p.exists():
+            report[name] = p.read_text(encoding="utf-8", errors="replace")[:6000]
     (args.out / "inspect_report.json").write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     lines = ["# GSE297328 data inspection", "", f"data dir `{args.data}`", "", "## Files present", ""]
     lines += [f"- {k}: {v / 1e6:.1f} MB" for k, v in sorted(present.items())]
@@ -208,9 +287,19 @@ def main() -> None:
         lines.append(f"- {k}: {v.get('barcodes')} barcodes, {v.get('features')} features, mtx `{v.get('mtx_dims_rows_cols_nnz')}`, "
                      f"author cells {v.get('author_cells')} / in archive {v.get('author_cells_in_archive')} ({v.get('author_sample_id_match')}); "
                      f"members {[m['name'] for m in v['members']]}")
-    for name in ("GSE297328_ltl331_velocity.h5ad", "GSE297328_ltl331_harmony_integrated.h5ad"):
+    for name in OTHER_H5AD:
         if name in report:
-            lines += ["", f"## {name}", "", f"- {report[name]}"]
+            r = report[name]
+            lines += ["", f"## {name}", "", f"- shape {r['shape']}, X {r['X']}, raw {r['raw']}, layers {r['layers']}, obsm {r['obsm']}",
+                      f"- uns keys {r['uns']}", f"- cells shared with annotated: {r.get('cells_shared_with_annotated')}",
+                      f"- var names examples {r['var_names_examples']}", "", "### obs columns", ""]
+            lines += [f"- `{c['column']}` {c['kind']}: " + json.dumps({k: v for k, v in c.items() if k not in ('column', 'kind')})[:400]
+                      for c in r["obs_columns"]]
+    if "rds" in report:
+        lines += ["", "## GSE297328_LTL331.RDS", "", f"- {report['rds']}"]
+    for name in ("GSE297328_README.txt", "filelist.txt"):
+        if name in report:
+            lines += ["", f"## {name}", "", "```", report[name].rstrip(), "```"]
     (args.out / "INSPECT_SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
 

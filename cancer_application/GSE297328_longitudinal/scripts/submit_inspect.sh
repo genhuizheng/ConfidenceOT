@@ -23,8 +23,4 @@ id=$(sbatch --parsable -p gh-dev -N 1 -n 1 -t 00:40:00 -A MCB26031 -J g297_insp 
 [[ "$id" =~ ^[0-9]+$ ]] || { echo "sbatch returned no job id" >&2; exit 1; }
 echo "inspection job $id -> $out (log $root/logs/inspect_$id.out)"
 
-# Download, once, on the login node (about 3.3 GB; velocity 8.8 GB is optional and not needed for the inspection):
-#   D=/scratch/10119/ghzheng/OT_project/data/ltl331_GSE297328 && mkdir -p $D/raw && cd $D
-#   U=https://ftp.ncbi.nlm.nih.gov/geo/series/GSE297nnn/GSE297328/suppl
-#   wget -q $U/GSE297328_README.txt $U/filelist.txt $U/GSE297328_RAW.tar $U/GSE297328_ltl331_annotated.h5ad
-#   test $(stat -c %s GSE297328_RAW.tar) -eq 694087680 && tar -xf GSE297328_RAW.tar -C raw
+# Download first (every supplementary file, about 28 GB, sizes checked, RAW.tar extracted): download_gse297328.sh
