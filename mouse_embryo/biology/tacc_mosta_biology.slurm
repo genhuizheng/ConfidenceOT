@@ -32,6 +32,9 @@ case "$step" in
         python mouse_embryo/biology/31_audit_runs.py --out "$out" --probe || exit $?
         python mouse_embryo/biology/34_systematic_annotations.py --out "$out" \
             --run ds=$results/mosta_all_stages --run logcpm=$results/mosta_all_stages_logcpm || exit $?
+        python mouse_embryo/biology/35_curated_accuracy.py --out "$out" \
+            --run ds=$results/mosta_all_stages --run logcpm=$results/mosta_all_stages_logcpm \
+            --run std=$results/mosta_all_stages_std || exit $?
         ;;
     extract)
         run=${MOSTA_BIO_RUN:?MOSTA_BIO_RUN is not set}
