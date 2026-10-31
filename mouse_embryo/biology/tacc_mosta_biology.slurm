@@ -10,7 +10,7 @@
 # One step of the MOSTA biological application (mouse_embryo/biology/31_-33_)
 # on one gg node, CPU.  Reads the finished MOSTA runs, writes only under
 # MOSTA_BIO_OUT.  Submitted by submit_mosta_biology.sh; MOSTA_BIO_STEP picks:
-#   audit                 31_ (all three runs, with the coupling probe)
+#   audit                 31_ (all three runs, with the coupling probe), then 34_ (every annotation, ds and logcpm)
 #   extract               32_ for MOSTA_BIO_RUN (ds | logcpm) and MOSTA_BIO_SETS
 #                         (space-separated organ sets); MOSTA_BIO_EXPRESSION=1
 #                         adds the marker expression, MOSTA_BIO_M4R=1 the M4-R
@@ -30,6 +30,8 @@ echo "job=$SLURM_JOB_ID host=$(hostname) commit=$(git -C "$repo" rev-parse HEAD)
 case "$step" in
     audit)
         python mouse_embryo/biology/31_audit_runs.py --out "$out" --probe || exit $?
+        python mouse_embryo/biology/34_systematic_annotations.py --out "$out" \
+            --run ds=$results/mosta_all_stages --run logcpm=$results/mosta_all_stages_logcpm || exit $?
         ;;
     extract)
         run=${MOSTA_BIO_RUN:?MOSTA_BIO_RUN is not set}
