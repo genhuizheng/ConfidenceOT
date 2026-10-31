@@ -1,7 +1,10 @@
 """Build the representation (MOSTA_PREPROCESSING, default ranknm256_noscale_ds_cos) of every MOSTA pair.
 
-With a configuration that does not equalise depth (logcpm), each slice's original counts
-are read for exactly the equalised slice's bins, so both runs analyse the same bins.
+With a configuration that does not equalise depth (logcpm, and the standard arm
+stdpca30_allgenes_nopca_noscale), each slice's original counts are read for exactly the
+equalised slice's bins, so every run analyses the same bins.  The standard arm's
+embedding (moscot's MOSTA preprocessing, mosta_common.STANDARD_EMBEDDING) is built here
+with scanpy and passed to Preprocessing as precomputed coordinates.
 
 Each pair takes its two equalised slices whole: every analysed bin, with no
 per-side cap.  The counts go to ``confidenceot.Preprocessing`` the way
@@ -42,7 +45,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mosta_common import (  # noqa: E402
-    PREPROCESSING_LABEL, SEED, Layout, check_preprocessing, claim, publish,
+    PREPROCESSING_LABEL, SEED, STANDARD_EMBEDDING, Layout, check_preprocessing, claim, publish,
     read_equalised_slice, read_pairs, read_slices, staging_directory, write_json,
 )
 
@@ -81,6 +84,47 @@ def original_counts(layout: Layout, sample: str, equalised: dict) -> dict:
     return {**equalised, "counts": counts[rows][:, columns]}
 
 
+def standard_embedding(source: dict, target: dict, seed: int) -> tuple[np.ndarray, np.ndarray, dict]:
+    """The standard arm's 30-dimensional embedding of one pair (mosta_common.STANDARD_EMBEDDING)."""
+    import anndata as ad
+    import scanpy as sc
+    from scipy import sparse
+
+    common, source_columns, target_columns = common_columns(source["genes"], target["genes"])
+    n_source = source["counts"].shape[0]
+    counts = sparse.vstack([source["counts"][:, source_columns], target["counts"][:, target_columns]]).tocsr()
+    data = ad.AnnData(
+        X=counts.astype(np.float32),
+        obs=pd.DataFrame({"slice": pd.Categorical(np.r_[np.repeat("source", n_source),
+                                                        np.repeat("target", counts.shape[0] - n_source)])},
+                         index=[f"b{i}" for i in range(counts.shape[0])]),
+        var=pd.DataFrame(index=common),
+    )
+    detected = np.diff(counts.indptr)
+    sc.pp.filter_genes(data, min_cells=STANDARD_EMBEDDING["minimum_cells_per_gene"])
+    genes_kept = int(data.n_vars)
+    sc.pp.highly_variable_genes(data, n_top_genes=STANDARD_EMBEDDING["n_top_genes"],
+                                flavor=STANDARD_EMBEDDING["hvg_flavor"], batch_key="slice")
+    totals = np.asarray(data.X.sum(axis=1)).ravel()
+    target_sum = float(np.median(totals))
+    sc.pp.normalize_total(data, target_sum=target_sum)
+    sc.pp.log1p(data)
+    hvg = data.var_names[data.var["highly_variable"].to_numpy()]
+    data = data[:, hvg].copy()
+    sc.pp.pca(data, n_comps=STANDARD_EMBEDDING["n_pcs"], zero_center=True, svd_solver="arpack", random_state=seed)
+    pcs = np.asarray(data.obsm["X_pca"], dtype=np.float64)
+    record = {
+        **STANDARD_EMBEDDING, "seed": seed, "common_genes": len(common),
+        "genes_after_minimum_cells": genes_kept,
+        "hvg_genes": [str(gene) for gene in hvg], "normalize_total_target_sum": target_sum,
+        "pca_variance_ratio": [float(v) for v in data.uns["pca"]["variance_ratio"]],
+        "bins_under_200_genes_moscot_would_drop": {"source": int(np.sum(detected[:n_source] < 200)),
+                                                    "target": int(np.sum(detected[n_source:] < 200))},
+        "scanpy_version": sc.__version__, "anndata_version": ad.__version__,
+    }
+    return pcs[:n_source], pcs[n_source:], record
+
+
 def prepare_pair(layout: Layout, row: pd.Series) -> dict:
     from confidenceot import Preprocessing
 
@@ -101,9 +145,16 @@ def prepare_pair(layout: Layout, row: pd.Series) -> dict:
         for side, data, columns in (("source", source, source_columns), ("target", target, target_columns))
     }
     seed = SEED + int(row["index"])
+    embedding = None
+    source_input, target_input = source["counts"], target["counts"]
+    source_names, target_names = source["genes"], target["genes"]
+    if configuration.normalisation == "precomputed":
+        # the standard arm: its embedding is built here and passed through unchanged
+        source_input, target_input, embedding = standard_embedding(source, target, seed)
+        source_names = target_names = np.array([f"PC{i + 1}" for i in range(source_input.shape[1])])
     representation = configuration.representation(
-        source["counts"], target["counts"], seed=seed,
-        source_genes=source["genes"], target_genes=target["genes"],
+        source_input, target_input, seed=seed,
+        source_genes=source_names, target_genes=target_names,
         extra_provenance={
             "equalise_applied_here": False,
             "equalise_note": ("counts equalised at the file level by mouse_embryo/21_equalise_mosta_depth.py"
@@ -127,6 +178,7 @@ def prepare_pair(layout: Layout, row: pd.Series) -> dict:
             "rank_top_n": configuration.rank_top_n,
             "source_bins_encoded_under_rank_top_n": rank_short["source"],
             "target_bins_encoded_under_rank_top_n": rank_short["target"],
+            "standard_embedding": embedding,
             "load_seconds": loaded,
             "seconds": time.perf_counter() - started,
         },

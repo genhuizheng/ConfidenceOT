@@ -6,6 +6,7 @@ written.  The three runs:
     ds      mosta_all_stages                         ranknm256_noscale_ds_cos, no potentials
     logcpm  mosta_all_stages_logcpm                  logcpm, potentials saved (couplings rebuildable)
     ds_pot  mosta_all_stages_ds_potentials_20261028  ds rerun with potentials (OT not run as of 2026-10-30)
+    std     mosta_all_stages_std                     P3 standard arm (moscot preprocessing), from 2026-10-30
 
 Writing: every output goes under one versioned analysis root, through
 ``Outputs``, which refuses to replace a file it did not write in this root.
@@ -42,6 +43,7 @@ RUNS = {
     "ds": SCRATCH / "mosta_all_stages",
     "logcpm": SCRATCH / "mosta_all_stages_logcpm",
     "ds_pot": SCRATCH / "mosta_all_stages_ds_potentials_20261028",
+    "std": SCRATCH / "mosta_all_stages_std",
 }
 METHODS = ("m4e", "m4r")
 ORGAN_SETS = HERE / "organ_sets.tsv"

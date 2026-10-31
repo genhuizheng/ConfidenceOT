@@ -11,7 +11,7 @@
 # on one gg node, CPU.  Reads the finished MOSTA runs, writes only under
 # MOSTA_BIO_OUT.  Submitted by submit_mosta_biology.sh; MOSTA_BIO_STEP picks:
 #   audit                 31_ (all three runs, with the coupling probe), then 34_ (every annotation, ds and logcpm)
-#   extract               32_ for MOSTA_BIO_RUN (ds | logcpm) and MOSTA_BIO_SETS
+#   extract               32_ for MOSTA_BIO_RUN (ds | logcpm | std) and MOSTA_BIO_SETS
 #                         (space-separated organ sets); MOSTA_BIO_EXPRESSION=1
 #                         adds the marker expression, MOSTA_BIO_M4R=1 the M4-R
 #                         couplings rebuilt from potentials (logcpm only)
@@ -38,7 +38,8 @@ case "$step" in
         case "$run" in
             ds) root=$results/mosta_all_stages ;;
             logcpm) root=$results/mosta_all_stages_logcpm ;;
-            *) echo "MOSTA_BIO_RUN must be ds or logcpm" >&2; exit 2 ;;
+            std) root=$results/mosta_all_stages_std ;;
+            *) echo "MOSTA_BIO_RUN must be ds, logcpm or std" >&2; exit 2 ;;
         esac
         args=()
         for s in ${MOSTA_BIO_SETS:?MOSTA_BIO_SETS is not set}; do args+=(--organ-set "$s"); done
@@ -49,8 +50,9 @@ case "$step" in
         ;;
     case)
         for s in ${MOSTA_BIO_SETS:?MOSTA_BIO_SETS is not set}; do
-            python mouse_embryo/biology/33_organ_case.py --out "$out" --organ-set "$s" --runs ds logcpm \
+            python mouse_embryo/biology/33_organ_case.py --out "$out" --organ-set "$s" --runs ds logcpm std \
                 --run-root ds=$results/mosta_all_stages --run-root logcpm=$results/mosta_all_stages_logcpm \
+                --run-root std=$results/mosta_all_stages_std \
                 ${MOSTA_BIO_FOCAL:+--focal-group "$MOSTA_BIO_FOCAL"} || exit $?
         done
         ;;

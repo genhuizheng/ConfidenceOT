@@ -44,6 +44,27 @@ EXPECTED_PREPROCESSING = {
         "cost": "squared_euclidean", "scale": "median_sampled_pair", "n_hvg": 2000, "n_pcs": 30,
         "minimum_detection_rate": 0.0, "regress_out": [],
     },
+    # P3, the standard arm (user 2026-10-30): moscot's MOSTA preprocessing
+    # (Klein et al. Nature 2025, Methods "Preprocessing"; moscot-framework_reproducibility
+    # notebooks/space/spatiotemporal) built per pair by 22_ (STANDARD_EMBEDDING) and handed
+    # to Preprocessing as a precomputed 30-dimensional embedding: original counts of the
+    # same bins, genes in >= 3 bins of the pair, 2,000 seurat_v3 HVGs on the counts with
+    # each slice its own batch, normalize_total to the pair's median total, log1p, PCA 30
+    # (zero-centred, no per-gene scaling), squared Euclidean.  The cost scale stays the
+    # median sampled pair, as in the other arms (moscot scales by the maximum).  moscot's
+    # min_genes 200 bin filter is not applied, so every arm analyses the same bins; the
+    # bins it would remove are counted in representation.json.
+    "stdpca30_allgenes_nopca_noscale": {
+        "label": "stdpca30_allgenes_nopca_noscale", "normalisation": "precomputed", "scale_genes": False,
+        "equalise_depth": False, "cost": "squared_euclidean", "scale": "median_sampled_pair",
+        "n_hvg": 0, "n_pcs": 0, "minimum_detection_rate": 0.0, "regress_out": [],
+    },
+}
+STANDARD_EMBEDDING = {
+    "minimum_cells_per_gene": 3, "n_top_genes": 2000, "hvg_flavor": "seurat_v3", "hvg_batch": "slice",
+    "normalize_total_target": "median total of the pair's bins", "log1p": True, "n_pcs": 30,
+    "pca_zero_center": True, "pca_scale_genes": False, "pca_solver": "arpack",
+    "moscot_bin_filter_not_applied": "min_genes 200",
 }
 PREPROCESSING_LABEL = os.environ.get("MOSTA_PREPROCESSING", "ranknm256_noscale_ds_cos")
 if PREPROCESSING_LABEL not in EXPECTED_PREPROCESSING:
