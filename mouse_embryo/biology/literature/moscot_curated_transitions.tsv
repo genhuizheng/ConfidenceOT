@@ -1,0 +1,139 @@
+source_annotation	target_annotation	transition_type	source_of_row
+AGM	AGM	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+AGM	Adrenal gland	known_descendant	Klein2025 Suppl. Tab. 5 row 'AGM', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Adrenal gland', column Known_progenitors
+AGM	Blood vessel	known_descendant	Klein2025 Suppl. Tab. 5 row 'AGM', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Blood vessel', column Known_progenitors
+AGM	Kidney	known_descendant	Klein2025 Suppl. Tab. 5 row 'AGM', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Kidney', column Known_progenitors
+AGM	Ovary	known_descendant	Klein2025 Suppl. Tab. 5 row 'AGM', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Ovary', column Known_progenitors
+AGM	Urogenital ridge	known_descendant	Klein2025 Suppl. Tab. 5 row 'AGM', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Urogenital ridge', column Known_progenitors
+Adipose tissue	Adipose tissue	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Adrenal gland	Adrenal gland	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Blood vessel	Blood vessel	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Bone	Bone	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Brain	Brain	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Brain	Eye	known_descendant	Klein2025 Suppl. Tab. 5 row 'Brain', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Eye', column Known_progenitors
+Branchial arch	Branchial arch	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Branchial arch	Jaw and tooth	known_descendant	Klein2025 Suppl. Tab. 5 row 'Branchial arch', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Jaw and tooth', column Known_progenitors
+Branchial arch	Thymus	known_descendant	Klein2025 Suppl. Tab. 5 row 'Branchial arch', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Thymus', column Known_progenitors
+Cartilage	Bone	known_descendant	Klein2025 Suppl. Tab. 5 row 'Cartilage', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Bone', column Known_progenitors
+Cartilage	Cartilage	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Cartilage primordium	Bone	known_descendant	Klein2025 Suppl. Tab. 5 row 'Cartilage primordium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Bone', column Known_progenitors
+Cartilage primordium	Cartilage	known_descendant	Klein2025 Suppl. Tab. 5 row 'Cartilage primordium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Cartilage', column Known_progenitors
+Cartilage primordium	Cartilage primordium	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Cartilage primordium	Connective tissue	known_descendant	Klein2025 Suppl. Tab. 5 row 'Connective tissue', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Cartilage primordium', column Known_descendants
+Cavity	Cavity	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Choroid plexus	Choroid plexus	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Connective tissue	Blood vessel	known_descendant	Klein2025 Suppl. Tab. 5 row 'Blood vessel', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Connective tissue', column Known_descendants
+Connective tissue	Cartilage	known_descendant	Klein2025 Suppl. Tab. 5 row 'Connective tissue', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Cartilage', column Known_progenitors
+Connective tissue	Cartilage primordium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Connective tissue', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Cartilage primordium', column Known_progenitors
+Connective tissue	Connective tissue	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Dermomyotome	Adipose tissue	known_descendant	Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Adipose tissue', column Known_progenitors
+Dermomyotome	Connective tissue	known_descendant	Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Connective tissue', column Known_progenitors
+Dermomyotome	Dermomyotome	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Dermomyotome	Head mesenchyme	known_descendant	Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Head mesenchyme', column Known_progenitors
+Dermomyotome	Meninges	known_descendant	Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Meninges', column Known_progenitors
+Dermomyotome	Muscle	known_descendant	Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Muscle', column Known_progenitors
+Dermomyotome	Smooth muscle	known_descendant	Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Smooth muscle', column Known_progenitors
+Dorsal root ganglion	Dorsal root ganglion	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Ectoderm	Brain	known_descendant	Klein2025 Suppl. Tab. 5 row 'Ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Brain', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Ectoderm	Branchial arch	known_descendant	Klein2025 Suppl. Tab. 5 row 'Ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Branchial arch', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Ectoderm	Ectoderm	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type) | germ-layer row, not a MOSTA annotation
+Ectoderm	Neural crest	known_descendant	Klein2025 Suppl. Tab. 5 row 'Ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Ectoderm	Spinal cord	known_descendant	Klein2025 Suppl. Tab. 5 row 'Ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Spinal cord', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Ectoderm	Surface ectoderm	known_descendant	Klein2025 Suppl. Tab. 5 row 'Ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Endoderm	Endoderm	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type) | germ-layer row, not a MOSTA annotation
+Endoderm	Liver	known_descendant	Klein2025 Suppl. Tab. 5 row 'Endoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Liver', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Endoderm	Primitive gut tube	known_descendant	Klein2025 Suppl. Tab. 5 row 'Endoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Epidermis	Epidermis	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Epidermis	Mucosal epithelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Epidermis', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Mucosal epithelium', column Known_progenitors
+Epidermis	Olfactory epithelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Epidermis', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Olfactory epithelium', column Known_progenitors
+Eye	Eye	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Facial nerve	Facial nerve	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+GI tract	GI tract	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Head mesenchyme	Head mesenchyme	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Head mesenchyme	Meninges	known_descendant	Klein2025 Suppl. Tab. 5 row 'Head mesenchyme', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Meninges', column Known_progenitors
+Head mesenchyme	Mesenchyme	known_descendant	Klein2025 Suppl. Tab. 5 row 'Head mesenchyme', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_progenitors
+Heart	Heart	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Inner ear	Inner ear	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Jaw and tooth	Jaw and tooth	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Kidney	Kidney	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Liver	Liver	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Lung	Lung	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Lung primordium	Lung	known_descendant	Klein2025 Suppl. Tab. 5 row 'Lung primordium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Lung', column Known_progenitors
+Lung primordium	Lung primordium	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Meninges	Meninges	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Mesenchyme	Adipose tissue	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Adipose tissue', column Known_progenitors
+Mesenchyme	Blood vessel	known_descendant	Klein2025 Suppl. Tab. 5 row 'Blood vessel', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants
+Mesenchyme	Branchial arch	known_descendant	Klein2025 Suppl. Tab. 5 row 'Branchial arch', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants
+Mesenchyme	Choroid plexus	known_descendant	Klein2025 Suppl. Tab. 5 row 'Choroid plexus', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants
+Mesenchyme	Connective tissue	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Connective tissue', column Known_progenitors
+Mesenchyme	Head mesenchyme	known_descendant	Klein2025 Suppl. Tab. 5 row 'Head mesenchyme', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants
+Mesenchyme	Mesenchyme	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Mesenchyme	Mesothelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Mesothelium', column Known_progenitors
+Mesenchyme	Smooth muscle	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Smooth muscle', column Known_progenitors
+Mesentery	Mesentery	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Mesentery	Mesothelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesothelium', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Mesentery', column Known_descendants
+Mesoderm	AGM	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'AGM', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Branchial arch	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Branchial arch', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Dermomyotome	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Dermomyotome', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Head mesenchyme	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Head mesenchyme', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Heart	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Heart', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Mesenchyme	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Mesenchyme', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Mesoderm	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type) | germ-layer row, not a MOSTA annotation
+Mesoderm	Notochord	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Notochord', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesoderm	Sclerotome	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Sclerotome', column Known_progenitors | germ-layer row, not a MOSTA annotation
+Mesothelium	Mesentery	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mesothelium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Mesentery', column Known_progenitors
+Mesothelium	Mesothelium	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Mucosal epithelium	Inner ear	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mucosal epithelium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Inner ear', column Known_progenitors
+Mucosal epithelium	Mucosal epithelium	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Mucosal epithelium	Olfactory epithelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mucosal epithelium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Olfactory epithelium', column Known_progenitors
+Mucosal epithelium	Submandibular gland	known_descendant	Klein2025 Suppl. Tab. 5 row 'Mucosal epithelium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Submandibular gland', column Known_progenitors
+Muscle	Muscle	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Neural crest	Adrenal gland	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Adrenal gland', column Known_progenitors
+Neural crest	Branchial arch	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Branchial arch', column Known_progenitors
+Neural crest	Dorsal root ganglion	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Dorsal root ganglion', column Known_progenitors
+Neural crest	Eye	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Eye', column Known_progenitors
+Neural crest	Facial nerve	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Facial nerve', column Known_progenitors
+Neural crest	Head mesenchyme	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Head mesenchyme', column Known_progenitors
+Neural crest	Jaw and tooth	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Jaw and tooth', column Known_progenitors
+Neural crest	Meninges	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Meninges', column Known_progenitors
+Neural crest	Neural crest	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Neural crest	Olfactory epithelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Olfactory epithelium', column Known_progenitors
+Neural crest	Smooth muscle	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Smooth muscle', column Known_progenitors
+Neural crest	Submandibular gland	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Submandibular gland', column Known_progenitors
+Neural crest	Sympathetic nerve	known_descendant	Klein2025 Suppl. Tab. 5 row 'Neural crest', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Sympathetic nerve', column Known_progenitors
+Notochord	Cartilage primordium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Notochord', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Cartilage primordium', column Known_progenitors
+Notochord	Notochord	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Olfactory epithelium	Olfactory epithelium	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Ovary	Ovary	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Pancreas	Pancreas	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Pancreas primordium	Pancreas	known_descendant	Klein2025 Suppl. Tab. 5 row 'Pancreas primordium', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Pancreas', column Known_progenitors
+Pancreas primordium	Pancreas primordium	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Primitive gut tube	GI tract	known_descendant	Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'GI tract', column Known_progenitors
+Primitive gut tube	Liver	known_descendant	Klein2025 Suppl. Tab. 5 row 'Liver', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_descendants
+Primitive gut tube	Lung	known_descendant	Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Lung', column Known_progenitors
+Primitive gut tube	Lung primordium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Lung primordium', column Known_progenitors
+Primitive gut tube	Pancreas	known_descendant	Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Pancreas', column Known_progenitors
+Primitive gut tube	Pancreas primordium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Primitive gut tube', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Pancreas primordium', column Known_progenitors
+Primitive gut tube	Primitive gut tube	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Sclerotome	Cartilage	known_descendant	Klein2025 Suppl. Tab. 5 row 'Sclerotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Cartilage', column Known_progenitors
+Sclerotome	Cartilage primordium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Sclerotome', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Cartilage primordium', column Known_progenitors
+Sclerotome	Sclerotome	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Smooth muscle	Blood vessel	known_descendant	Klein2025 Suppl. Tab. 5 row 'Blood vessel', column Known_progenitors | Klein2025 Suppl. Tab. 5 row 'Smooth muscle', column Known_descendants
+Smooth muscle	Smooth muscle	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Spinal cord	Spinal cord	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Submandibular gland	Submandibular gland	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Surface ectoderm	Choroid plexus	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Choroid plexus', column Known_progenitors
+Surface ectoderm	Epidermis	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Epidermis', column Known_progenitors
+Surface ectoderm	Eye	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Eye', column Known_progenitors
+Surface ectoderm	Inner ear	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Inner ear', column Known_progenitors
+Surface ectoderm	Meninges	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Meninges', column Known_progenitors
+Surface ectoderm	Mucosal epithelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Mucosal epithelium', column Known_progenitors
+Surface ectoderm	Olfactory epithelium	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Olfactory epithelium', column Known_progenitors
+Surface ectoderm	Submandibular gland	known_descendant	Klein2025 Suppl. Tab. 5 row 'Surface ectoderm', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Submandibular gland', column Known_progenitors
+Surface ectoderm	Surface ectoderm	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Sympathetic nerve	Sympathetic nerve	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Thymus	Thymus	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)
+Urogenital ridge	Adrenal gland	known_descendant	Klein2025 Suppl. Tab. 5 row 'Urogenital ridge', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Adrenal gland', column Known_progenitors
+Urogenital ridge	Kidney	known_descendant	Klein2025 Suppl. Tab. 5 row 'Urogenital ridge', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Kidney', column Known_progenitors
+Urogenital ridge	Ovary	known_descendant	Klein2025 Suppl. Tab. 5 row 'Urogenital ridge', column Known_descendants | Klein2025 Suppl. Tab. 5 row 'Ovary', column Known_progenitors
+Urogenital ridge	Urogenital ridge	self	moscot-framework_reproducibility mosta_st_map_accuracies.py set_transition_graph: G.add_edge(cell_type, cell_type)

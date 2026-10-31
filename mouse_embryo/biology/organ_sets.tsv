@@ -1,0 +1,14 @@
+# Organ case studies: which MOSTA annotations (exact strings of obs['annotation']) each case analyses.
+# heart / neural / liver / urogenital are the four cases of the user's request (2026-10-30).
+# Every annotation is also analysed on its own in the systematic pass (34_), so nothing is left out.
+organ_set	annotation
+heart	Heart
+neural	Brain
+neural	Spinal cord
+neural	Dorsal root ganglion
+neural	Neural crest
+liver	Liver
+urogenital	Urogenital ridge
+urogenital	Kidney
+urogenital	Ovary
+urogenital	Testis

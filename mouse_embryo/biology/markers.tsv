@@ -1,0 +1,22 @@
+# Marker genes per organ case, fixed before any result was read.  source: who named the gene.
+# "user" = the user's request of 2026-10-30; "literature:<ref>" = named in that paper (see literature/LITERATURE_NOTES.md).
+# Whether each gene exists in the MOSTA matrix is checked and written by 32_ (MARKER_GENES.tsv); a missing gene is reported, never replaced.
+organ_set	gene	program	source
+heart	Nkx2-5	cardiac_identity	user
+heart	Gata4	cardiac_identity	user
+heart	Tbx5	cardiac_identity	user
+heart	Tbx20	cardiac_identity	user
+heart	Myl7	cardiomyocyte_contractile	user
+heart	Myh6	cardiomyocyte_contractile	user
+neural	Neurod2	neuronal_differentiation	user
+neural	Sox11	neuronal_differentiation	user
+neural	Tcf7l2	regional_identity	user
+liver	Afp	fetal_hepatocyte	user
+liver	Alb	fetal_hepatocyte	user
+liver	Hnf4a	fetal_hepatocyte	user
+heart	Gata6	cardiac_identity	literature:moscot Suppl. Tab. 7 (top heart TFs)
+heart	Hand2	cardiac_identity	literature:moscot Suppl. Tab. 7 (top heart TFs)
+neural	Myt1l	neuronal_differentiation	literature:moscot Fig. 4e-g (neuron TF drivers)
+neural	Zfhx3	neuronal_differentiation	literature:moscot Fig. 4e-g (neuron TF drivers)
+liver	Apoa2	fetal_hepatocyte	literature:moscot (Liver pull-back genes)
+liver	Lgals2	fetal_hepatocyte	literature:moscot (Hnf4a push-forward genes)
