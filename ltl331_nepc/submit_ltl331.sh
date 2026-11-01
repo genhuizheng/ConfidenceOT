@@ -1,7 +1,7 @@
 #!/bin/bash
 # GSE297328 (LTL331 PDX neuroendocrine transdifferentiation time course) through the project's pipeline.
 #
-#   bash ltl331_nepc/submit_ltl331.sh [--dry-run] convert|prepare|run|all
+#   bash ltl331_nepc/submit_ltl331.sh [--dry-run] convert|prepare|run|all|export
 #
 # convert  01_convert_geo.py on a compute node: one raw-count H5AD per time point, the CellRanger counts of
 #          GSE297328_RAW.tar for the authors' QC cells, with their labels (annotated, harmony coarse_celltype,
@@ -12,6 +12,8 @@
 #          and logcpm (original counts, the same cells); ConfidenceOT M4-E / M4-R, within-side split null,
 #          acceptance 0.99, no cell cap, couplings saved
 # all      convert -> prepare -> run, each afterok the previous
+# export   04_export_results.py (not part of all): gate tables of every pair and every cell's labels to
+#          $root/export/export_<time>[.tar.gz] for local checking; couplings and counts stay on TACC
 # Download first: cancer_application/GSE297328_longitudinal/scripts/download_gse297328.sh. Nothing outside $data and $root is written; a stage
 # whose output exists is refused, never overwritten. No set -e / -u / pipefail (TACC rules); each step checks itself.
 
@@ -19,11 +21,11 @@ dry_run=0; stage=""
 for a in "$@"; do
     case "$a" in
         --dry-run) dry_run=1 ;;
-        convert|prepare|run|all) stage=$a ;;
+        convert|prepare|run|all|export) stage=$a ;;
         *) echo "unknown argument: $a" >&2; exit 2 ;;
     esac
 done
-[[ -n "$stage" ]] || { echo "usage: bash ltl331_nepc/submit_ltl331.sh [--dry-run] convert|prepare|run|all" >&2; exit 2; }
+[[ -n "$stage" ]] || { echo "usage: bash ltl331_nepc/submit_ltl331.sh [--dry-run] convert|prepare|run|all|export" >&2; exit 2; }
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 data=${LTL331_DATA:-/scratch/10119/ghzheng/OT_project/data/ltl331_GSE297328}
 root=${LTL331_ROOT:-/scratch/10119/ghzheng/OT_project/ltl331_confidenceot}
@@ -50,6 +52,7 @@ need=0
 [[ $stage == convert || $stage == all ]] && need=$(( need + 1 ))
 [[ $stage == prepare || $stage == all ]] && need=$(( need + 1 ))
 [[ $stage == run || $stage == all ]] && need=$(( need + 2 ))
+[[ $stage == export ]] && need=1
 if (( ! dry_run && queued + need > cap )); then echo "$queued queued; $need more would pass the cap of $cap" >&2; exit 3; fi
 (( dry_run )) || mkdir -p "$logs" "$data/logs" || exit 1
 
@@ -85,5 +88,13 @@ if [[ $stage == run || $stage == all ]]; then
         --export=ALL,CONFIDENCEOT_REPO="$repo",CANCER_COT_ROOT="$root",CONFIDENCEOT_FACTORIAL_MANIFEST="$inputs/rawqc/pair_manifest_rawqc.csv",CONFIDENCEOT_FACTORIAL_MANIFEST_DS="$inputs/ds/pair_manifest_downsampled.csv",CONFIDENCEOT_PREDOWNSAMPLE_DEPTH="$inputs/ds/predownsample_depth.csv.gz",CONFIDENCEOT_FACTORIAL_LABELS="$labels",CONFIDENCEOT_FACTORIAL_WORKERS=1,CONFIDENCEOT_FACTORIAL_ROOT="$root/runs/acc0.99",CONFIDENCEOT_FACTORIAL_BLOCK=ltl331,CONFIDENCEOT_ANALYSIS_SCOPE=malignant,CONFIDENCEOT_MALIGNANT_COLUMN=malignant,CONFIDENCEOT_MAX_OBSERVED_CELLS_PER_SIDE=0,CONFIDENCEOT_MINIMUM_SCOPE_CELLS=4,CONFIDENCEOT_FACTORIAL_EXTRA_ARGS="--within-side-acceptance-minimum 0.99 --save-coupling" \
         "$repo/cancer_metastasis/tacc_preprocessing_factorial.slurm") || exit 1
     echo "run array $id: task 0 ranknm256_noscale_ds_cos, task 1 logcpm; out $root/runs/acc0.99/ltl331/<label>/" >&2
+fi
+if [[ $stage == export ]]; then
+    [[ -n "$(find "$root/runs" -name pair_metrics.csv -print -quit 2> /dev/null)" ]] || { echo "no pair_metrics.csv under $root/runs (run first)" >&2; exit 1; }
+    out=$root/export/export_$(date +%Y%m%d_%H%M%S)
+    (( dry_run )) || mkdir -p "$root/export" || exit 1
+    id=$(submit -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J ltl_exp -o "$logs/export_%j.out" \
+        --wrap "$activate && python ltl331_nepc/04_export_results.py --root $root --converted $converted --out $out") || exit 1
+    echo "export job $id -> $out.tar.gz (log $logs/export_$id.out)" >&2
 fi
 (( dry_run )) || echo "$stage submitted $(date -Iseconds), commit $(git -C "$repo" rev-parse --short HEAD 2> /dev/null)" >> "$root/SUBMITTED.txt"

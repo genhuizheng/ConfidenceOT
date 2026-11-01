@@ -23,6 +23,7 @@
 6. **ConfidenceOT** (`cancer_metastasis/tacc_preprocessing_factorial.slurm`):
    - two representations on the same cells: **`ranknm256_noscale_ds_cos`** (the project's preprocessing, equalised counts) and **`logcpm`** (library size → log1p → HVG → PCA with gene scaling, original counts; as MOSTA's logcpm arm);
    - M4-E / M4-R, within-side split null, acceptance 0.99, no cell cap, couplings saved.
+7. **`04_export_results.py`** (`submit_ltl331.sh export`): every pair's gate tables and every cell's labels (`cells_obs.tsv.gz`, joined on `observation_id`) to `$root/export/export_<time>.tar.gz` for local checking, with an md5 manifest. Couplings and counts stay on TACC (listed in `COUPLINGS_NOT_EXPORTED.tsv`). The gate tables' `annotation` is `unannotated` (obs has no `cell_type`); the labels come from the join.
 
 **Not used.** The authors' log-normalised `.X` / `.raw`, PCA, UMAP, Harmony embedding, velocity layers and the RDS (only obs labels are read from the harmony and velocity objects). The biological question and any further pairing (e.g. non-adjacent time points) come later.
 
