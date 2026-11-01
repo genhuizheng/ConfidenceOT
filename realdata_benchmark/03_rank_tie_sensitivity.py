@@ -64,8 +64,7 @@ def main() -> None:
         for index, row in pairs.iterrows():
             pair = row.pair_id.replace("LTL331__", "")
             s = ad.read_h5ad(rb.local(row.source_h5ad, a.run_root)); t = ad.read_h5ad(rb.local(row.target_h5ad, a.run_root))
-            _, si, ti = rb.common_genes(s, t)
-            joint = sp.vstack([sp.csr_matrix(s.X)[:, si], sp.csr_matrix(t.X)[:, ti]], format="csr").astype(np.float64)
+            joint = rb.joint_counts(s, t)
             ns = s.n_obs
             types = np.concatenate([ctype.loc[s.obs_names.astype(str)].to_numpy(), ctype.loc[t.obs_names.astype(str)].to_numpy()])
             sample_rng = np.random.default_rng(index)

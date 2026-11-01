@@ -1,0 +1,17 @@
+worker 0 of 1: 3 rows
+splatter test_all_shared ranknm256-production|none|noscale|cos ok
+splatter test_all_shared ranknm1024-expected|P10sfrozen|noscale|cos ok
+splatter test_all_shared rankhvg2000-midrank|P25s1|noscale|cos ok
+ 
+PASS  ranknm256-production|none|noscale|cos: SUCCESS
+PASS  ranknm256-production|none|noscale|cos: score.csv has M4-E and M4-R with the scorer's metrics  (2 rows)
+PASS  ranknm1024-expected|P10sfrozen|noscale|cos: SUCCESS
+PASS  ranknm1024-expected|P10sfrozen|noscale|cos: score.csv has M4-E and M4-R with the scorer's metrics  (2 rows)
+PASS  rankhvg2000-midrank|P25s1|noscale|cos: SUCCESS
+PASS  rankhvg2000-midrank|P25s1|noscale|cos: score.csv has M4-E and M4-R with the scorer's metrics  (2 rows)
+PASS  expected-tie configuration fitted through the precomputed path  (bmenc_noscale_cos)
+PASS  production configuration fitted by its label
+PASS  a rerun skips finished rows  (worker 0 of 1: 3 rows
+)
+
+9 passed, 0 failed

@@ -2,17 +2,20 @@
 
 Rank encoders with an explicit tie rule, beside the production one (confidenceot.preprocessing.rank_value_encode,
 which breaks ties by numpy's stable argsort over each row's entries in their STORED order):
-  production  the production rule exactly: the same sparse products as rank_value_encode, so ties keep the storage
-              order those products leave. Measured 2026-10-31 (scipy 1.15.1): sparse.diags(...) @ csr returns every
-              row in reverse column order, so for rank_no_median (no further product) ties break in REVERSE
-              alphabetical gene order; for rank_value the extra product with the gene-median diagonal leaves rows
-              ascending, so ties break alphabetically. Checked bit for bit against rank_value_encode;
-  alphabetical ties in ascending column order (gene keys sorted as strings), another arbitrary order;
-  random    ties broken uniformly at random (seeded);
-  expected  the encoding averaged over random tie-breaking: every gene of a tie group receives the mean of the
-            values of the slots the group occupies, and a group straddling the top-N cut shares the slots it is
-            competing for, each member receiving (mean slot value) x (slots / group size). Deterministic, and does
-            not depend on gene order.
+  production    the production rule exactly. The stored order is implementation-defined: Preprocessing.representation
+                builds csr_matrix(counts, dtype=float64), then indexes columns into the sorted gene-key order; scipy's
+                fancy column indexing leaves each row in a permutation that is neither column nor key order (measured
+                2026-10-31, scipy 1.15.1: row 0 of the 16-week cells starts 15705, 8325, 24732, ...), and both
+                rank_no_median and rank_value inherit it (on the equalised 16-week cells the alphabetical rule differs
+                from production for both). joint_counts() rebuilds the joint exactly that way, so rank_encode(...,
+                'production') equals rank_value_encode bit for bit. (An earlier note in this file and in commit 55616d0
+                said "reverse alphabetical"; that came from a joint matrix built in sorted order, not production's.)
+  alphabetical  ties in ascending gene-key order (keys sorted as strings): another arbitrary but documented order;
+  random        ties broken uniformly at random (seeded);
+  expected      the encoding averaged over random tie-breaking: every gene of a tie group receives the mean of the
+                values of the slots the group occupies, and a group straddling the top-N cut shares the slots it is
+                competing for, each member receiving (mean slot value) x (slots / group size). Deterministic, and does
+                not depend on gene order.
 """
 
 from __future__ import annotations
@@ -43,14 +46,27 @@ def cell_types(converted: Path) -> pd.Series:
 
 
 def common_genes(source: ad.AnnData, target: ad.AnnData):
-    """Columns as prepare_joint_representation intersects them: first occurrence, keys sorted as strings."""
+    """Columns as prepare_joint_representation intersects them: common.gene_keys (gene_id, else gene_symbol, else
+    var_names), first occurrence, keys sorted as strings. (Before 2026-10-31 15:00 this used var_names, 28 genes
+    wider than production on the original-count files, whose repeated symbols carry '-1' names.)"""
+    from common import gene_keys
     sf, tf = {}, {}
-    for i, k in enumerate(source.var_names.astype(str)):
+    for i, k in enumerate(gene_keys(source)):
         sf.setdefault(k, i)
-    for i, k in enumerate(target.var_names.astype(str)):
+    for i, k in enumerate(gene_keys(target)):
         tf.setdefault(k, i)
     common = sorted(set(sf) & set(tf))
     return common, [sf[k] for k in common], [tf[k] for k in common]
+
+
+def joint_counts(source: ad.AnnData, target: ad.AnnData) -> sp.csr_matrix:
+    """Both sides stacked on the common genes, built exactly as Preprocessing.representation builds them (float64 csr
+    first, then the column index), so the stored row order, which decides production ties, is production's."""
+    from common import expression_matrix
+    _, si, ti = common_genes(source, target)
+    sx = sp.csr_matrix(expression_matrix(source), dtype=np.float64)[:, si]
+    tx = sp.csr_matrix(expression_matrix(target), dtype=np.float64)[:, ti]
+    return sp.vstack([sx, tx], format="csr")
 
 
 def scaled_for_rank(joint: sp.csr_matrix, gene_median: bool, sort: bool) -> sp.csr_matrix:
@@ -153,3 +169,87 @@ def kappa(x, y) -> float:
     x, y = np.asarray(x, int), np.asarray(y, int)
     po = np.mean(x == y); pe = x.mean() * y.mean() + (1 - x.mean()) * (1 - y.mean())
     return float((po - pe) / (1 - pe)) if pe < 1 else np.nan
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Registered configurations (JOINT_BENCHMARK_PROTOCOL.md section 2)
+
+DS_QUANTILES = {"P10": 0.10, "P25": 0.25, "P50": 0.50}
+
+
+def ds_targets(depth: pd.Series) -> dict:
+    """Pooled quantile targets of the analysed cells' pre-equalisation depth, as 27_downsample_counts.py computes P10."""
+    return {k: int(np.quantile(depth.to_numpy(), q)) for k, q in DS_QUANTILES.items()}
+
+
+def equalised(data: ad.AnnData, target: int, seed: int) -> ad.AnnData:
+    from confidenceot import equalise_depth
+    out = data.copy()
+    X = sp.csr_matrix(out.X).astype(np.int64)
+    out.X = sp.csr_matrix(equalise_depth(X, rng=np.random.default_rng(seed), target=target)).astype(np.float32)
+    return out
+
+
+def production_label(enc: str, K: int, scale: bool, ds: bool, cost: str) -> str | None:
+    if enc not in ("logcpm", "ranknm"):
+        return None
+    stem = "logcpm" if enc == "logcpm" else f"ranknm{K}"
+    return stem + ("" if scale else "_noscale") + ("_ds" if ds else "") + ("_cos" if cost == "cos" else "")
+
+
+def rankhvg_encode(joint_counts: sp.csr_matrix, H: int, rule: str):
+    """Rank-HVG: H genes of highest variance of log1p(1e4 x count / total) over both sides; within them each cell's
+    expressed genes ranked by count (descending), value 1 - (r - 1) / H, zeros stay 0. rule 'midrank': ties share
+    their average rank; 'order': ties keep column order (keys sorted as strings), to measure gene-order sensitivity."""
+    totals = np.asarray(joint_counts.sum(axis=1)).ravel()
+    ln = sp.csr_matrix(sp.diags(1e4 / np.maximum(totals, 1.0)) @ joint_counts); ln.data = np.log1p(ln.data)
+    hvg = top_variance(ln, min(H, joint_counts.shape[1]))
+    sub = sp.csr_matrix(joint_counts[:, hvg]); sub.sort_indices()
+    vals = np.empty_like(sub.data, dtype=np.float64)
+    for i in range(sub.shape[0]):
+        a, b = sub.indptr[i], sub.indptr[i + 1]
+        if b == a:
+            continue
+        d = sub.data[a:b]
+        if rule == "midrank":
+            r = pd.Series(-d).rank(method="average").to_numpy()
+        elif rule == "order":
+            r = np.empty(d.size); r[np.argsort(-d, kind="stable")] = np.arange(1, d.size + 1)
+        else:
+            raise ValueError(rule)
+        vals[a:b] = 1.0 - (r - 1.0) / H
+    enc = sp.csr_matrix((vals, sub.indices.copy(), sub.indptr.copy()), shape=sub.shape)
+    return enc, hvg
+
+
+def build_config(spec: dict, source: ad.AnnData, target: ad.AnnData, seed: int):
+    """Coordinates of one registered configuration on (already depth-handled) source / target AnnData.
+    Production-equivalent configurations go through the production code by their label; the others through the
+    encoders above, with the production downstream (rank-K: 2,000 top-variance encoded genes; rank-HVG: all H genes;
+    no gene scaling unless spec says so; PCA 30; cosine or squared Euclidean)."""
+    from common import prepare_joint_representation
+    from confidenceot import Preprocessing
+    enc, K, H, tie, scale, cost = spec["encoding"], spec.get("K"), spec.get("H"), spec.get("tie"), spec["scale"], spec["cost"]
+    ds = spec["ds"] != "none"
+    label = spec.get("label") if isinstance(spec.get("label"), str) and spec.get("label") else None
+    if label is None and (enc == "logcpm" or tie == "production"):
+        label = production_label(enc, int(K) if K == K and K is not None else 0, scale, ds, cost)
+    if label is not None:
+        c = Preprocessing.from_label(label)
+        X, Y, _, prov = prepare_joint_representation(
+            source, target, n_hvg=c.n_hvg, n_pcs=c.n_pcs, seed=seed, representation=c.normalisation, rank_top_n=c.rank_top_n,
+            cost=c.cost, equalise_depth=c.equalise_depth, regress_out=c.regress_out, regress_on_ranks=c.regress_on_ranks,
+            scale_genes=c.scale_genes, label_stem=c.label_stem)
+        return np.asarray(X, np.float32), np.asarray(Y, np.float32), {"path": f"production label {label}", "hvg_n": prov.get("hvg_n")}
+    joint = joint_counts(source, target)
+    if enc == "ranknm":
+        rule, tseed = ("random", int(tie[6:])) if str(tie).startswith("random") else (tie, 0)
+        e, _ = rank_encode(joint, int(K), False, rule, tseed)
+        coords, sel = pca_coordinates(e, 2000, 30, scale, cost == "cos", seed)
+    elif enc == "rankhvg":
+        e, _ = rankhvg_encode(joint, int(H), tie)
+        coords, sel = pca_coordinates(e, int(H), 30, scale, cost == "cos", seed)
+    else:
+        raise ValueError(enc)
+    n = source.n_obs
+    return coords[:n].astype(np.float32), coords[n:].astype(np.float32), {"path": f"benchmark encoder {enc} tie {tie}", "hvg_n": len(sel)}

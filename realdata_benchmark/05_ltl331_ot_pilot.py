@@ -1,26 +1,24 @@
-"""LTL331 OT benchmark, pilot on 16 -> 20 weeks (or any pair index): every registered configuration and the tie-rule
-variants of the production one, fitted with exactly the factorial run's arguments, plus balanced OT on the same cost.
+"""LTL331 OT benchmark on one pair (pilot: 16 -> 20 weeks, index 5): the configurations the protocol fits with OT,
+with exactly the factorial run's arguments, plus balanced OT on the same cost.
 
     python realdata_benchmark/05_ltl331_ot_pilot.py --run-root RUN_ROOT --converted CONVERTED --registry REGISTRY \
-        --out OUT_DIR [--pair-index 5] [--labels ...] [--tie-variants]
+        --out OUT_DIR [--pair-index 5] [--only CONFIG_ID ...]
 
-Fits (OUT/fits/<config>/): cancer_metastasis/02_run_pair.py on the frozen manifest (ds or original counts as the label
-reads) at --index PAIR_INDEX, so seeds equal the frozen run's; the LTL331 factorial arguments; --save-coupling.
-Tie variants (--tie-variants): ranknm256 encodings of the same equalised cells with the tie rules of
-rb_common.rank_encode (production, alphabetical, random seed 1, expected) written as h5ad and run through the
-precomputed path with labels tie<rule>_noscale_cos (--allow-precomputed): the rank-arm downstream (2,000 top-variance
-genes, no gene scaling, PCA 30, cosine) applies unchanged. The production variant must reproduce the frozen gates;
-that is checked and reported (production_reproduced).
+Which configurations (JOINT_BENCHMARK_PROTOCOL.md section 3): the historical non-raw labels (contrast H) and every
+registered configuration with role main (R1-R6: production and expected ties, DS none / frozen P10 / seed 1 of P10,
+P25, P50, cos and sqeuc, scale and noscale). Sensitivity rows (random ties, DS seeds 2-3) are representation-only.
+Plus one mechanism check: the production ranknm256 encoding of the frozen equalised cells supplied as a precomputed
+matrix must give the frozen gates (check_precomputed_path).
 
-Per fit and method (M4-E, M4-R) LTL331_OT_BENCHMARK rows hold: convergence (inner, outer, cycle), M4-E inference
-validity and the M4-R calibration flags, source / target rejected fractions and their difference (asymmetry), median
-normalised coupling row entropy, annotation-level transport (observed type-to-type mass over the independent
-coupling with the same marginals), coverage (fraction of target types receiving >= 1% of the retained mass, fraction
-of target cells with a retained partner mass above 1 / n_target of the retained block), NE minus non-NE source
-retention, AUC of pre-equalisation depth for rejected cells, and the correspondence with balanced OT on the same cost
-(full) and on the M4-E retained block (matched subset): Pearson correlation of the type-to-type mass matrices and the
-Jensen-Shannon divergence of each source type's target-type distribution. A non-converged M4-R row is marked
-formal_result = False and must not enter an average.
+How each is fitted (OUT/fits/pair<i>/<config>/): cancer_metastasis/02_run_pair.py on a manifest equal to the frozen
+one except the pair's two files, at --index PAIR_INDEX, so every seed equals the frozen run's; LTL331 factorial
+arguments; --save-coupling.
+  production-equivalent (logcpm any DS, ranknm-K production, historical labels): the production label on count files
+  (frozen ds / original / equalised here with rb_common.equalised, seed 1000 * s + 1 / + 2 as in 04_);
+  other encodings: the encoded matrix written as h5ad and fitted through the precomputed path with label
+  bmenc[_allgenes][_noscale][_cos] (--allow-precomputed): rank-K -> 2,000 top-variance encoded genes, rank-HVG ->
+  every encoded HVG (allgenes), then the configuration's scaling, PCA 30 and cost.
+Rows of LTL331_OT_BENCHMARK_pair<i>.tsv: see the columns; a non-converged M4-R row has formal_result False.
 """
 
 from __future__ import annotations
@@ -52,7 +50,6 @@ FACTORIAL_ARGS = ["--analysis-scope", "malignant", "--malignant-column", "malign
                   "--cell-qc", "--minimum-total-counts", "0", "--minimum-detected-genes", "0", "--maximum-mitochondrial-percent", "100",
                   "--null-calibration-replicates", "5", "--null-validation-replicates", "5", "--calibration-grid-size", "5",
                   "--tolerance", "1e-4", "--workers", "8", "--device", "cpu", "--within-side-acceptance-minimum", "0.99", "--save-coupling"]
-TIE_RULES = [("production", 0), ("alphabetical", 0), ("random", 1), ("expected", 0)]
 
 
 def type_mass(P, st, tt):
@@ -63,10 +60,10 @@ def correspondence(Ma, Mb):
     ok = (Ma.sum(1) > 0) & (Mb.sum(1) > 0)
     js = [jensenshannon(Ma[i] / Ma[i].sum(), Mb[i] / Mb[i].sum()) for i in np.flatnonzero(ok)]
     a, b = (Ma / Ma.sum()).ravel(), (Mb / Mb.sum()).ravel()
-    return float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else np.nan, float(np.mean(js)) if js else np.nan
+    return (float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else np.nan), (float(np.mean(js)) if js else np.nan)
 
 
-def run_fit(manifest: Path, out: Path, index: int, label: str, precomputed: bool) -> int:
+def fit(manifest: Path, out: Path, index: int, label: str, precomputed: bool) -> int:
     sep = ";" if os.name == "nt" else ":"
     env = {**os.environ, "PYTHONPATH": sep.join(map(str, [REPO / "src", REPO / "cancer_metastasis", REPO]))}
     cmd = [sys.executable, str(REPO / "cancer_metastasis" / "02_run_pair.py"), str(manifest), str(out / "out"),
@@ -75,16 +72,16 @@ def run_fit(manifest: Path, out: Path, index: int, label: str, precomputed: bool
         return subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=REPO).returncode
 
 
-def localised_manifest(run_root: Path, equalised: bool, replace: dict | None, path: Path) -> Path:
+def manifest_with(run_root: Path, equalised: bool, pair_id: str, files: tuple[Path, Path] | None, path: Path) -> Path:
     sub, name = rb.LTL_LABEL_INPUT[equalised]
     m = pd.read_csv(run_root / "inputs" / sub / name)
     for side in ("source", "target"):
         m[f"{side}_h5ad"] = [str(rb.local(v, run_root).resolve()) for v in m[f"{side}_h5ad"]]
+    if files:
+        k = m.index[m.pair_id == pair_id][0]
+        m.loc[k, "source_h5ad"], m.loc[k, "target_h5ad"] = str(files[0].resolve()), str(files[1].resolve())
+    for side in ("source", "target"):
         m[f"{side}_h5ads_json"] = [json.dumps([v]) for v in m[f"{side}_h5ad"]]
-    if replace:
-        for (pair_id, side), v in replace.items():
-            k = m.index[m.pair_id == pair_id][0]
-            m.loc[k, f"{side}_h5ad"] = str(v); m.loc[k, f"{side}_h5ads_json"] = json.dumps([str(v)])
     m.to_csv(path, index=False)
     return path
 
@@ -96,8 +93,8 @@ def main() -> None:
     p.add_argument("--registry", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--pair-index", type=int, default=5)
-    p.add_argument("--labels", nargs="*", default=None)
-    p.add_argument("--tie-variants", action="store_true")
+    p.add_argument("--only", nargs="*", default=None)
+    p.add_argument("--no-check", action="store_true", help="skip the precomputed-path mechanism check (TACC workers)")
     a = p.parse_args()
     target = a.out / f"LTL331_OT_BENCHMARK_pair{a.pair_index}.tsv"
     if target.exists():
@@ -105,79 +102,104 @@ def main() -> None:
     fits = a.out / "fits" / f"pair{a.pair_index}"; fits.mkdir(parents=True, exist_ok=True)
     ctype = rb.cell_types(a.converted)
     depth = pd.read_csv(a.run_root / "inputs" / "ds" / "predownsample_depth.csv.gz").set_index("observation_id")["predownsample_total_counts"]
-    labels = a.labels if a.labels is not None else pd.read_csv(a.registry, sep="\t")["label"].tolist()
-    jobs = [(label, Preprocessing.from_label(label).equalise_depth, None, False) for label in labels]
-    pair_id = rb.ltl_pairs(a.run_root, True).iloc[a.pair_index].pair_id
-    if a.tie_variants:
-        row = rb.ltl_pairs(a.run_root, True).iloc[a.pair_index]
-        s = ad.read_h5ad(rb.local(row.source_h5ad, a.run_root)); t = ad.read_h5ad(rb.local(row.target_h5ad, a.run_root))
-        _, si, ti = rb.common_genes(s, t)
-        genes = s.var_names[si]
-        joint = sp.vstack([sp.csr_matrix(s.X)[:, si], sp.csr_matrix(t.X)[:, ti]], format="csr").astype(np.float64)
-        for rule, seed in TIE_RULES:
-            name = f"tie{rule}{seed if rule == 'random' else ''}"
-            d = fits / f"{name}_noscale_cos" / "input"; d.mkdir(parents=True, exist_ok=True)
-            enc, _ = rb.rank_encode(joint, 256, False, rule, seed)
-            enc = sp.csr_matrix(enc, dtype=np.float32)
-            for side, sl, obs in (("source", slice(0, s.n_obs), s.obs), ("target", slice(s.n_obs, None), t.obs)):
-                ad.AnnData(X=enc[sl], obs=obs.copy(), var=pd.DataFrame(index=genes)).write_h5ad(d / f"{side}.h5ad")
-            jobs.append((f"{name}_noscale_cos", True, {(pair_id, "source"): (d / "source.h5ad").resolve(),
-                                                        (pair_id, "target"): (d / "target.h5ad").resolve()}, True))
-    frozen = next((a.run_root / "runs" / "acc0.99" / "ltl331" / "ranknm256_noscale_ds_cos" / pair_id / "scope_malignant").glob("budget_*"))
-    frozen_cc = pd.read_csv(frozen / "cell_confidence.csv")
+    targets = rb.ds_targets(depth)
+    reg = pd.read_csv(a.registry, sep="\t")
+    reg = reg[(reg.kind == "historical") & reg.in_new_grid.astype(bool) | (reg.kind == "registered") & (reg.role == "main")]
+    if a.only:
+        reg = reg[reg.config_id.isin(a.only)]
+    orig = rb.ltl_pairs(a.run_root, False).iloc[a.pair_index]; froz = rb.ltl_pairs(a.run_root, True).iloc[a.pair_index]
+    pair_id = orig.pair_id
+    base = {"none": (ad.read_h5ad(rb.local(orig.source_h5ad, a.run_root)), ad.read_h5ad(rb.local(orig.target_h5ad, a.run_root))),
+            "P10sfrozen": (ad.read_h5ad(rb.local(froz.source_h5ad, a.run_root)), ad.read_h5ad(rb.local(froz.target_h5ad, a.run_root)))}
+    frozen_dir = lambda label: next((a.run_root / "runs" / "acc0.99" / "ltl331" / label / pair_id / "scope_malignant").glob("budget_*"))
+    jobs = []
+    for _, r in reg.iterrows():
+        r = r.to_dict()
+        if r["kind"] == "historical":
+            c = Preprocessing.from_label(r["label"])
+            jobs.append(dict(config=r["config_id"], ds_key="P10sfrozen" if c.equalise_depth else "none", label=r["label"], encode=None))
+            continue
+        ds_key = "none" if r["ds"] == "none" else f"{r['ds']}s{r['ds_seed']}"
+        lab = rb.production_label(r["encoding"], int(r["K"]) if r["K"] == r["K"] else 0, bool(r["scale"]), r["ds"] != "none", r["cost"]) \
+            if (r["encoding"] == "logcpm" or r["tie"] == "production") else None
+        jobs.append(dict(config=r["config_id"], ds_key=ds_key, label=lab, encode=None if lab else r))
+    if not a.no_check:
+        jobs.append(dict(config="check_precomputed_path", ds_key="P10sfrozen", label=None,
+                         encode={"encoding": "ranknm", "K": 256, "tie": "production", "scale": False, "cost": "cos", "ds": "P10", "H": None}))
     rows = []
-    for label, eq, replace, pre in jobs:
-        fit = fits / label; fit.mkdir(parents=True, exist_ok=True)
-        manifest = localised_manifest(a.run_root, eq, replace, fit / "manifest.csv")
-        code = run_fit(manifest, fit, a.pair_index, label, pre)
-        base = {"pair": pair_id.replace("LTL331__", ""), "config": label, "input": "ds" if eq else "original",
-                "tie_variant": pre, "exit": code}
+    for job in jobs:
+        safe = job["config"].replace("|", "__").replace(":", "_")
+        out = fits / safe; (out / "input").mkdir(parents=True, exist_ok=True)
+        if job["ds_key"] in base:
+            s, t = base[job["ds_key"]]
+        else:
+            ds, seed = job["ds_key"][:3], int(job["ds_key"][4:])
+            s, t = rb.equalised(base["none"][0], targets[ds], 1000 * seed + 1), rb.equalised(base["none"][1], targets[ds], 1000 * seed + 2)
+        files, precomputed = None, False
+        if job["encode"] is not None:
+            e = job["encode"]; joint = rb.joint_counts(s, t); genes = pd.Index(rb.common_genes(s, t)[0])
+            if e["encoding"] == "ranknm":
+                rule, tseed = ("random", int(e["tie"][6:])) if str(e["tie"]).startswith("random") else (e["tie"], 0)
+                enc, _ = rb.rank_encode(joint, int(e["K"]), False, rule, tseed); stem = "bmenc"
+            else:
+                enc, hvg = rb.rankhvg_encode(joint, int(e["H"]), e["tie"]); genes = genes[hvg]; stem = "bmenc_allgenes"
+            label = stem + ("" if e["scale"] else "_noscale") + ("_cos" if e["cost"] == "cos" else "")
+            enc = sp.csr_matrix(enc, dtype=np.float32); n = s.n_obs
+            files = (out / "input" / "source.h5ad", out / "input" / "target.h5ad")
+            ad.AnnData(X=enc[:n], obs=s.obs.copy(), var=pd.DataFrame(index=genes)).write_h5ad(files[0])
+            ad.AnnData(X=enc[n:], obs=t.obs.copy(), var=pd.DataFrame(index=genes)).write_h5ad(files[1])
+            precomputed = True
+        else:
+            label = job["label"]
+            if job["ds_key"] not in base:
+                files = (out / "input" / "source.h5ad", out / "input" / "target.h5ad"); s.write_h5ad(files[0]); t.write_h5ad(files[1])
+        manifest = manifest_with(a.run_root, job["ds_key"] == "P10sfrozen", pair_id, files, out / "manifest.csv")
+        code = fit(manifest, out, a.pair_index, label, precomputed)
+        base_row = {"pair": pair_id.replace("LTL331__", ""), "config_id": job["config"], "fit_label": label, "ds": job["ds_key"], "precomputed": precomputed, "exit": code}
         if code != 0:
-            rows.append({**base, "status": "fit failed; see run.log"}); print(label, "FAILED", flush=True); continue
-        d = next((fit / "out" / pair_id / "scope_malignant").glob("budget_*"))
-        run = json.loads((d / "run.json").read_text())
-        metrics = pd.read_csv(d / "pair_metrics.csv").set_index("method")
+            rows.append({**base_row, "status": "fit failed; see run.log"}); print(job["config"], "FAILED", flush=True); continue
+        d = next((out / "out" / pair_id / "scope_malignant").glob("budget_*"))
+        run = json.loads((d / "run.json").read_text()); metrics = pd.read_csv(d / "pair_metrics.csv").set_index("method")
         cc = pd.read_csv(d / "cell_confidence.csv")
-        # balanced OT on the same cost, rebuilt from the run's own representation
         sm = pd.read_csv(manifest).iloc[a.pair_index]
-        s = ad.read_h5ad(sm.source_h5ad); t = ad.read_h5ad(sm.target_h5ad)
+        S, T = ad.read_h5ad(sm.source_h5ad), ad.read_h5ad(sm.target_h5ad)
         c = Preprocessing.from_label(label)
         X, Y, _, _ = prepare_joint_representation(
-            s, t, n_hvg=c.n_hvg, n_pcs=c.n_pcs, seed=rb.SEED + a.pair_index, representation=c.normalisation,
-            rank_top_n=c.rank_top_n, cost=c.cost, equalise_depth=c.equalise_depth, regress_out=c.regress_out,
-            regress_on_ranks=c.regress_on_ranks, scale_genes=c.scale_genes, label_stem=c.label_stem, allow_precomputed=pre or c.normalisation == "precomputed")
+            S, T, n_hvg=c.n_hvg, n_pcs=c.n_pcs, seed=rb.SEED + a.pair_index, representation=c.normalisation, rank_top_n=c.rank_top_n,
+            cost=c.cost, equalise_depth=c.equalise_depth, regress_out=c.regress_out, regress_on_ranks=c.regress_on_ranks,
+            scale_genes=c.scale_genes, label_stem=c.label_stem, allow_precomputed=precomputed or c.normalisation == "precomputed")
         scale = median_pair_scale(X, Y, rng=np.random.default_rng(rb.SEED + a.pair_index * 104729))
-        cost_ok = abs(scale - run["cost_scale"]) <= 1e-4 * max(1, abs(run["cost_scale"]))
         C = squared_euclidean(X, Y) / scale
         bot = balanced_ot(C, epsilon=0.1)
-        st = ctype.loc[s.obs_names.astype(str)].to_numpy(); tt = ctype.loc[t.obs_names.astype(str)].to_numpy()
+        st = ctype.loc[S.obs_names.astype(str)].to_numpy(); tt = ctype.loc[T.obs_names.astype(str)].to_numpy()
+        sd, td = depth.loc[S.obs_names.astype(str)].to_numpy(), depth.loc[T.obs_names.astype(str)].to_numpy()
         M_bot = type_mass(bot.coupling, st, tt)
         for method in ("M4-E", "M4-R"):
-            m = metrics.loc[method]
-            g = cc[cc.method == method]
-            src = g[g.side == "source"].set_index("observation_id").loc[s.obs_names.astype(str)]
-            tgt = g[g.side == "target"].set_index("observation_id").loc[t.obs_names.astype(str)]
+            m = metrics.loc[method]; g = cc[cc.method == method]
+            src = g[g.side == "source"].set_index("observation_id").loc[S.obs_names.astype(str)]
+            tgt = g[g.side == "target"].set_index("observation_id").loc[T.obs_names.astype(str)]
             rs, rt = ~src.rejected.to_numpy(bool), ~tgt.rejected.to_numpy(bool)
             P = np.load(d / f"coupling_{method.lower().replace('-', '')}.npz")["coupling"]
             R = P / P.sum(1, keepdims=True); H = -(R * np.log(np.where(R > 0, R, 1))).sum(1) / np.log(P.shape[1])
             M = type_mass(P, st, tt); ind = np.outer(M.sum(1), M.sum(0)) / M.sum()
             Q = P[np.ix_(rs, rt)]
-            r = {**base, "status": "fitted", "method": method, "cost_reproduced": cost_ok,
+            valid = bool(m.calibration_m4e_inference_valid) if method == "M4-E" else bool(m.calibration_valid_for_m4r)
+            r = {**base_row, "status": "fitted", "method": method,
+                 "cost_reproduced": abs(scale - run["cost_scale"]) <= 1e-4 * max(1, abs(run["cost_scale"])),
                  "inner_converged": bool(m.inner_converged), "outer_converged": bool(m.outer_converged), "cycle_detected": bool(m.cycle_detected),
                  "m4e_inference_valid": bool(m.calibration_m4e_inference_valid), "m4r_calibration_valid": bool(m.calibration_valid_for_m4r),
-                 "formal_result": bool(m.outer_converged) and (bool(m.calibration_m4e_inference_valid) if method == "M4-E" else bool(m.calibration_valid_for_m4r)),
-                 "rejection_cost": float(m.rejection_cost), "source_rejected": float(m.source_final_rejection_rate),
-                 "target_rejected": float(m.target_final_rejection_rate),
+                 "formal_result": bool(m.outer_converged) and valid, "rejection_cost": float(m.rejection_cost),
+                 "source_rejected": float(m.source_final_rejection_rate), "target_rejected": float(m.target_final_rejection_rate),
                  "asymmetry_source_minus_target": float(m.source_final_rejection_rate - m.target_final_rejection_rate),
                  "coupling_row_entropy_median": float(np.median(H)), "transported_mass": float(P.sum()),
                  "retained_block_mass_fraction": float(Q.sum() / P.sum()) if P.sum() > 0 else np.nan,
                  "source_ne_minus_nonne_retained": float(rs[st == "NE"].mean() - rs[st != "NE"].mean()) if (st == "NE").sum() >= 20 else np.nan,
-                 "source_auc_depth_rejected": float(roc_auc_score(~rs, depth.loc[s.obs_names.astype(str)])) if 0 < rs.mean() < 1 else np.nan,
-                 "target_auc_depth_rejected": float(roc_auc_score(~rt, depth.loc[t.obs_names.astype(str)])) if 0 < rt.mean() < 1 else np.nan,
+                 "source_auc_depth_rejected": float(roc_auc_score(~rs, sd)) if 0 < rs.mean() < 1 else np.nan,
+                 "target_auc_depth_rejected": float(roc_auc_score(~rt, td)) if 0 < rt.mean() < 1 else np.nan,
                  "balanced_converged": bool(bot.converged)}
             for i, x in enumerate(TYPES):
                 for j, y in enumerate(TYPES):
-                    if ind[i, j] > 0 and x in ("NE", "PRAD") and y in ("NE", "PRAD"):
+                    if ind[i, j] > 0:
                         r[f"enrich_{x}_to_{y}"] = float(M[i, j] / ind[i, j])
             r["full_vs_balanced_type_corr"], r["full_vs_balanced_js"] = correspondence(M, M_bot)
             if rs.sum() >= 4 and rt.sum() >= 4:
@@ -187,12 +209,13 @@ def main() -> None:
                 share = Mq.sum(0) / Mq.sum() if Mq.sum() > 0 else np.zeros(4)
                 r["target_types_covered"] = int((share >= 0.01).sum())
                 r["target_cells_covered"] = float(np.mean(Q.sum(0) / max(Q.sum(), 1e-300) > 1.0 / max(rt.sum(), 1)))
-            if label == "tieproduction_noscale_cos" or label == "ranknm256_noscale_ds_cos":
-                fz = frozen_cc[frozen_cc.method == method].set_index(["side", "observation_id"])["rejected"]
-                mine = g.set_index(["side", "observation_id"])["rejected"]
-                r["production_reproduced"] = bool((fz.loc[mine.index] == mine).all())
+            for ref_label in ("ranknm256_noscale_ds_cos", "logcpm"):
+                if job["config"] in (f"label:{ref_label}", "check_precomputed_path" if ref_label.startswith("ranknm") else ""):
+                    fz = pd.read_csv(frozen_dir(ref_label) / "cell_confidence.csv"); fz = fz[fz.method == method].set_index(["side", "observation_id"])["rejected"]
+                    mine = g.set_index(["side", "observation_id"])["rejected"]
+                    r["reproduces_frozen_gates"] = bool((fz.loc[mine.index] == mine).all())
             rows.append(r)
-        print(label, "done", flush=True)
+        print(job["config"], "done", flush=True)
         pd.DataFrame(rows).to_csv(target.with_suffix(".partial.tsv"), sep="\t", index=False)
     pd.DataFrame(rows).to_csv(target, sep="\t", index=False)
     target.with_suffix(".partial.tsv").unlink(missing_ok=True)
