@@ -5,8 +5,9 @@
 #   bash realdata_benchmark/tacc/submit_benchmark.sh [--dry-run] [--nodes N] [--hours H] ltl331|splatter
 #   bash realdata_benchmark/tacc/submit_benchmark.sh status
 #
-# worklist  one short gg job: 01_config_registry.py -> ROOT/PREPROCESSING_CONFIG_REGISTRY.tsv (rebuilt from the code
-#           at this commit), then 11_build_worklists.py -> ROOT/worklist_{ltl331,splatter}.tsv. Refused if they exist.
+# worklist  one short gg job: 01_config_registry.py -> ROOT/PREPROCESSING_CONFIG_REGISTRY.tsv (from the code at this
+#           commit; kept if it exists), then 11_build_worklists.py for whichever of ROOT/worklist_{ltl331,splatter}.tsv
+#           is missing (an existing worklist is never rebuilt). Refused if both exist.
 # ltl331    N nodes (default 2, 6 h) of benchmark_workers.slurm on worklist_ltl331.tsv
 # splatter  N nodes (default 6, 8 h) on worklist_splatter.tsv
 # status    rows done / failed / pending per worklist, read from the SUCCESS / FAILED flags
@@ -26,7 +27,9 @@ done
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${RB_ROOT:-/scratch/10119/ghzheng/OT_project/realdata_benchmark_20261031}
 env_path=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
-splatter_root=${RB_SPLATTER_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_technical}
+# benchmark_native = the original Splatter benchmark (ARCHIVE_MANIFEST.md); benchmark_technical is the superseded
+# thinning benchmark (3 cases, no populations_disjoint) and must not be used.
+splatter_root=${RB_SPLATTER_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_native}
 ltl_root=${RB_LTL331_ROOT:-/scratch/10119/ghzheng/OT_project/ltl331_confidenceot}
 ltl_converted=${RB_LTL331_CONVERTED:-/scratch/10119/ghzheng/OT_project/data/ltl331_GSE297328/converted}
 cap=${CONFIDENCEOT_JOB_CAP:-40}
@@ -55,10 +58,10 @@ fi
 
 (( dry_run )) || mkdir -p "$root/logs" || exit 1
 if [[ $stage == worklist ]]; then
-    [[ -f "$root/worklist_ltl331.tsv" || -f "$root/worklist_splatter.tsv" ]] && { echo "worklists exist in $root; not rebuilt" >&2; exit 2; }
+    [[ -f "$root/worklist_ltl331.tsv" && -f "$root/worklist_splatter.tsv" ]] && { echo "both worklists exist in $root; not rebuilt" >&2; exit 2; }
     [[ -f "$ltl_root/inputs/rawqc/pair_manifest_rawqc.csv" ]] || { echo "missing LTL331 inputs under $ltl_root" >&2; exit 1; }
     [[ -d "$splatter_root/conditions" ]] || { echo "missing Splatter conditions under $splatter_root" >&2; exit 1; }
-    cmd="$activate && python realdata_benchmark/01_config_registry.py --out $root && python realdata_benchmark/11_build_worklists.py --registry $registry --out-root $root --splatter-root $splatter_root --ltl331-run-root $ltl_root --ltl331-converted $ltl_converted"
+    cmd="$activate && { [[ -f $registry ]] || python realdata_benchmark/01_config_registry.py --out $root; } && python realdata_benchmark/11_build_worklists.py --registry $registry --out-root $root --splatter-root $splatter_root --ltl331-run-root $ltl_root --ltl331-converted $ltl_converted"
     id=$(submit -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb_work -o "$root/logs/worklist_%j.out" --wrap "$cmd") || exit 1
     echo "worklist job $id -> $root (log $root/logs/worklist_$id.out)"
     exit 0

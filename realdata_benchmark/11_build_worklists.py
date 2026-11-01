@@ -1,7 +1,7 @@
 """Worklists of the joint benchmark's TACC fits (PROPOSED_TACC_JOBS.md). Runs on TACC; reads manifests only.
 
     python realdata_benchmark/11_build_worklists.py --registry REGISTRY --out-root ROOT \
-        --splatter-root /scratch/10119/ghzheng/OT_project/benchmark_technical \
+        --splatter-root /scratch/10119/ghzheng/OT_project/benchmark_native \
         --ltl331-run-root /scratch/10119/ghzheng/OT_project/ltl331_confidenceot \
         --ltl331-converted /scratch/10119/ghzheng/OT_project/data/ltl331_GSE297328/converted
 
@@ -15,8 +15,12 @@ Design fixed by computational cost before any fit (2026-10-31; JOINT_BENCHMARK_P
             n_cells 10,000 and replicates 4-5 are left out for cost; the historical labels are not refitted on Splatter
             (their 0.90 runs exist; ranknm256_noscale_ds_cos is refitted at 0.99 as a registered configuration, which
             also reproduces the archived 0.99 run).
-Rows are ordered largest-first so the long fits start early. Writes ROOT/worklist_ltl331.tsv, ROOT/worklist_splatter.tsv
-and ROOT/WORKLIST_SUMMARY.tsv; refuses if a worklist exists.
+The Splatter root is benchmark_native (the original benchmark: all_shared, population_lost, population_emerged,
+populations_disjoint); benchmark_technical is the superseded thinning benchmark without the disjoint case (a first
+worklist built from it on 2026-10-31 was set aside before any Splatter fit). The build stops if a condition manifest
+lacks any of the four cases.
+Rows are ordered largest-first so the long fits start early. Writes whichever of ROOT/worklist_ltl331.tsv and
+ROOT/worklist_splatter.tsv is missing (an existing one is kept, never rebuilt) and ROOT/WORKLIST_SUMMARY_<dataset>.tsv.
 """
 
 from __future__ import annotations
@@ -42,9 +46,10 @@ def main() -> None:
     p.add_argument("--ltl331-run-root", type=Path, required=True)
     p.add_argument("--ltl331-converted", type=Path, required=True)
     a = p.parse_args()
-    for name in ("worklist_ltl331.tsv", "worklist_splatter.tsv"):
-        if (a.out_root / name).exists():
-            sys.exit(f"{a.out_root / name} exists; not overwritten")
+    build = {d: not (a.out_root / f"worklist_{d}.tsv").exists() for d in ("ltl331", "splatter")}
+    if not any(build.values()):
+        sys.exit("both worklists exist; nothing rebuilt")
+    print("building:", [d for d, b in build.items() if b])
     a.out_root.mkdir(parents=True, exist_ok=True)
     reg = pd.read_csv(a.registry, sep="\t")
     main_cfg = reg[(reg.kind == "registered") & (reg.role == "main")].config_id.tolist()
@@ -69,6 +74,9 @@ def main() -> None:
     sp = []
     for mf in sorted(a.splatter_root.glob("conditions/*/*/*/manifest.csv")):
         m = pd.read_csv(mf)
+        need = {"all_shared", "population_lost", "population_emerged", "populations_disjoint"}
+        if not need <= set(m.biological_case.astype(str)):
+            sys.exit(f"{mf} lacks {sorted(need - set(m.biological_case.astype(str)))}: wrong Splatter root?")
         n, rep = int(m.n_cells.iloc[0]), int(m.replicate.iloc[0])
         if n not in (1000, 5000) or rep not in (1, 2, 3):
             continue
@@ -81,13 +89,18 @@ def main() -> None:
                                "manifest_ds": str(mds) if mds.exists() else "", "run_root": "", "converted": "", "acceptance": acc,
                                "size": n, "out": str(a.out_root / "splatter" / f"acc{acc}" / safe(cid) / str(rel).replace("\\", "/") / str(r.pair_id))})
     sp = pd.DataFrame(sp, columns=COLUMNS).sort_values(["size", "config_id"], ascending=[False, True])
-    lt.to_csv(a.out_root / "worklist_ltl331.tsv", sep="\t", index=False)
-    sp.to_csv(a.out_root / "worklist_splatter.tsv", sep="\t", index=False)
-    summary = pd.concat([lt.assign(acceptance=lt.acceptance.astype(str)).groupby(["dataset", "acceptance"]).size(),
-                         sp.assign(acceptance=sp.acceptance.astype(str)).groupby(["dataset", "acceptance", "size"]).size()]).rename("rows")
-    summary.to_csv(a.out_root / "WORKLIST_SUMMARY.tsv", sep="\t")
-    missing_ds = int((sp.manifest_ds == "").sum())
-    print(summary.to_string()); print(f"splatter rows without a conditions_ds manifest: {missing_ds}")
+    for name, table, keys in (("ltl331", lt, ["dataset", "acceptance"]), ("splatter", sp, ["dataset", "acceptance", "size"])):
+        if not build[name]:
+            continue
+        table.to_csv(a.out_root / f"worklist_{name}.tsv", sep="\t", index=False)
+        summary = table.assign(acceptance=table.acceptance.astype(str)).groupby(keys).size().rename("rows").reset_index()
+        summary.to_csv(a.out_root / f"WORKLIST_SUMMARY_{name}.tsv", sep="\t", index=False)
+        print(summary.to_string(index=False))
+    if build["splatter"]:
+        pairs = sp.drop_duplicates(["manifest", "pair_index"])
+        case = pairs.pair_id.str.extract(r"(all_shared|population_lost|population_emerged|populations_disjoint)")[0]
+        print(f"splatter rows: {len(sp)}; condition-pairs per case: {case.value_counts().to_dict()}")
+        print(f"splatter rows without a conditions_ds manifest: {int((sp.manifest_ds == '').sum())}")
 
 
 if __name__ == "__main__":
