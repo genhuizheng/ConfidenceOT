@@ -129,3 +129,10 @@ and a versioned root on TACC.
   CRISPR phylogenetic correspondence is not a ground truth that RNA-based ConfidenceOT has to recover. New compute,
   if any, is a few representative RNA preprocessing sensitivity runs, not a CRISPR-specific benchmark.
 - Table 1 arm D and section 5's lineage items read accordingly.
+
+## Dated correction, 2026-11-01: Arm A root
+
+Table 1 names `benchmark_technical` as Arm A's TACC root. That is the superseded thinning benchmark (three cases, no
+`populations_disjoint`; not archived, `benchmark/ARCHIVE_MANIFEST.md`). Arm A is `benchmark_native`, the original
+benchmark with all four cases (all_shared, population_lost, population_emerged, populations_disjoint). Found from the
+first worklist (2,592 rows, no disjoint pairs) before any Splatter fit; that worklist is set aside, not used.
