@@ -32,6 +32,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bio_common import RUNS, Outputs  # noqa: E402
 
+# The configuration fields of Preprocessing.as_dict; the record also holds per-pair facts (seed, genes), which differ by design.
+CONFIGURATION_KEYS = ("label", "equalise_depth", "equalise_quantile", "equalise_target", "normalisation", "rank_top_n",
+                      "residual_theta", "minimum_detection_rate", "n_hvg", "n_pcs", "scale_genes", "cost", "scale",
+                      "regress_out", "regress_on_ranks")
 PAIR_FILES = ("SUCCESS", "bins_source.csv.gz", "bins_target.csv.gz", "transport_source.npz", "transport_target.npz",
               "annotation_fractions.csv", "annotation_transitions.csv.gz", "pair_metrics.csv", "calibration.json",
               "run.json", "potentials.npz", "coupling.json", "coupling_check.json")
@@ -69,7 +73,9 @@ def audit_run(name: str, root: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         row["coupling_check_pass"] = None if check is None else bool(check.get("pass"))
         representation = read_json(root / "representations" / pid / "representation.json")
         row["preprocessing_label"] = None if representation is None else representation.get("preprocessing", {}).get("label")
-        row["preprocessing_json"] = None if representation is None else json.dumps(representation.get("preprocessing"), sort_keys=True)
+        record = None if representation is None else representation.get("preprocessing") or {}
+        row["preprocessing_json"] = None if record is None else json.dumps(
+            {k: record.get(k) for k in CONFIGURATION_KEYS}, sort_keys=True)
         row["status"] = ("completed" if row["has_SUCCESS"] else "failed" if row["failed_marker"]
                          else "incomplete" if directory.exists() else "missing")
         rows.append(row)
