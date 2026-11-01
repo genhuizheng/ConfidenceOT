@@ -87,16 +87,11 @@ sbatch -p gg -N 1 -n 1 -t 04:00:00 -A MCB26031 -J rb_splat -o /scratch/10119/ghz
    the Arm B condition generator; the generator's factors are fixed in the protocol (section 4) and are not tuned on
    OT results.
 
-## Stage 5. KP-Tracer / Quinn (versioned extension; designed, not yet scripted)
+## Stage 5. KP-Tracer / Quinn: RNA-only exploratory validation (low priority; nothing proposed yet)
 
-- Configuration x solver crossing on the frozen Level 2 cases: the existing runner pairs one preprocessing with one
-  solver (`methods.METHODS`: A = `logcpm_noscale` + balanced OT, B = `ranknm256_noscale_ds_cos` + UOT without
-  rejection), so the old A vs B contrast mixes the two. A wrapper supplying its own method table (never editing the
-  frozen file) will cross {logcpm_noscale, logcpm_noscale_cos, ranknm256_noscale_ds_cos, ranknm256_noscale_cos,
-  ranknm1024_noscale_cos} x {balanced OT, UOT without rejection, M4-E at 0.99}, scored by the frozen Level 2 / 3
-  scorers into a new root.
-- CRISPR editing-site input (exploratory): character-matrix (allele) distances as the cost, alone and with RNA. Its
-  evaluation cannot use a tree built from the same sites. Held-out protocol: split each family's intBCs into two
-  halves, fit on one half, evaluate on a tree rebuilt from the other half only; the halves still share the lineage, so
-  the evaluation is not independent of the input and is reported with that dependence stated.
-- Needs the allele tables and trees on TACC; scripts follow after Stages 1-3 are running.
+Scope corrected 2026-11-01 (user): RNA-only. No editing-site input, no held-out intBC design, no CRISPR cost and no
+multimodal fusion; none of these was written. The existing RNA-only Level 1 / 2 / 3 results are reused as they are
+(`KP_QUINN_LINEAGE_BENCHMARK.tsv`, compiled from the committed result tables; frozen protocol 508609f untouched), with
+CRISPR trees and labels used only as external evaluation, never as a ground truth RNA must recover. If a few RNA
+preprocessing sensitivity runs are wanted later (for example the four R4 representatives on the Level 2 cases), they
+will be proposed here after the Splatter and LTL331 stages have run; no job is prepared now.

@@ -116,3 +116,16 @@ All configurations are reported; none is dropped for its result. Every table sep
 association and biological inference. No NEPC ancestry, fate or transdifferentiation claim is made from gates or
 couplings. Frozen outputs are never overwritten: new work lives in `results/realdata_benchmark_20261031/` (local)
 and a versioned root on TACC.
+
+## Dated change, 2026-11-01: scope is RNA-only (user)
+
+- This benchmark studies RNA preprocessing only. Cancelled, no code or TACC job: CRISPR editing-site-only OT,
+  RNA + editing-site OT, held-out intBC input / evaluation, CRISPR character cost engineering, multimodal cost fusion.
+  None of these had been written.
+- Priorities: (1) Splatter shared / unmatched (Arms A, B); (2) LTL331 PDX preprocessing robustness and NEPC
+  validity; (3) KP-Tracer / Quinn RNA-only exploratory validation, low priority.
+- KP-Tracer / Quinn: costs from scRNA-seq only; CRISPR trees, clone and MetFamily labels are external evaluation
+  information only; the existing RNA-only Level 1 / 2 / 3 results are reused and the frozen protocols are untouched.
+  CRISPR phylogenetic correspondence is not a ground truth that RNA-based ConfidenceOT has to recover. New compute,
+  if any, is a few representative RNA preprocessing sensitivity runs, not a CRISPR-specific benchmark.
+- Table 1 arm D and section 5's lineage items read accordingly.
