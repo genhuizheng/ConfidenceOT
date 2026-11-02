@@ -118,3 +118,4 @@ lineage_validation/**/*.png
 lineage_validation/**/*.pdf
 lineage_validation/**/*.svg
 !/realdata_benchmark/*.md
+!/realdata_benchmark/*/*.md
