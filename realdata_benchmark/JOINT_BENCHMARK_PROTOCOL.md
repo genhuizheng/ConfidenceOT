@@ -150,3 +150,23 @@ adds one; values fixed in `splatter_n5000/20_generate_n5000.R` before any L3-L5 
   replicates 1-3; eight configurations (the four R4 / R5 representatives at DS none and P10 seed 1, cosine, noscale).
 - Per row IC-POT (c = 0.5, the literature value) and Vanilla UOT on the same cost besides M4-E / M4-R / balanced OT;
   DEG-A / B / C / D against the simulator's truth (21_ / 23_ / 24_).
+
+## Dated section, 2026-11-01: which configurations are read biologically on LTL331 (fixed before the collected tables are opened)
+
+Written before PDX_GATE_COUPLING_METRICS.tsv / SPLATTER_GATE_COUPLING_METRICS.tsv were downloaded or read. A
+configuration is eligible for the PDX biological readout when, with M4-E at acceptance 0.99, all hold:
+1. Splatter (Arm A, n_cells 1,000 and 5,000, replicates 1-3, every level): median false rejection of shared cells
+   <= 0.10 on each side in all_shared; median recall of the unmatched population >= 0.80 (source side in
+   population_lost, target side in population_emerged); median false asserted mass <= 0.05 in populations_disjoint.
+2. LTL331: M4-E inference valid in >= 5 of the 7 pairs; median |AUC(pre-equalisation depth, rejected) - 0.5| <= 0.10
+   over the 14 pair-sides.
+3. Stability, where measured (DS and tie-rule representatives, REPRESENTATION_DIAGNOSTICS / RANK_TIE_SENSITIVITY):
+   OT-free kNN-gate kappa >= 0.80 between DS seeds and between tie rules.
+If none passes every criterion, that is reported and every configuration's position on the three criteria is shown
+(no configuration is picked for its biology). The biological readout is the same for every eligible configuration:
+all 7 pairs; per pair and side the retained fraction of each annotated type with intervals, the depth-stratified
+and kNN-baseline checks of `ltl331_nepc/07_`, latent time and cell cycle; DEG / GSEA (hallmark only) within each
+annotated type, rejected vs retained, on the frozen P10 equalised counts whatever the configuration (so depth cannot
+drive the contrast), read only where the depth audit of `LTL331_BIOLOGICAL_VALIDITY.md` section 5 passes; a pathway
+is reported as consistent only when its sign agrees in every eligible configuration. Observed result, technical
+association and biological inference stay separate; no ancestry or fate claim.
