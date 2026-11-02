@@ -20,9 +20,11 @@
 # run            N nodes (default 4 x 6 h; pilot 1 x 3 h) of realdata_benchmark/tacc/benchmark_workers.slurm
 # collect        one short job: 32_collect_n5000.py (--pilot: the _PILOT tables)
 # --after IDS    colon-separated job ids this stage waits for (afterok; collect: afterany)
+# --partition P  gg (default, every stage) or gh-dev / gh (72 cores, so 9 workers per node; gh-dev's 2 h limit clips
+#                the job times and limits pilot generation to the two levels it reads, L2_depth_dropout and L4_batch_perturb)
 # No set -e / -u / pipefail (TACC rules). Root is versioned; frozen roots are read only.
 
-dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""
+dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -30,6 +32,7 @@ while (( $# )); do
         --nodes) nodes=$2; shift 2 ;;
         --hours) hours=$2; shift 2 ;;
         --after) after=$2; shift 2 ;;
+        --partition) partition=$2; shift 2 ;;
         chain|cleanup-audit|generate|worklist|run|status|collect) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -44,6 +47,15 @@ cap=${CONFIDENCEOT_JOB_CAP:-40}
 activate="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo/realdata_benchmark:$repo"
 wl=$root/TACC_N5000_WORKLIST.tsv; pilot_flag=""
 (( pilot )) && { wl=$root/TACC_N5000_PILOT_WORKLIST.tsv; pilot_flag="--pilot"; }
+partition=${partition:-gg}
+case $partition in
+    gg) cores=144; procs=18; max_hours=48 ;;
+    gh-dev) cores=72; procs=9; max_hours=2 ;;
+    gh) cores=72; procs=9; max_hours=48 ;;
+    *) echo "unknown partition $partition" >&2; exit 2 ;;
+esac
+part=(-p "$partition" -c "$cores")
+clip() { if (( $1 > max_hours )); then echo "$max_hours"; else echo "$1"; fi; }
 
 submit() {  # prints the job id
     if (( dry_run )); then echo "DRY RUN  sbatch $*" | cut -c1-400 >&2; echo "DRY$RANDOM"; return 0; fi
@@ -58,11 +70,13 @@ dep_args() {  # $1 kind (afterok / afterany), $2 ids
 
 do_generate() {  # prints colon-joined ids
     [[ -d "$native/generated" ]] || { echo "missing $native/generated" >&2; return 1; }
-    local reps=(1 2 3) ids=() rep id
+    local reps=(1 2 3) ids=() rep id levels=""
     (( pilot )) && reps=(1)
+    # gh-dev's 2 h limit: generate only the two levels the pilot reads; on gg the pilot generates every level of rep 1
+    [[ $pilot == 1 && $partition == gh-dev ]] && levels="L2_depth_dropout L4_batch_perturb"
     for rep in "${reps[@]}"; do
-        id=$(submit -t 06:00:00 -J rb5_gen -o "$root/logs/generate_rep${rep}_%j.out" \
-            --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB5_ROOT="$root",RB5_REP="$rep",RB5_NATIVE_ROOT="$native" \
+        id=$(submit "${part[@]}" -t "$(printf '%02d:00:00' "$(clip 6)")" -J rb5_gen -o "$root/logs/generate_rep${rep}_%j.out" \
+            --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB5_ROOT="$root",RB5_REP="$rep",RB5_NATIVE_ROOT="$native",RB5_LEVELS="$levels" \
             "$repo/realdata_benchmark/splatter_n5000/tacc/generate_n5000.slurm") || return 1
         echo "generate rep $rep: job $id" >&2; ids+=("$id")
     done
@@ -71,18 +85,19 @@ do_generate() {  # prints colon-joined ids
 do_worklist() {  # $1 ids to wait for
     [[ -f "$wl" ]] && { echo "$wl exists; not rebuilt" >&2; return 2; }
     local cmd="$activate && { [[ -f $root/PREPROCESSING_CONFIG_REGISTRY.tsv ]] || python realdata_benchmark/01_config_registry.py --out $root; } && python realdata_benchmark/splatter_n5000/31_build_n5000_worklist.py --root $root --registry $root/PREPROCESSING_CONFIG_REGISTRY.tsv --frozen-fits $frozen_fits $pilot_flag"
-    local id; id=$(submit $(dep_args afterok "$1") -p gg -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb5_work -o "$root/logs/worklist_%j.out" --wrap "$cmd") || return 1
+    local id; id=$(submit $(dep_args afterok "$1") -p "$partition" -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb5_work -o "$root/logs/worklist_%j.out" --wrap "$cmd") || return 1
     echo "worklist job $id${1:+ (after $1)}" >&2; echo "$id"
 }
 do_run() {  # $1 ids to wait for; the worklist may not exist yet when it is a dependency
     [[ -n "$1" || -f "$wl" ]] || { echo "missing $wl" >&2; return 1; }
     if (( pilot )); then nodes=${nodes:-1}; hours=${hours:-3}; else nodes=${nodes:-4}; hours=${hours:-6}; fi
+    hours=$(clip "$hours")
     local queued; queued=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l)
     (( dry_run || queued + nodes <= cap )) || { echo "$queued queued; $nodes more would pass the cap of $cap" >&2; return 3; }
     local ids=() n id
     for (( n = 0; n < nodes; n++ )); do
-        id=$(submit $(dep_args afterok "$1") -t "$(printf '%02d:00:00' "$hours")" -J rb5_run -o "$root/logs/run/node_%j.out" \
-            --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB_WORKLIST="$wl",RB_REGISTRY="$root/PREPROCESSING_CONFIG_REGISTRY.tsv",RB_LOGDIR="$root/logs/run",RB_NODE="$n",RB_NODES="$nodes" \
+        id=$(submit $(dep_args afterok "$1") "${part[@]}" -t "$(printf '%02d:00:00' "$hours")" -J rb5_run -o "$root/logs/run/node_%j.out" \
+            --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB_WORKLIST="$wl",RB_REGISTRY="$root/PREPROCESSING_CONFIG_REGISTRY.tsv",RB_LOGDIR="$root/logs/run",RB_NODE="$n",RB_NODES="$nodes",RB_PROCS="$procs" \
             "$repo/realdata_benchmark/tacc/benchmark_workers.slurm") || return 1
         echo "run node $n of $nodes: job $id${1:+ (after $1)}" >&2; ids+=("$id")
     done
@@ -90,7 +105,7 @@ do_run() {  # $1 ids to wait for; the worklist may not exist yet when it is a de
 }
 do_collect() {  # $1 ids to wait for (afterany)
     local cmd="$activate && python realdata_benchmark/splatter_n5000/32_collect_n5000.py --root $root $pilot_flag"
-    local id; id=$(submit $(dep_args afterany "$1") -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J rb5_coll -o "$root/logs/collect_%j.out" --wrap "$cmd") || return 1
+    local id; id=$(submit $(dep_args afterany "$1") -p "$partition" -N 1 -n 1 -t 01:00:00 -A MCB26031 -J rb5_coll -o "$root/logs/collect_%j.out" --wrap "$cmd") || return 1
     echo "collect job $id${1:+ (after $1)}" >&2; echo "$id"
 }
 

@@ -15,7 +15,8 @@ repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 cd "$repo" || exit 1
 rscript=${CONFIDENCEOT_RSCRIPT:-$repo/benchmark/tacc/rscript.sh}
 rep=$RB5_REP
-levels=(L0_matched L1_depth L2_depth_dropout L3_batch L4_batch_perturb L5_batch_perturb_imbalance A4_perturb_only A5_imbalance_only)
+# RB5_LEVELS (space-separated) restricts the levels, e.g. the pilot's "L2_depth_dropout L4_batch_perturb"
+levels=(${RB5_LEVELS:-L0_matched L1_depth L2_depth_dropout L3_batch L4_batch_perturb L5_batch_perturb_imbalance A4_perturb_only A5_imbalance_only})
 echo "replicate $rep, commit $(git rev-parse --short HEAD), $(date -Iseconds)"
 status=0
 for level in "${levels[@]}"; do
