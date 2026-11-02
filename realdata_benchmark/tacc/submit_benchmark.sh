@@ -48,9 +48,14 @@ if [[ $stage == status ]]; then
     for w in ltl331 splatter; do
         f=$root/worklist_$w.tsv
         [[ -f "$f" ]] || { echo "$w: no worklist"; continue; }
-        rows=$(( $(wc -l < "$f") - 1 ))
-        done_n=$(find "$root/$w" -name SUCCESS 2> /dev/null | wc -l)
-        fail_n=$(find "$root/$w" -name FAILED 2> /dev/null | wc -l)
+        # count the row-level flags only (02_run_pair.py writes its own SUCCESS deeper in each row's directory)
+        rows=0; done_n=0; fail_n=0
+        while IFS=$'\t' read -r -a field; do
+            out=${field[10]}
+            rows=$(( rows + 1 ))
+            [[ -f "$out/SUCCESS" ]] && done_n=$(( done_n + 1 ))
+            [[ -f "$out/FAILED" ]] && fail_n=$(( fail_n + 1 ))
+        done < <(tail -n +2 "$f")
         echo "$w: $rows rows, $done_n done, $fail_n failed, $(( rows - done_n - fail_n )) pending"
     done
     exit 0
