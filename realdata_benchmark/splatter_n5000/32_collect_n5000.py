@@ -8,6 +8,7 @@ SPLATTER_N5000_GATE_METRICS.tsv        40_score.py rows (M4-E, M4-R) of every ro
 SPLATTER_N5000_COUPLING_METRICS.tsv    23_row_extras.py coupling.tsv (M4-E, M4-R, balanced full, balanced on the block)
 SPLATTER_N5000_CALIBRATION_VALIDITY.tsv every fit's pair_metrics.csv: convergence, calibration flags, rejection cost
 SPLATTER_N5000_DEG_VALIDATION.tsv      DEG-B (23_) per row and side, and DEG-A / C / D (24_) per condition
+SPLATTER_N5000_REPRESENTATION_DIAGNOSTICS / DOWNSAMPLING_DIAGNOSTICS / RANK_STABILITY.tsv  26_ per condition pair
 COLLECT_STATUS_N5000.tsv               every row's flag and which tables were found
 The robustness views (batch: L2 -> L3, perturbation: L3 -> L4 and L2 -> A4, imbalance: L4 -> L5 and L2 -> A5,
 depth / dropout: L0 -> L1 -> L2) are cuts of these tables by level, made in the report, not separate runs.
@@ -29,7 +30,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, required=True)
     a = p.parse_args()
-    names = ["GATE_METRICS", "COUPLING_METRICS", "CALIBRATION_VALIDITY", "DEG_VALIDATION"]
+    names = ["GATE_METRICS", "COUPLING_METRICS", "CALIBRATION_VALIDITY", "DEG_VALIDATION", "REPRESENTATION_DIAGNOSTICS",
+             "DOWNSAMPLING_DIAGNOSTICS", "RANK_STABILITY"]
     outs = {n: a.root / f"SPLATTER_N5000_{n}.tsv" for n in names}
     for f in outs.values():
         if f.exists():
@@ -43,6 +45,12 @@ def main() -> None:
             f = out / "deg_condition.tsv"; st["deg_condition"] = f.exists()
             if f.exists():
                 tabs["DEG_VALIDATION"].append(pd.read_csv(f, sep="\t").assign(**meta, table="DEG-A/C/D"))
+            for fname, n in (("representation.tsv", "REPRESENTATION_DIAGNOSTICS"), ("downsampling.tsv", "DOWNSAMPLING_DIAGNOSTICS"),
+                             ("rank_stability.tsv", "RANK_STABILITY")):
+                f = out / "diagnostics" / fname; st[fname] = f.exists()
+                if f.exists():
+                    cond_meta = {k: v for k, v in meta.items() if k != "config_id"}
+                    tabs[n].append(pd.read_csv(f, sep="\t").assign(**cond_meta))
             status.append(st); continue
         fit = Path(r.fit_out) if isinstance(r.fit_out, str) and r.fit_out else out
         st["fit_reused"] = fit != out

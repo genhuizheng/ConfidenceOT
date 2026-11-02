@@ -143,8 +143,14 @@ def n5000_row(row, spec, out: Path) -> int:
 
 
 def n5000_condition_row(row, out: Path) -> int:
-    return run_logged([sys.executable, str(HERE / "splatter_n5000" / "24_condition_deg.py"), "--manifest", row.manifest,
-                       "--pair-index", str(int(row.pair_index)), "--truth", row.truth_dir, "--out", str(out)], out / "deg_condition.log")
+    code = 0
+    if not (out / "deg_condition.tsv").exists():
+        code = run_logged([sys.executable, str(HERE / "splatter_n5000" / "24_condition_deg.py"), "--manifest", row.manifest,
+                           "--pair-index", str(int(row.pair_index)), "--truth", row.truth_dir, "--out", str(out)], out / "deg_condition.log")
+    if code == 0 and not (out / "diagnostics" / "representation.tsv").exists():
+        code = run_logged([sys.executable, str(HERE / "splatter_n5000" / "26_representation_diagnostics.py"), "--manifest", row.manifest,
+                           "--pair-index", str(int(row.pair_index)), "--truth", row.truth_dir, "--out", str(out / "diagnostics")], out / "diagnostics.log")
+    return code
 
 
 def ltl331_row(row, out: Path, registry: Path) -> int:

@@ -13,7 +13,7 @@ Rows:
                             Case 3) x configuration; L0-L2 rows reuse the frozen fit (fit_out) when the regenerated
                             level is identical to the native one (NATIVE_IDENTITY.json), otherwise they are refitted
                             here; every row then gets IC-POT, Vanilla UOT and 23_row_extras.py
-  splatter_n5000_condition  level x replicate x case pair: 24_condition_deg.py
+  splatter_n5000_condition  level x replicate x case pair: 24_condition_deg.py and 26_representation_diagnostics.py
 Writes ROOT/TACC_N5000_WORKLIST.tsv, ROOT/SPLATTER_N5000_CONFIG_REGISTRY.tsv and ROOT/SPLATTER_N5000_SIMULATION_MANIFEST.tsv
 (one row per level x replicate x pair with the generation record); refuses if the worklist exists.
 """
