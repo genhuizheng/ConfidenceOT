@@ -1,0 +1,162 @@
+Table S2: Cell-type and lineage marker gene lists		
+Cell-type and lineage marker gene lists.		
+Provenance: Table S2. Cell-type / lineage marker gene lists.  source = canonical_annotation (AD/NE/EMT/Proliferation/Epithelial panels used for UCell scoring;  Dong/Miao et al. 2020), Fig2D_program_panel (the 7-program dot plot, data/fig2c_main.tsv),  Fig3_cluster_markers (one empirical top marker per cluster, data/fig3_datadriven.tsv).		
+		
+source	group	gene
+canonical_annotation	Epithelial	EPCAM
+canonical_annotation	Epithelial	KRT8
+canonical_annotation	Epithelial	KRT5
+canonical_annotation	Epithelial	CDH1
+canonical_annotation	AD	AR
+canonical_annotation	AD	KLK3
+canonical_annotation	AD	KLK2
+canonical_annotation	AD	FKBP5
+canonical_annotation	AD	TMPRSS2
+canonical_annotation	AD	FOXA1
+canonical_annotation	AD	GATA2
+canonical_annotation	AD	SLC45A3
+canonical_annotation	EMT	CDH2
+canonical_annotation	EMT	CDH11
+canonical_annotation	EMT	FN1
+canonical_annotation	EMT	VIM
+canonical_annotation	EMT	TWIST1
+canonical_annotation	EMT	SNAI1
+canonical_annotation	EMT	ZEB1
+canonical_annotation	EMT	ZEB2
+canonical_annotation	EMT	DCN
+canonical_annotation	NE	ASCL1
+canonical_annotation	NE	CHGA
+canonical_annotation	NE	CHGB
+canonical_annotation	NE	SYP
+canonical_annotation	NE	FOXA2
+canonical_annotation	NE	NKX2-1
+canonical_annotation	NE	ENO2
+canonical_annotation	NE	MYCN
+canonical_annotation	NE	POU3F2
+canonical_annotation	NE	NCAM1
+canonical_annotation	NE	INSM1
+canonical_annotation	NE	EZH2
+canonical_annotation	NE	SOX2
+canonical_annotation	NE	SIAH2
+canonical_annotation	Proliferation	HMGB2
+canonical_annotation	Proliferation	CDK1
+canonical_annotation	Proliferation	NUSAP1
+canonical_annotation	Proliferation	UBE2C
+canonical_annotation	Proliferation	BIRC5
+canonical_annotation	Proliferation	TPX2
+canonical_annotation	Proliferation	TOP2A
+canonical_annotation	Proliferation	NDC80
+canonical_annotation	Proliferation	CKS2
+canonical_annotation	Proliferation	NUF2
+canonical_annotation	Proliferation	CKS1B
+canonical_annotation	Proliferation	MKI67
+canonical_annotation	Proliferation	TMPO
+canonical_annotation	Proliferation	CENPF
+canonical_annotation	Proliferation	TACC3
+canonical_annotation	Proliferation	FAM64A
+canonical_annotation	Proliferation	SMC4
+canonical_annotation	Proliferation	CCNB2
+canonical_annotation	Proliferation	CKAP2L
+canonical_annotation	Proliferation	CKAP2
+canonical_annotation	Proliferation	AURKB
+canonical_annotation	Proliferation	BUB1
+canonical_annotation	Proliferation	KIF11
+canonical_annotation	Proliferation	ANP32E
+canonical_annotation	Proliferation	TUBB4B
+canonical_annotation	Proliferation	GTSE1
+canonical_annotation	Proliferation	KIF20B
+canonical_annotation	Proliferation	HJURP
+canonical_annotation	Proliferation	CDCA3
+canonical_annotation	Proliferation	HN1
+canonical_annotation	Proliferation	CDC20
+canonical_annotation	Proliferation	TTK
+canonical_annotation	Proliferation	CDC25C
+canonical_annotation	Proliferation	KIF2C
+canonical_annotation	Proliferation	RANGAP1
+canonical_annotation	Proliferation	NCAPD2
+canonical_annotation	Proliferation	DLGAP5
+canonical_annotation	Proliferation	CDCA2
+canonical_annotation	Proliferation	CDCA8
+canonical_annotation	Proliferation	ECT2
+canonical_annotation	Proliferation	KIF23
+canonical_annotation	Proliferation	HMMR
+canonical_annotation	Proliferation	AURKA
+canonical_annotation	Proliferation	PSRC1
+canonical_annotation	Proliferation	ANLN
+canonical_annotation	Proliferation	LBR
+canonical_annotation	Proliferation	CKAP5
+canonical_annotation	Proliferation	CENPE
+canonical_annotation	Proliferation	CTCF
+canonical_annotation	Proliferation	NEK2
+canonical_annotation	Proliferation	G2E3
+canonical_annotation	Proliferation	GAS2L3
+canonical_annotation	Proliferation	CBX5
+canonical_annotation	Proliferation	CENPA
+canonical_annotation	Proliferation	PCNA
+Fig2D_program_panel	Luminal	EPCAM
+Fig2D_program_panel	Luminal	KRT8
+Fig2D_program_panel	Luminal	KRT18
+Fig2D_program_panel	Luminal	CDH1
+Fig2D_program_panel	Luminal	CD24
+Fig2D_program_panel	Basal	KRT5
+Fig2D_program_panel	Basal	KRT14
+Fig2D_program_panel	Basal	KRT15
+Fig2D_program_panel	Basal	TP63
+Fig2D_program_panel	 	
+Fig2D_program_panel	PRAD	AR
+Fig2D_program_panel	PRAD	KLK3
+Fig2D_program_panel	PRAD	KLK2
+Fig2D_program_panel	PRAD	FKBP5
+Fig2D_program_panel	PRAD	TMPRSS2
+Fig2D_program_panel	PRAD	FOXA1
+Fig2D_program_panel	PRAD	GATA2
+Fig2D_program_panel	PRAD	SLC45A3
+Fig2D_program_panel	PRAD	NKX3-1
+Fig2D_program_panel	EMT	VIM
+Fig2D_program_panel	EMT	CDH2
+Fig2D_program_panel	EMT	FN1
+Fig2D_program_panel	EMT	ZEB1
+Fig2D_program_panel	EMT	TWIST1
+Fig2D_program_panel	EMT	SNAI2
+Fig2D_program_panel	EMT	CAV1
+Fig2D_program_panel	EMT	COL1A1
+Fig2D_program_panel	EMT	COL3A1
+Fig2D_program_panel	Neuroendocrine	ASCL1
+Fig2D_program_panel	Neuroendocrine	CHGA
+Fig2D_program_panel	Neuroendocrine	CHGB
+Fig2D_program_panel	Neuroendocrine	SYP
+Fig2D_program_panel	Neuroendocrine	NCAM1
+Fig2D_program_panel	Neuroendocrine	ENO2
+Fig2D_program_panel	Neuroendocrine	INSM1
+Fig2D_program_panel	Neuroendocrine	FOXA2
+Fig2D_program_panel	Neuroendocrine	POU3F2
+Fig2D_program_panel	Neuroendocrine	NKX2-1
+Fig2D_program_panel	Neuroendocrine	MYCN
+Fig2D_program_panel	Neuroendocrine	NEUROD1
+Fig2D_program_panel	Neuroendocrine	DLL3
+Fig2D_program_panel	Proliferation	MKI67
+Fig2D_program_panel	Proliferation	TOP2A
+Fig2D_program_panel	Proliferation	CDK1
+Fig2D_program_panel	Proliferation	PCNA
+Fig2D_program_panel	Ciliary	FOXJ1
+Fig2D_program_panel	Ciliary	DNAH6
+Fig2D_program_panel	Ciliary	RFX3
+Fig3_cluster_markers	cluster 11	TMPRSS2
+Fig3_cluster_markers	cluster 15	NPY
+Fig3_cluster_markers	cluster 0	NAALADL2
+Fig3_cluster_markers	cluster 2	PCDH11X
+Fig3_cluster_markers	cluster 5	XACT
+Fig3_cluster_markers	cluster 8	TOP2A
+Fig3_cluster_markers	cluster 12	MROH2A
+Fig3_cluster_markers	cluster 16	REG4
+Fig3_cluster_markers	cluster 4	MAST4
+Fig3_cluster_markers	cluster 6	DNAH6
+Fig3_cluster_markers	cluster 17	COL3A1
+Fig3_cluster_markers	cluster 17	CAV1
+Fig3_cluster_markers	cluster 10	RGS7
+Fig3_cluster_markers	cluster 13	APOE
+Fig3_cluster_markers	cluster 1	DEFA6
+Fig3_cluster_markers	cluster 3	NNAT
+Fig3_cluster_markers	cluster 9	SLC24A2
+Fig3_cluster_markers	cluster 14	TEX14
+Fig3_cluster_markers	cluster 7	DPP10

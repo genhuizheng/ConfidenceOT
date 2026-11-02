@@ -5,14 +5,17 @@ the 64 configurations of the joint benchmark; author-provided Harmony: author_ha
         --gates nonharmony=PDX_CELL_GATES.tsv.gz [authorharmony=PDX_CELL_GATES_<...>.tsv.gz] \
         --coupling nonharmony=STATE_COUPLING.tsv.gz [...] --metrics nonharmony=PDX_GATE_COUPLING_METRICS.tsv [...]
 
-States. Sar et al. (bioRxiv 10.1101/2025.04.25.650369; GSE297328) cluster the same 51,726 cells into 18 clusters
+States. Sar et al. (Genome Med 2026, doi 10.1186/s13073-026-01806-8; GSE297328) cluster the same 51,726 cells (doublets
+kept: their doublet removal was a sensitivity analysis only, Additional file 1 section 1.2) into 18 clusters
 (seurat_clusters of the authors' annotated object, carried in our converted obs). Their text assigns: AR-high PRAD
 11, 15; AR-low PRAD 0, 2, 4, 5, 6, 8, 12, 16 (cluster 6: RFX2 / RFX3 ciliogenesis regulons, "pre- or early EMT");
-intermediate AR-low / NE-low EMT stem-like 17; NEPC 1, 3, 7, 9, 10, 13, 14, of which 10 early ASCL1+, 13 early ASCL1-,
-7 the terminal ASCL1- state. STATE below follows that text; it is provisional until the authors' own annotation table
-is supplied, and every cluster is also reported on its own. coarse_celltype (the multi-cohort Harmony object's
-PRAD / NE / Basal / Other) is not used as a state: its Basal / Other are not the paper's intermediate (the paper finds
-KRT5 / KRT14 absent).
+intermediate AR-low / NE-low EMT stem-like 17 (PRAD and NE UCell scores both at baseline); NEPC 1, 3, 7, 9, 10, 13, 14.
+Within NEPC: 10 is ASCL1+ (appears at 8-12 weeks; the ASCL1+ terminal macrostate of the published CellRank analysis),
+13 the early ASCL1- state, 1 / 7 / 9 the ASCL1- terminal macrostates (Additional file 1 section 4.2), 3 (proliferative)
+and 14 the remaining NEPC clusters. Our UCell scores and ASCL1 detection per cluster (11_signature_scores.py) agree with
+this. Every cluster is also reported on its own. coarse_celltype (the multi-cohort Harmony object's PRAD / NE / Basal /
+Other) is not used as a state: its Basal / Other are not the paper's intermediate (the paper finds KRT5 / KRT14 absent).
+--signatures CELL_SIGNATURES.tsv.gz (11_) adds SIGNATURE_CONTRAST.tsv / SIGNATURE_ROBUSTNESS.tsv (below).
 
 Writes OUT/ (refuses if it exists):
   ANNOTATION_AUDIT.tsv      cells per time point and cluster (fraction of the time point), with state and coarse type
@@ -30,6 +33,15 @@ Writes OUT/ (refuses if it exists):
                             and the fraction of configurations in which the group is retained more than the rest
   COUPLING_ROBUSTNESS.tsv   per branch, method, pair, block and state pair: median / quartiles of the enrichment over
                             configurations
+  SIGNATURE_CONTRAST.tsv    branch, config, method, pair, side, group (every state and "all"), program (the authors'
+                            UCell programs AD = PRAD/AR-pathway, NE, EMT, Proliferation), counts (original | p10):
+                            retained / rejected cells and mean / median score, retained minus rejected (mean), and the
+                            same difference within pre-equalisation depth quintiles and within nFeature_RNA quintiles of
+                            the side (averaged over quintiles holding >= 3 cells of each group, weighted by the group's
+                            cells); groups with < 10 cells on either side of the gate are listed with no difference
+  SIGNATURE_ROBUSTNESS.tsv  per branch, method, pair, side, group, program, counts over configurations: median
+                            difference (raw, depth-stratified, nFeature-stratified) and the fraction of configurations
+                            with retained > rejected
 Nothing is filtered by calibration, convergence or depth; those stay columns. No ancestry or fate is read from a gate
 or a coupling: a coupling links expression states of two time points, not cells to their descendants.
 """
@@ -45,10 +57,12 @@ import numpy as np
 import pandas as pd
 
 STATE = {**{c: "AR-high PRAD" for c in (11, 15)}, **{c: "AR-low PRAD" for c in (0, 2, 4, 5, 8, 12, 16)}, 6: "pre-EMT (AR-low PRAD)",
-         17: "intermediate EMT-like", 10: "early NEPC ASCL1+", 13: "early NEPC ASCL1-", 7: "terminal NEPC ASCL1-",
-         **{c: "NEPC other" for c in (1, 3, 9, 14)}}
-ORDER = ["AR-high PRAD", "AR-low PRAD", "pre-EMT (AR-low PRAD)", "intermediate EMT-like", "early NEPC ASCL1+",
+         17: "intermediate EMT-like", 10: "NEPC ASCL1+", 13: "early NEPC ASCL1-",
+         **{c: "terminal NEPC ASCL1-" for c in (1, 7, 9)}, **{c: "NEPC other" for c in (3, 14)}}
+ORDER = ["AR-high PRAD", "AR-low PRAD", "pre-EMT (AR-low PRAD)", "intermediate EMT-like", "NEPC ASCL1+",
          "early NEPC ASCL1-", "NEPC other", "terminal NEPC ASCL1-"]
+PROGRAMS = {"canonical_annotation:AD": "AD", "canonical_annotation:NE": "NE", "canonical_annotation:EMT": "EMT",
+            "canonical_annotation:Proliferation": "Proliferation"}
 NEPC = (1, 3, 7, 9, 10, 13, 14)
 PRAD = (0, 2, 4, 5, 6, 8, 11, 12, 15, 16)
 
@@ -74,6 +88,32 @@ def standardised(g: pd.DataFrame, keys: list[str], group: str, stratum: str) -> 
     return s.rw / s.w
 
 
+def signature_contrast(g: pd.DataFrame, sig: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """Retained minus rejected mean program score per group (each state and 'all'), raw and within depth / nFeature
+    quintiles of the side; one block of configurations at a time."""
+    out = []
+    for counts, s in sig.groupby("counts"):
+        x = g.merge(s.drop(columns="counts"), on="observation_id")
+        x = pd.concat([x, x.assign(state="all")], ignore_index=True)
+        k = keys + ["state"]
+        for col, prog in PROGRAMS.items():
+            m = x.groupby(k + ["retained"], observed=True)[col].agg(["size", "mean", "median"]).unstack("retained")
+            m.columns = [f"{a_}_{'retained' if r else 'rejected'}" for a_, r in m.columns]
+            m = m.reindex(columns=[f"{a_}_{r}" for a_ in ("size", "mean", "median") for r in ("retained", "rejected")])
+            ok = (m.size_retained >= 10) & (m.size_rejected >= 10)
+            m["difference"] = (m.mean_retained - m.mean_rejected).where(ok)
+            for strat in ("q_depth", "q_nfeature"):
+                q = x.groupby(k + [strat, "retained"], observed=True)[col].agg(["size", "mean"]).unstack("retained")
+                q.columns = [f"{a_}_{'ret' if r else 'rej'}" for a_, r in q.columns]
+                q = q.reindex(columns=["size_ret", "size_rej", "mean_ret", "mean_rej"])
+                q = q[(q.size_ret >= 3) & (q.size_rej >= 3)].copy()
+                q["d"] = q.mean_ret - q.mean_rej; q["w"] = q.size_ret + q.size_rej; q["dw"] = q.d * q.w
+                agg = q.groupby(level=k, observed=True)[["dw", "w"]].sum()
+                m[f"difference_within_{strat[2:]}_quintile"] = (agg.dw / agg.w).reindex(m.index).where(ok)
+            out.append(m.reset_index().assign(program=prog, counts=counts))
+    return pd.concat(out, ignore_index=True)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--converted", type=Path, required=True)
@@ -82,6 +122,7 @@ def main() -> None:
     p.add_argument("--gates", nargs="+", required=True)
     p.add_argument("--coupling", nargs="*", default=[])
     p.add_argument("--metrics", nargs="*", default=[])
+    p.add_argument("--signatures", type=Path, default=None, help="CELL_SIGNATURES.tsv.gz of 11_signature_scores.py")
     a = p.parse_args()
     if a.out.exists():
         sys.exit(f"{a.out} exists; not overwritten")
@@ -119,7 +160,10 @@ def main() -> None:
         m = pd.read_csv(f, sep="\t")
         valid[b] = m.assign(branch=b)[["branch", "config_id", "pair", "method", "m4e_inference_valid", "m4r_calibration_valid", "outer_converged"]]
     valid = pd.concat(valid.values()) if valid else None
-    ret, rob = [], []
+    ret, sc = [], []
+    sig = None
+    if a.signatures is not None:
+        sig = pd.read_csv(a.signatures, sep="\t", usecols=["observation_id", "counts", *PROGRAMS])
     for b, f in pairs_of(a.gates).items():
         g = pd.read_csv(f, sep="\t", usecols=["config_id", "pair_id", "method", "side", "observation_id", "rejected"],
                         dtype={"config_id": "category", "pair_id": "category", "method": "category", "side": "category"})
@@ -147,6 +191,11 @@ def main() -> None:
             t = t.rename(columns={level: "group"}).assign(level=level, branch=b)
             ret.append(t)
         print(b, "retention done", flush=True)
+        if sig is not None:
+            gs = g[["config_id", "method", "pair", "side", "observation_id", "retained", "state", "q_depth", "q_nfeature"]]
+            for cid, gc in gs.groupby("config_id", observed=True):
+                sc.append(signature_contrast(gc, sig, keys).assign(branch=b))
+            print(b, "signatures done", flush=True)
     ret = pd.concat(ret, ignore_index=True)
     if valid is not None:
         ret = ret.merge(valid, on=["branch", "config_id", "pair", "method"], how="left")
@@ -160,6 +209,16 @@ def main() -> None:
                             fraction_configs_group_above_rest=("group_minus_rest", lambda x: float((x > 0).mean()) if x.notna().any() else np.nan),
                             median_group_minus_rest=("group_minus_rest", "median")).reset_index()
     q.to_csv(a.out / "ROBUSTNESS.tsv", sep="\t", index=False)
+    if sc:
+        sc = pd.concat(sc, ignore_index=True).rename(columns={"state": "group"})
+        sc.to_csv(a.out / "SIGNATURE_CONTRAST.tsv", sep="\t", index=False)
+        sk = ["branch", "method", "pair", "side", "group", "program", "counts"]
+        sc.groupby(sk, observed=True).agg(
+            configs=("config_id", "nunique"), configs_estimable=("difference", "count"),
+            median_difference=("difference", "median"), median_difference_within_depth=("difference_within_depth_quintile", "median"),
+            median_difference_within_nfeature=("difference_within_nfeature_quintile", "median"),
+            fraction_configs_retained_higher=("difference", lambda x: float((x.dropna() > 0).mean()) if x.notna().any() else np.nan)
+        ).reset_index().to_csv(a.out / "SIGNATURE_ROBUSTNESS.tsv", sep="\t", index=False)
 
     # 3. coupling between states
     cp = []
