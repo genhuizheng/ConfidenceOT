@@ -30,11 +30,13 @@ import pandas as pd
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, required=True)
+    p.add_argument("--worklist", default="worklist_ltl331.tsv", help="another LTL331 worklist writes PDX_CALIBRATION_FLAGS_<stem>.tsv")
     a = p.parse_args()
-    target = a.root / "PDX_CALIBRATION_FLAGS.tsv"
+    tag = "" if a.worklist == "worklist_ltl331.tsv" else "_" + Path(a.worklist).stem
+    target = a.root / f"PDX_CALIBRATION_FLAGS{tag}.tsv"
     if target.exists():
         sys.exit(f"{target} exists; not overwritten")
-    w = pd.read_csv(a.root / "worklist_ltl331.tsv", sep="\t", dtype=str)
+    w = pd.read_csv(a.root / a.worklist, sep="\t", dtype=str)
     rows = []
     for _, r in w.iterrows():
         files = sorted(Path(r.out).glob("fits/pair*/*/out/*/scope_malignant/budget_*/calibration.json"))

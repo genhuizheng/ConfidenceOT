@@ -11,6 +11,8 @@ SPLATTER_GATE_COUPLING_METRICS.tsv  every splatter row's score.csv (benchmark/40
                                     row's configuration, acceptance and the fitted run's calibration flags (pair_metrics.csv)
 COLLECT_STATUS.tsv                  per row: SUCCESS / FAILED / missing and whether its table was found
 Nothing is filtered: a row without output is listed, never dropped silently. Refuses if a table exists.
+--ltl331-worklist NAME (e.g. worklist_ltl331_author_harmony.tsv): collect only that LTL331 worklist, into
+PDX_GATE_COUPLING_METRICS_<NAME stem>.tsv and COLLECT_STATUS_<NAME stem>.tsv (the default tables are not touched).
 """
 
 from __future__ import annotations
@@ -25,14 +27,16 @@ import pandas as pd
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, required=True)
+    p.add_argument("--ltl331-worklist", default=None)
     a = p.parse_args()
-    outs = {d: a.root / f"{d}_GATE_COUPLING_METRICS.tsv" for d in ("PDX", "SPLATTER")}
+    tag = "" if a.ltl331_worklist is None else "_" + Path(a.ltl331_worklist).stem
+    outs = {d: a.root / f"{d}_GATE_COUPLING_METRICS{tag}.tsv" for d in (("PDX",) if tag else ("PDX", "SPLATTER"))}
     for f in outs.values():
         if f.exists():
             sys.exit(f"{f} exists; not overwritten")
     status, pdx, spl = [], [], []
-    for w in ("ltl331", "splatter"):
-        work = pd.read_csv(a.root / f"worklist_{w}.tsv", sep="\t", dtype=str)
+    for w in (("ltl331",) if tag else ("ltl331", "splatter")):
+        work = pd.read_csv(a.root / (a.ltl331_worklist if tag else f"worklist_{w}.tsv"), sep="\t", dtype=str)
         for _, r in work.iterrows():
             out = Path(r.out)
             st = {"dataset": w, "config_id": r.config_id, "pair_id": r.pair_id, "acceptance": r.acceptance, "out": r.out,
@@ -57,8 +61,9 @@ def main() -> None:
                     spl.append(t)
             status.append(st)
     (pd.concat(pdx, ignore_index=True) if pdx else pd.DataFrame()).to_csv(outs["PDX"], sep="\t", index=False)
-    (pd.concat(spl, ignore_index=True) if spl else pd.DataFrame()).to_csv(outs["SPLATTER"], sep="\t", index=False)
-    s = pd.DataFrame(status); s.to_csv(a.root / "COLLECT_STATUS.tsv", sep="\t", index=False)
+    if "SPLATTER" in outs:
+        (pd.concat(spl, ignore_index=True) if spl else pd.DataFrame()).to_csv(outs["SPLATTER"], sep="\t", index=False)
+    s = pd.DataFrame(status); s.to_csv(a.root / f"COLLECT_STATUS{tag}.tsv", sep="\t", index=False)
     print(s.groupby(["dataset", "flag", "table_found"]).size().to_string())
     for k, f in outs.items():
         print(k, f, sum(1 for _ in open(f)) - 1, "rows")

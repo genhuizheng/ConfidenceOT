@@ -19,6 +19,15 @@ arguments; --save-coupling.
   bmenc[_allgenes][_noscale][_cos] (--allow-precomputed): rank-K -> 2,000 top-variance encoded genes, rank-HVG ->
   every encoded HVG (allgenes), then the configuration's scaling, PCA 30 and cost.
 Rows of LTL331_OT_BENCHMARK_pair<i>.tsv: see the columns; a non-converged M4-R row has formal_result False.
+
+Author-provided embedding arm (added 2026-11-01; --author-embedding NPZ --author-key KEY, the npz of
+ltl331_nepc/09_author_harmony_audit.py): configurations author_harmony|<KEY>|cos and author_harmony|<KEY>|sqeuc. The
+authors' coordinates of exactly this pair's cells (the frozen equalised manifest's cells, as every other arm) are written
+as a precomputed matrix and fitted with label authorharmony_allgenes_nopca_noscale[_cos]: no HVG selection, no PCA, no
+gene scaling, so the embedding enters unchanged; only the cost is built (unit rows for cos) and divided by the median
+pair cost, and the calibration is run on that cost as for every arm. --cell-qc is dropped for this arm only (its
+thresholds here are 0 / 0 / 100, which every cell passes, and it refuses negative values). Stops if any cell has no
+author coordinates.
 """
 
 from __future__ import annotations
@@ -63,11 +72,12 @@ def correspondence(Ma, Mb):
     return (float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else np.nan), (float(np.mean(js)) if js else np.nan)
 
 
-def fit(manifest: Path, out: Path, index: int, label: str, precomputed: bool) -> int:
+def fit(manifest: Path, out: Path, index: int, label: str, precomputed: bool, cell_qc: bool = True) -> int:
     sep = ";" if os.name == "nt" else ":"
     env = {**os.environ, "PYTHONPATH": sep.join(map(str, [REPO / "src", REPO / "cancer_metastasis", REPO]))}
+    args = FACTORIAL_ARGS if cell_qc else [x for x in FACTORIAL_ARGS if x != "--cell-qc"]
     cmd = [sys.executable, str(REPO / "cancer_metastasis" / "02_run_pair.py"), str(manifest), str(out / "out"),
-           "--index", str(index), "--preprocessing", label, *FACTORIAL_ARGS] + (["--allow-precomputed"] if precomputed else [])
+           "--index", str(index), "--preprocessing", label, *args] + (["--allow-precomputed"] if precomputed else [])
     with open(out / "run.log", "w") as log:
         return subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=REPO).returncode
 
@@ -96,6 +106,9 @@ def main() -> None:
     p.add_argument("--only", nargs="*", default=None)
     p.add_argument("--no-check", action="store_true", help="skip the precomputed-path mechanism check (TACC workers)")
     p.add_argument("--resume", action="store_true", help="keep the configurations already in the partial table; fit the rest")
+    p.add_argument("--author-embedding", type=Path, default=None, help="npz of 09_author_harmony_audit.py (cellid + obsm keys)")
+    p.add_argument("--author-key", default=None, help="obsm key of the author embedding, e.g. X_harmony")
+    p.add_argument("--author-costs", nargs="*", default=["cos", "sqeuc"])
     a = p.parse_args()
     target = a.out / f"LTL331_OT_BENCHMARK_pair{a.pair_index}.tsv"
     if target.exists():
@@ -124,6 +137,14 @@ def main() -> None:
         lab = rb.production_label(r["encoding"], int(r["K"]) if r["K"] == r["K"] else 0, bool(r["scale"]), r["ds"] != "none", r["cost"]) \
             if (r["encoding"] == "logcpm" or r["tie"] == "production") else None
         jobs.append(dict(config=r["config_id"], ds_key=ds_key, label=lab, encode=None if lab else r))
+    author = None
+    if a.author_embedding is not None:
+        z = np.load(a.author_embedding, allow_pickle=False)
+        author = pd.DataFrame(z[a.author_key], index=pd.Index(z["cellid"].astype(str)))
+        for cost in a.author_costs:
+            cid = f"author_harmony|{a.author_key}|{cost}"
+            if not a.only or cid in a.only:
+                jobs.append(dict(config=cid, ds_key="P10sfrozen", label=None, encode=None, author_cost=cost))
     if not a.no_check:
         jobs.append(dict(config="check_precomputed_path", ds_key="P10sfrozen", label=None,
                          encode={"encoding": "ranknm", "K": 256, "tie": "production", "scale": False, "cost": "cos", "ds": "P10", "H": None}))
@@ -145,7 +166,17 @@ def main() -> None:
             ds, seed = job["ds_key"][:3], int(job["ds_key"][4:])
             s, t = rb.equalised(base["none"][0], targets[ds], 1000 * seed + 1), rb.equalised(base["none"][1], targets[ds], 1000 * seed + 2)
         files, precomputed = None, False
-        if job["encode"] is not None:
+        if job.get("author_cost") is not None:
+            E = author.reindex(pd.Index(s.obs_names.astype(str)).append(pd.Index(t.obs_names.astype(str))))
+            if E.isna().any(axis=None):
+                sys.exit(f"{int(E.isna().any(axis=1).sum())} cells of {pair_id} have no author coordinates")
+            dims = pd.Index([f"{a.author_key}_{k + 1}" for k in range(E.shape[1])]); n = s.n_obs
+            label = "authorharmony_allgenes_nopca_noscale" + ("_cos" if job["author_cost"] == "cos" else "")
+            files = (out / "input" / "source.h5ad", out / "input" / "target.h5ad")
+            ad.AnnData(X=E.to_numpy(np.float32)[:n], obs=s.obs.copy(), var=pd.DataFrame(index=dims)).write_h5ad(files[0])
+            ad.AnnData(X=E.to_numpy(np.float32)[n:], obs=t.obs.copy(), var=pd.DataFrame(index=dims)).write_h5ad(files[1])
+            precomputed = True
+        elif job["encode"] is not None:
             e = job["encode"]; joint = rb.joint_counts(s, t); genes = pd.Index(rb.common_genes(s, t)[0])
             if e["encoding"] == "ranknm":
                 rule, tseed = ("random", int(e["tie"][6:])) if str(e["tie"]).startswith("random") else (e["tie"], 0)
@@ -163,7 +194,7 @@ def main() -> None:
             if job["ds_key"] not in base:
                 files = (out / "input" / "source.h5ad", out / "input" / "target.h5ad"); s.write_h5ad(files[0]); t.write_h5ad(files[1])
         manifest = manifest_with(a.run_root, job["ds_key"] == "P10sfrozen", pair_id, files, out / "manifest.csv")
-        code = fit(manifest, out, a.pair_index, label, precomputed)
+        code = fit(manifest, out, a.pair_index, label, precomputed, cell_qc=job.get("author_cost") is None)
         base_row = {"pair": pair_id.replace("LTL331__", ""), "config_id": job["config"], "fit_label": label, "ds": job["ds_key"], "precomputed": precomputed, "exit": code}
         if code != 0:
             rows.append({**base_row, "status": "fit failed; see run.log"}); print(job["config"], "FAILED", flush=True); continue

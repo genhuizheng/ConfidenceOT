@@ -11,7 +11,8 @@ A row whose out/SUCCESS exists is skipped (resubmission continues); a failed row
 and the worker goes on.
 
 ltl331 rows call 05_ltl331_ot_pilot.py --pair-index --only CONFIG --no-check --out OUT (the factorial arguments, frozen
-manifests, metrics and balanced OT exactly as the local pilot). splatter rows: the configuration's input is prepared
+manifests, metrics and balanced OT exactly as the local pilot); a row with author_embedding / author_key columns (the
+author-provided Harmony arm, 19_build_author_harmony_worklist.py) passes them on, and needs no registry entry. splatter rows: the configuration's input is prepared
 as in 05_ (DS none: the manifest's files; P10 frozen: the conditions_ds files of that pair; P10 / P25 / P50 seed s:
 the original counts equalised with confidenceot.equalise_depth to the pooled quantile over every file of the
 condition manifest, seeds 1000 s + 1 / + 2; production-equivalent configurations by label, the others as precomputed
@@ -156,6 +157,8 @@ def n5000_condition_row(row, out: Path) -> int:
 def ltl331_row(row, out: Path, registry: Path) -> int:
     cmd = [sys.executable, str(HERE / "05_ltl331_ot_pilot.py"), "--run-root", row.run_root, "--converted", row.converted,
            "--registry", str(registry), "--out", str(out), "--pair-index", str(int(row.pair_index)), "--only", row.config_id, "--no-check"]
+    if isinstance(row.get("author_embedding"), str) and row.get("author_embedding"):
+        cmd += ["--author-embedding", row.author_embedding, "--author-key", row.author_key]
     with open(out / "worker.log", "w") as log:
         return subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env(), cwd=REPO).returncode
 
@@ -179,10 +182,11 @@ def main() -> None:
         try:
             if row.dataset == "splatter_n5000_condition":
                 code = n5000_condition_row(row, out)
+            elif row.dataset == "ltl331":
+                code = ltl331_row(row, out, a.registry)
             else:
                 spec = reg.loc[row.config_id].to_dict(); spec["config_id"] = row.config_id
-                code = (ltl331_row(row, out, a.registry) if row.dataset == "ltl331" else
-                        n5000_row(row, spec, out) if row.dataset == "splatter_n5000" else splatter_row(row, spec, out))
+                code = n5000_row(row, spec, out) if row.dataset == "splatter_n5000" else splatter_row(row, spec, out)
         except Exception:
             code = -1; (out / "error.txt").write_text(traceback.format_exc())
         (out / ("SUCCESS" if code == 0 else "FAILED")).write_text(json.dumps({"config_id": row.config_id, "pair_id": row.pair_id, "exit": code}))

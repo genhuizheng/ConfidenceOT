@@ -24,11 +24,13 @@ COLS = ["method", "side", "observation_id", "rejected", "signed_rejection_margin
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, required=True)
+    p.add_argument("--worklist", default="worklist_ltl331.tsv", help="another LTL331 worklist writes PDX_CELL_GATES_<stem>.tsv.gz")
     a = p.parse_args()
-    target = a.root / "PDX_CELL_GATES.tsv.gz"
+    tag = "" if a.worklist == "worklist_ltl331.tsv" else "_" + Path(a.worklist).stem
+    target = a.root / f"PDX_CELL_GATES{tag}.tsv.gz"
     if target.exists():
         sys.exit(f"{target} exists; not overwritten")
-    w = pd.read_csv(a.root / "worklist_ltl331.tsv", sep="\t", dtype=str)
+    w = pd.read_csv(a.root / a.worklist, sep="\t", dtype=str)
     parts, status = [], []
     for _, r in w.iterrows():
         out = Path(r.out)
@@ -40,7 +42,7 @@ def main() -> None:
             parts.append(c)
         status.append(st)
     pd.concat(parts, ignore_index=True).to_csv(target, sep="\t", index=False, compression="gzip")
-    s = pd.DataFrame(status); s.to_csv(a.root / "PDX_CELL_GATES_STATUS.tsv", sep="\t", index=False)
+    s = pd.DataFrame(status); s.to_csv(a.root / f"PDX_CELL_GATES_STATUS{tag}.tsv", sep="\t", index=False)
     print(s.groupby(["success", "files"]).size().to_string())
     print(f"{sum(len(x) for x in parts)} rows -> {target} ({target.stat().st_size / 1e6:.1f} MB)")
 
