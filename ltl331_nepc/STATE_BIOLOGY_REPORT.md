@@ -1,4 +1,4 @@
-# LTL331 state-level readout of ConfidenceOT (Non-Harmony branch; author-Harmony branch pending)
+# LTL331 state-level readout of ConfidenceOT (Non-Harmony branch; author-Harmony branch audited, fits pending)
 
 Written 2026-11-01. Tables: `results/ltl331_nepc/state_biology_20261101/nonharmony_v3/` (10_state_biology.py) and
 `signatures_v1/` (11_signature_scores.py), from the existing gates of all 64 fitted configurations
@@ -126,5 +126,21 @@ configuration share is a robustness count, not a p-value.
 - **How it enters OT:** the coordinates as published, with no HVG selection, PCA or scaling; cosine and sqeuc cost
   scaled by the median pair cost; calibration recomputed; the same cells, solver and metrics as the 64 configurations.
 - Its genes (ortholog set, three-cohort HVGs), dimensions and joint PCA differ from every Non-Harmony configuration.
-  A difference between the branches is therefore not the Harmony correction alone; the audit will record each
-  difference.
+  A difference between the branches is therefore not the Harmony correction alone.
+- **Audit of the authors' object** (`GSE297328_ltl331_harmony_integrated.h5ad`, 09_author_harmony_audit.py, TACC job
+  1115473, 2026-11-01):
+  - **Object:** 73,934 cells (LTL331 51,726; Gao 12,203; Li 10,005). X has the 3,000 vst HVGs of the joint object;
+    raw has 29,622 genes.
+  - **Embedding:** `obsm.X_harmony_dataset`, 30 dimensions, with loadings `varm.HARMONY_DATASET` (3,000 × 30). The
+    integration variable is `dataset` (cohort), as the paper states, not sample or time point. The object also holds
+    the uncorrected joint `X_pca` (50 dimensions) and two UMAPs.
+  - **Alignment:** all 51,726 LTL331 rows match our cells one to one by `cellid`, with no duplicates and none
+    missing either way. Their `ltl331_cluster_original` equals our `seurat_clusters` in every cell, and
+    `coarse_celltype`, nCount_RNA, nFeature_RNA and percent.mt are equal in every cell. Obs names carry a prefix, so
+    matching is by `cellid`.
+  - **Cluster count:** the object's own `seurat_clusters` (29 levels) is the joint clustering at resolution 0.8; its
+    resolution 0.55 column has 25 levels, against the 27 clusters of the paper. Neither is used here: states come
+    from `ltl331_cluster_original`.
+  - **Difference from Non-Harmony:** 30 Harmony dimensions from a 3,000-HVG, three-cohort PCA, against every
+    Non-Harmony configuration's own genes and dimensions; the same 51,726 cells and the same frozen equalised
+    manifest.

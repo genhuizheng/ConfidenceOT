@@ -7,6 +7,7 @@
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] worklist
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] [--nodes N] [--hours H] run
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] collect
+#   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] f1
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--pilot] status
 #
 # chain          generate -> worklist (afterok every generation job) -> run (afterok the worklist job) -> collect
@@ -19,6 +20,8 @@
 # worklist       one short job: registry (from the code) + 31_build_n5000_worklist.py (--pilot: the pilot worklist)
 # run            N nodes (default 4 x 6 h; pilot 1 x 3 h) of realdata_benchmark/tacc/benchmark_workers.slurm
 # collect        one short job: 32_collect_n5000.py (--pilot: the _PILOT tables)
+# f1             one short job: 33_f1_summary.py on the collected tables (SPLATTER_N5000_F1_ROWS / F1_SUMMARY, --pilot:
+#                _PILOT); the chain does not submit it
 # --after IDS    colon-separated job ids this stage waits for (afterok; collect: afterany)
 # --partition P  gg (default, every stage) or gh-dev / gh (72 cores, so 9 workers per node; gh-dev's 2 h limit clips
 #                the job times and limits pilot generation to the two levels it reads, L2_depth_dropout and L4_batch_perturb)
@@ -33,11 +36,11 @@ while (( $# )); do
         --hours) hours=$2; shift 2 ;;
         --after) after=$2; shift 2 ;;
         --partition) partition=$2; shift 2 ;;
-        chain|cleanup-audit|generate|worklist|run|status|collect) stage=$1; shift ;;
+        chain|cleanup-audit|generate|worklist|run|status|collect|f1) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-[[ -n "$stage" ]] || { echo "usage: bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] [--nodes N] [--hours H] chain|cleanup-audit|generate|worklist|run|status|collect" >&2; exit 2; }
+[[ -n "$stage" ]] || { echo "usage: bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] [--nodes N] [--hours H] chain|cleanup-audit|generate|worklist|run|status|collect|f1" >&2; exit 2; }
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 root=${RB5_ROOT:-/scratch/10119/ghzheng/OT_project/splatter_n5000_benchmark_20261101}
 native=${RB5_NATIVE_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_native}
@@ -126,13 +129,19 @@ generate) do_generate > /dev/null || exit 1 ;;
 worklist) do_worklist "$after" > /dev/null || exit 1 ;;
 run) do_run "$after" > /dev/null || exit 1 ;;
 collect) do_collect "$after" > /dev/null || exit 1 ;;
+f1)
+    id=$(submit $(dep_args afterok "$after") -p "$partition" -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb5_f1 -o "$root/logs/f1_%j.out" \
+        --wrap "$activate && python realdata_benchmark/splatter_n5000/33_f1_summary.py --root $root $pilot_flag") || exit 1
+    echo "F1 summary job $id -> $root/SPLATTER_N5000_F1_SUMMARY${pilot_flag:+_PILOT}.tsv"
+    ;;
 status)
     [[ -f "$wl" ]] || { echo "no worklist at $wl"; exit 0; }
     rows=0; done_n=0; fail_n=0
-    while IFS=$'\t' read -r -a field; do
-        out=${field[15]}; rows=$(( rows + 1 ))
+    # the out column by header name: read -a with a tab IFS merges empty fields and shifts the index
+    while IFS= read -r out; do
+        rows=$(( rows + 1 ))
         [[ -f "$out/SUCCESS" ]] && done_n=$(( done_n + 1 )); [[ -f "$out/FAILED" ]] && fail_n=$(( fail_n + 1 ))
-    done < <(tail -n +2 "$wl")
+    done < <(awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "out") c = i; next } { print $c }' "$wl")
     echo "$(basename "$wl"): $rows rows, $done_n done, $fail_n failed, $(( rows - done_n - fail_n )) pending"
     ;;
 esac
