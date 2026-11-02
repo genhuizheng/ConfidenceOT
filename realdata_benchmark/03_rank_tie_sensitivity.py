@@ -52,17 +52,29 @@ def main() -> None:
     p.add_argument("--run-root", type=Path, required=True)
     p.add_argument("--converted", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--resume", action="store_true",
+                   help="keep every (configuration, pair) of the partial table that has all tie rules, compute the rest")
     a = p.parse_args()
     target = a.out / "RANK_TIE_SENSITIVITY.tsv"
     if target.exists():
         sys.exit(f"{target} exists; not overwritten")
     a.out.mkdir(parents=True, exist_ok=True)
     ctype = rb.cell_types(a.converted)
-    rows = []
+    rows, done = [], set()
+    partial = target.with_suffix(".partial.tsv")
+    if a.resume and partial.exists():
+        old = pd.read_csv(partial, sep="\t")
+        complete = old.groupby(["config", "pair"]).size()
+        done = set(complete[complete == len(RULES)].index)
+        rows = old[[(c, q) in done for c, q in zip(old.config, old.pair)]].to_dict("records")
+        print(f"resume: {len(done)} configuration-pairs kept", flush=True)
     for equalised in (True, False):
         pairs = rb.ltl_pairs(a.run_root, equalised)
         for index, row in pairs.iterrows():
             pair = row.pair_id.replace("LTL331__", "")
+            names = [("rank256" if gm else "ranknm256") + "_noscale" + ("_ds" if equalised else "") + "_cos" for gm in (False, True)]
+            if all((n, pair) in done for n in names):
+                continue
             s = ad.read_h5ad(rb.local(row.source_h5ad, a.run_root)); t = ad.read_h5ad(rb.local(row.target_h5ad, a.run_root))
             joint = rb.joint_counts(s, t)
             ns = s.n_obs
@@ -71,6 +83,8 @@ def main() -> None:
             li, lj = sample_rng.integers(ns, size=200_000), sample_rng.integers(t.n_obs, size=200_000)
             for gm in (False, True):
                 config = ("rank256" if gm else "ranknm256") + "_noscale" + ("_ds" if equalised else "") + "_cos"
+                if (config, pair) in done:
+                    continue
                 ref = None
                 for rule, seed in RULES:
                     enc, st = rb.rank_encode(joint, 256, gm, rule, seed)

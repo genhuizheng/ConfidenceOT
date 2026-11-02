@@ -95,6 +95,7 @@ def main() -> None:
     p.add_argument("--pair-index", type=int, default=5)
     p.add_argument("--only", nargs="*", default=None)
     p.add_argument("--no-check", action="store_true", help="skip the precomputed-path mechanism check (TACC workers)")
+    p.add_argument("--resume", action="store_true", help="keep the configurations already in the partial table; fit the rest")
     a = p.parse_args()
     target = a.out / f"LTL331_OT_BENCHMARK_pair{a.pair_index}.tsv"
     if target.exists():
@@ -126,8 +127,16 @@ def main() -> None:
     if not a.no_check:
         jobs.append(dict(config="check_precomputed_path", ds_key="P10sfrozen", label=None,
                          encode={"encoding": "ranknm", "K": 256, "tie": "production", "scale": False, "cost": "cos", "ds": "P10", "H": None}))
-    rows = []
+    rows, done = [], set()
+    partial = target.with_suffix(".partial.tsv")
+    if a.resume and partial.exists():
+        old = pd.read_csv(partial, sep="\t")
+        done = set(old.config_id)
+        rows = old.to_dict("records")
+        print(f"resume: {len(done)} configurations kept", flush=True)
     for job in jobs:
+        if job["config"] in done:
+            continue
         safe = job["config"].replace("|", "__").replace(":", "_")
         out = fits / safe; (out / "input").mkdir(parents=True, exist_ok=True)
         if job["ds_key"] in base:

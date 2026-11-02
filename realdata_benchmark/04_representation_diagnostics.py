@@ -88,6 +88,9 @@ def main() -> None:
     p.add_argument("--registry", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--pairs", type=int, nargs="*", default=[5, 0, 1, 2, 3, 4, 6])
+    p.add_argument("--resume", action="store_true",
+                   help="keep the rows of every pair whose source/diag_pair<i>.npz exists (a pair is complete when its npz "
+                        "is written) from the partial tables, and compute only the other pairs")
     a = p.parse_args()
     target = a.out / "REPRESENTATION_DIAGNOSTICS.tsv"
     if target.exists():
@@ -98,8 +101,20 @@ def main() -> None:
     ctype = rb.cell_types(a.converted)
     depth = pd.read_csv(a.run_root / "inputs" / "ds" / "predownsample_depth.csv.gz").set_index("observation_id")["predownsample_total_counts"]
     targets = rb.ds_targets(depth)
-    rows, corr = [], []
+    rows, corr, done = [], [], set()
+    partial = a.out / "REPRESENTATION_DIAGNOSTICS.partial.tsv"
+    if a.resume and partial.exists():
+        done = {i for i in a.pairs if (a.out / "source" / f"diag_pair{i}.npz").exists()}
+        old = pd.read_csv(partial, sep="\t")
+        rows = old[old.pair_index.isin(done)].to_dict("records")
+        if (a.out / "COST_CORRELATION.partial.tsv").exists():
+            oc = pd.read_csv(a.out / "COST_CORRELATION.partial.tsv", sep="\t")
+            kept = {r["pair"] for r in rows}
+            corr = oc[oc.pair.isin(kept)].to_dict("records")
+        print(f"resume: pairs {sorted(done)} kept ({len(rows)} rows)", flush=True)
     for index in a.pairs:
+        if index in done:
+            continue
         orig = rb.ltl_pairs(a.run_root, False).iloc[index]; froz = rb.ltl_pairs(a.run_root, True).iloc[index]
         pair = orig.pair_id.replace("LTL331__", "")
         base = {"none": (ad.read_h5ad(rb.local(orig.source_h5ad, a.run_root)), ad.read_h5ad(rb.local(orig.target_h5ad, a.run_root))),
