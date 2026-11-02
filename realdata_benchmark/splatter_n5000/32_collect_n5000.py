@@ -29,14 +29,16 @@ KEYS = ["level", "replicate", "case", "pair_id", "config_id"]
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, required=True)
+    p.add_argument("--pilot", action="store_true", help="read TACC_N5000_PILOT_WORKLIST.tsv and write the tables with suffix _PILOT")
     a = p.parse_args()
+    suffix = "_PILOT" if a.pilot else ""
     names = ["GATE_METRICS", "COUPLING_METRICS", "CALIBRATION_VALIDITY", "DEG_VALIDATION", "REPRESENTATION_DIAGNOSTICS",
              "DOWNSAMPLING_DIAGNOSTICS", "RANK_STABILITY"]
-    outs = {n: a.root / f"SPLATTER_N5000_{n}.tsv" for n in names}
+    outs = {n: a.root / f"SPLATTER_N5000_{n}{suffix}.tsv" for n in names}
     for f in outs.values():
         if f.exists():
             sys.exit(f"{f} exists; not overwritten")
-    w = pd.read_csv(a.root / "TACC_N5000_WORKLIST.tsv", sep="\t", dtype=str)
+    w = pd.read_csv(a.root / ("TACC_N5000_PILOT_WORKLIST.tsv" if a.pilot else "TACC_N5000_WORKLIST.tsv"), sep="\t", dtype=str)
     tabs = {n: [] for n in names}; status = []
     for _, r in w.iterrows():
         out = Path(r.out); meta = {k: r[k] for k in KEYS}
@@ -71,7 +73,7 @@ def main() -> None:
         status.append(st)
     for n, parts in tabs.items():
         (pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()).to_csv(outs[n], sep="\t", index=False)
-    s = pd.DataFrame(status); s.to_csv(a.root / "COLLECT_STATUS_N5000.tsv", sep="\t", index=False)
+    s = pd.DataFrame(status); s.to_csv(a.root / f"COLLECT_STATUS_N5000{suffix}.tsv", sep="\t", index=False)
     print(s.groupby(["dataset", "flag"]).size().to_string())
     for n, f in outs.items():
         print(n, sum(1 for _ in open(f)) - 1, "rows")
