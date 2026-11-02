@@ -7,7 +7,7 @@
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--nodes N] [--hours H] run
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh status | collect
 #
-# cleanup-audit  read-only: TACC_CLEANUP_MANIFEST.tsv of the old Splatter directories (cleanup_audit.sh); deletes nothing
+# cleanup-audit  one short job, read-only: TACC_CLEANUP_MANIFEST.tsv of the old Splatter directories (cleanup_audit.sh); deletes nothing
 # generate       one gg job per replicate (generate_n5000.slurm): 8 levels generated, L0-L2 checked against the native
 #                generation, conditions + truth built. --pilot: replicate 1 only
 # worklist       one short job: registry (from the code) + 31_build_n5000_worklist.py; --pilot: the 18-row pilot worklist
@@ -46,7 +46,10 @@ submit() {
 
 case $stage in
 cleanup-audit)
-    bash "$repo/realdata_benchmark/splatter_n5000/tacc/cleanup_audit.sh" "$root/TACC_CLEANUP_MANIFEST.tsv"
+    # a job, not the login node: find / du over tens of thousands of files on /scratch take long
+    id=$(submit -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J rb5_audit -o "$root/logs/cleanup_audit_%j.out" \
+        --wrap "bash $repo/realdata_benchmark/splatter_n5000/tacc/cleanup_audit.sh $root/TACC_CLEANUP_MANIFEST.tsv") || exit 1
+    echo "cleanup audit job $id -> $root/TACC_CLEANUP_MANIFEST.tsv (read-only)"
     ;;
 generate)
     [[ -d "$native/generated" ]] || { echo "missing $native/generated" >&2; exit 1; }
