@@ -10,6 +10,11 @@ the joint coordinates; Spearman correlation of 200,000 sampled cross-side costs;
 ltl331_nepc/07_validity_audit.py (agreement kappa with the production rule's kNN gate, source / target kNN-retained
 fractions, NE minus non-NE kNN retention on the source side); kNN (k = 15) coarse_celltype retrieval within the joint
 representation. No OT is fitted here (the OT effect of the tie rule is in the 16 -> 20 pilot).
+
+Options (added 2026-11-01 for criterion 3 of the eligibility section, which had been measured with cosine and K = 256
+only): --cost sqeuc (no unit rows; costs and kNN gates on the PCA coordinates), --k K (top-K; the 'top256' columns are
+then named top<K>), --encodings ranknm (rank_no_median only), --ds-only (equalised counts only). With any non-default
+option the table is RANK_TIE_SENSITIVITY_<cost>_K<k>[_<encodings>][_ds].tsv, so the default table is never touched.
 """
 
 from __future__ import annotations
@@ -54,8 +59,17 @@ def main() -> None:
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--resume", action="store_true",
                    help="keep every (configuration, pair) of the partial table that has all tie rules, compute the rest")
+    p.add_argument("--cost", choices=("cos", "sqeuc"), default="cos")
+    p.add_argument("--k", type=int, default=256)
+    p.add_argument("--encodings", choices=("both", "ranknm"), default="both")
+    p.add_argument("--ds-only", action="store_true")
     a = p.parse_args()
-    target = a.out / "RANK_TIE_SENSITIVITY.tsv"
+    cosine, K = a.cost == "cos", a.k
+    gms = (False, True) if a.encodings == "both" else (False,)
+    default = cosine and K == 256 and a.encodings == "both" and not a.ds_only
+    target = a.out / ("RANK_TIE_SENSITIVITY.tsv" if default else
+                      f"RANK_TIE_SENSITIVITY_{a.cost}_K{K}" + ("" if a.encodings == "both" else f"_{a.encodings}") + ("_ds" if a.ds_only else "") + ".tsv")
+    name = lambda gm, equalised: ("rank" if gm else "ranknm") + str(K) + "_noscale" + ("_ds" if equalised else "") + ("_cos" if cosine else "")
     if target.exists():
         sys.exit(f"{target} exists; not overwritten")
     a.out.mkdir(parents=True, exist_ok=True)
@@ -68,11 +82,11 @@ def main() -> None:
         done = set(complete[complete == len(RULES)].index)
         rows = old[[(c, q) in done for c, q in zip(old.config, old.pair)]].to_dict("records")
         print(f"resume: {len(done)} configuration-pairs kept", flush=True)
-    for equalised in (True, False):
+    for equalised in ((True,) if a.ds_only else (True, False)):
         pairs = rb.ltl_pairs(a.run_root, equalised)
         for index, row in pairs.iterrows():
             pair = row.pair_id.replace("LTL331__", "")
-            names = [("rank256" if gm else "ranknm256") + "_noscale" + ("_ds" if equalised else "") + "_cos" for gm in (False, True)]
+            names = [name(gm, equalised) for gm in gms]
             if all((n, pair) in done for n in names):
                 continue
             s = ad.read_h5ad(rb.local(row.source_h5ad, a.run_root)); t = ad.read_h5ad(rb.local(row.target_h5ad, a.run_root))
@@ -81,14 +95,14 @@ def main() -> None:
             types = np.concatenate([ctype.loc[s.obs_names.astype(str)].to_numpy(), ctype.loc[t.obs_names.astype(str)].to_numpy()])
             sample_rng = np.random.default_rng(index)
             li, lj = sample_rng.integers(ns, size=200_000), sample_rng.integers(t.n_obs, size=200_000)
-            for gm in (False, True):
-                config = ("rank256" if gm else "ranknm256") + "_noscale" + ("_ds" if equalised else "") + "_cos"
+            for gm in gms:
+                config = name(gm, equalised)
                 if (config, pair) in done:
                     continue
                 ref = None
                 for rule, seed in RULES:
-                    enc, st = rb.rank_encode(joint, 256, gm, rule, seed)
-                    coords, _ = rb.pca_coordinates(enc, 2000, 30, False, True, rb.SEED + index)
+                    enc, st = rb.rank_encode(joint, K, gm, rule, seed)
+                    coords, _ = rb.pca_coordinates(enc, 2000, 30, False, cosine, rb.SEED + index)
                     X, Y = coords[:ns], coords[ns:]
                     scale = median_pair_scale(X, Y, rng=np.random.default_rng(rb.SEED + index * 104729))
                     costs = np.sum((X[li] - Y[lj]) ** 2, 1) / scale
@@ -96,7 +110,7 @@ def main() -> None:
                     member = (enc > 0).astype(np.float32)
                     r = {"config": config, "pair": pair, "tie_rule": rule, "seed": seed,
                          "median_tied_slots_at_cut": float(np.median(st.tied_slots_at_cut)),
-                         "median_fraction_of_top256_from_cut_ties": float(np.median(st.tied_slots_at_cut / 256)),
+                         f"median_fraction_of_top{K}_from_cut_ties": float(np.median(st.tied_slots_at_cut / K)),
                          "median_cut_tie_group_size": float(np.median(st.cut_tie_group_size)),
                          "median_cut_value": float(np.nanmedian(st.cut_value)),
                          "cells_with_cut_ties": float(np.mean(st.tied_slots_at_cut > 0)),
@@ -107,7 +121,7 @@ def main() -> None:
                         ref = {"member": member, "coords": coords, "costs": costs, "gs": gs, "gt": gt}
                     inter = np.asarray(member.multiply(ref["member"]).sum(1)).ravel()
                     union = np.asarray(member.sum(1)).ravel() + np.asarray(ref["member"].sum(1)).ravel() - inter
-                    r.update(top256_jaccard_vs_production_median=float(np.median(inter / np.maximum(union, 1))),
+                    r.update(**{f"top{K}_jaccard_vs_production_median": float(np.median(inter / np.maximum(union, 1)))},
                              pca_subspace_similarity_vs_production=rb.subspace_similarity(coords, ref["coords"]),
                              cost_spearman_vs_production=float(spearmanr(costs, ref["costs"])[0]),
                              source_knn_gate_kappa_vs_production=rb.kappa(gs, ref["gs"]),
