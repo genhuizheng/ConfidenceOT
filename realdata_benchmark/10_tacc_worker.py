@@ -2,9 +2,11 @@
 
     python realdata_benchmark/10_tacc_worker.py --worklist WORKLIST.tsv --registry REGISTRY.tsv --worker K --workers N
 
-Worklist columns (11_build_worklists.py): dataset (ltl331 | splatter), config_id, pair_index, pair_id, manifest (the
-original-count manifest), manifest_ds (the frozen equalised manifest, Splatter conditions_ds or LTL331 inputs/ds),
-run_root (LTL331 run root), converted (LTL331 converted dir), acceptance, out (this row's output directory).
+Worklist columns (11_build_worklists.py, splatter_n5000/31_build_n5000_worklist.py): dataset (ltl331 | splatter |
+splatter_n5000 | splatter_n5000_condition), config_id, pair_index, pair_id, manifest (the original-count manifest),
+manifest_ds (the frozen equalised manifest, Splatter conditions_ds or LTL331 inputs/ds), run_root (LTL331 run root),
+converted (LTL331 converted dir), acceptance, out (this row's output directory); for the N = 5,000 rows also
+truth_dir (the pair's 21_ truth) and fit_out (an existing fit to reuse, empty to fit here).
 A row whose out/SUCCESS exists is skipped (resubmission continues); a failed row writes out/FAILED with the exit code
 and the worker goes on.
 
@@ -110,6 +112,41 @@ def splatter_row(row, spec, out: Path) -> int:
         return subprocess.run(score, stdout=log, stderr=subprocess.STDOUT, env=env(), cwd=REPO).returncode
 
 
+def run_logged(cmd: list, log: Path) -> int:
+    with open(log, "w") as f:
+        return subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env(), cwd=REPO).returncode
+
+
+def n5000_row(row, spec, out: Path) -> int:
+    """Splatter N = 5,000 (L0-L5): fit unless the row names an existing fit (frozen L0-L2 rows), then IC-POT and Vanilla
+    UOT on the same cost (benchmark/50_solver_comparison.py, which reads the run's saved joint coordinates and checks
+    them against run.json before solving), then 23_row_extras.py (balanced OT, coupling metrics, DEG-B)."""
+    fit = Path(row.fit_out) if isinstance(row.fit_out, str) and row.fit_out else out
+    if fit == out and not (out / "score.csv").exists():
+        code = splatter_row(row, spec, out)
+        if code != 0:
+            return code
+    label = (fit / "fit_label.txt").read_text().strip()
+    for name, extra in (("icpot", ["--icpot-cost", "0.5"]), ("uot", ["--uot-only"])):
+        d = out / "comparators" / name
+        if (d / "solver_comparison.csv").exists():
+            continue
+        code = run_logged([sys.executable, str(REPO / "benchmark" / "50_solver_comparison.py"), str(fit / "manifest.csv"), str(d),
+                           "--index", str(int(row.pair_index)), "--preprocessing", label, "--confidenceot-root", str(fit / "runs"),
+                           "--scope", "all", "--seed", "20260925", *extra], out / f"comparator_{name}.log")
+        if code != 0:
+            return code
+    if not (out / "extras" / "coupling.tsv").exists():
+        return run_logged([sys.executable, str(HERE / "splatter_n5000" / "23_row_extras.py"), "--fit-out", str(fit), "--manifest", row.manifest,
+                           "--pair-index", str(int(row.pair_index)), "--truth", row.truth_dir, "--out", str(out / "extras")], out / "extras.log")
+    return 0
+
+
+def n5000_condition_row(row, out: Path) -> int:
+    return run_logged([sys.executable, str(HERE / "splatter_n5000" / "24_condition_deg.py"), "--manifest", row.manifest,
+                       "--pair-index", str(int(row.pair_index)), "--truth", row.truth_dir, "--out", str(out)], out / "deg_condition.log")
+
+
 def ltl331_row(row, out: Path, registry: Path) -> int:
     cmd = [sys.executable, str(HERE / "05_ltl331_ot_pilot.py"), "--run-root", row.run_root, "--converted", row.converted,
            "--registry", str(registry), "--out", str(out), "--pair-index", str(int(row.pair_index)), "--only", row.config_id, "--no-check"]
@@ -134,8 +171,12 @@ def main() -> None:
             continue
         (out / "FAILED").unlink(missing_ok=True)
         try:
-            spec = reg.loc[row.config_id].to_dict(); spec["config_id"] = row.config_id
-            code = ltl331_row(row, out, a.registry) if row.dataset == "ltl331" else splatter_row(row, spec, out)
+            if row.dataset == "splatter_n5000_condition":
+                code = n5000_condition_row(row, out)
+            else:
+                spec = reg.loc[row.config_id].to_dict(); spec["config_id"] = row.config_id
+                code = (ltl331_row(row, out, a.registry) if row.dataset == "ltl331" else
+                        n5000_row(row, spec, out) if row.dataset == "splatter_n5000" else splatter_row(row, spec, out))
         except Exception:
             code = -1; (out / "error.txt").write_text(traceback.format_exc())
         (out / ("SUCCESS" if code == 0 else "FAILED")).write_text(json.dumps({"config_id": row.config_id, "pair_id": row.pair_id, "exit": code}))

@@ -1,0 +1,22 @@
+worker 0 of 1: 2 rows
+splatter_n5000 N120_rep1_L2_depth_dropout_population_lost ranknm1024-expected|none|noscale|cos ok
+splatter_n5000_condition N120_rep1_L2_depth_dropout_population_lost nan ok
+ 
+PASS  row SUCCESS
+PASS  row scored by 40_score (M4-E, M4-R)
+PASS  IC-POT and Vanilla UOT on the same cost  (['method', 'side', 'score_kind', 'binary_decision_from', 'fixed_cutoff', 'score_is_binary'])
+PASS  coupling metrics for M4-E, M4-R, balanced full and balanced on the retained block
+PASS  DEG-B per side, truth comparison on the source side  (     side  rejected_n  retained_n  median_nCount_rejected  median_nCount_retained  median_nFeature_rejected  median_nFeature_retained  auc_nCount_rejected  auc_nFeature_rejected                                status
+0  source           9         591                  7855.0                  7296.0                     366.0                     365.0             0.589773               0.531115  not_estimable: < 20 cells in a group
+1  target           3         477                  6262.0                  7280.0                     358.0                     364.0             0.378756              )
+PASS  condition row: DEG-A, DEG-C and DEG-D  (                              contrast   group  truth_auroc  biological_auroc  technical_auroc
+0            DEG-A unmatched vs shared  Group5     0.923244               NaN              NaN
+1   DEG-C target vs source (all cells)     NaN          NaN               NaN              NaN
+2  DEG-D shared group target vs source  Group1          NaN          0.903992         0.721307
+3  DEG-D shared group target vs source  Group2          NaN               NaN         0.778824
+4  DEG-D shared group target vs source  Group3          NaN               NaN         0.767096
+5  DEG-D shared group target vs source  Group4          NaN               NaN         0.758898)
+PASS  a rerun skips finished rows  (worker 0 of 1: 2 rows
+)
+
+7 passed, 0 failed

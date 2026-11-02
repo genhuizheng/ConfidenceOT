@@ -136,3 +136,17 @@ Table 1 names `benchmark_technical` as Arm A's TACC root. That is the superseded
 `populations_disjoint`; not archived, `benchmark/ARCHIVE_MANIFEST.md`). Arm A is `benchmark_native`, the original
 benchmark with all four cases (all_shared, population_lost, population_emerged, populations_disjoint). Found from the
 first worklist (2,592 rows, no disjoint pairs) before any Splatter fit; that worklist is set aside, not used.
+
+## Dated extension, 2026-11-01: Splatter N = 5,000, cumulative levels L0-L5 (user)
+
+Organised as cumulative levels instead of separate stages; each level inherits every factor of the one before and
+adds one; values fixed in `splatter_n5000/20_generate_n5000.R` before any L3-L5 fit:
+- L0-L2: the frozen native definitions (matched; target depth x 0.5; + target dropout), regenerated with the same seeds
+  and checked against the native generation; their frozen fits are reused when identical.
+- L3 = L2 + batch effect (Splatter batch factors, expected squared per-gene log shift 0.5 D, D = 2 de.prob
+  (de.facLoc^2 + de.facScale^2)); L4 = L3 + target perturbation of shared Group1 (label kept, 0.5 D); L5 = L4 + target
+  proportions 0.40 / 0.25 / 0.15 / 0.12 / 0.08; ablations A4 = L2 + perturbation, A5 = L2 + imbalance.
+- L3-L5 and the ablations use L2's seed (paired). N = 5,000 cells per side, Cases 1 / 2 (both directions) / 3,
+  replicates 1-3; eight configurations (the four R4 / R5 representatives at DS none and P10 seed 1, cosine, noscale).
+- Per row IC-POT (c = 0.5, the literature value) and Vanilla UOT on the same cost besides M4-E / M4-R / balanced OT;
+  DEG-A / B / C / D against the simulator's truth (21_ / 23_ / 24_).
