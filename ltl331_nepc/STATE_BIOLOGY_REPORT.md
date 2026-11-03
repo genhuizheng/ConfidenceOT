@@ -1,6 +1,7 @@
 # LTL331 state-level readout of ConfidenceOT (Non-Harmony branch; author-Harmony branch audited, fits pending)
 
-Written 2026-11-01. Tables: `results/ltl331_nepc/state_biology_20261101/nonharmony_v3/` (10_state_biology.py) and
+Written 2026-11-01, coupling section 2026-11-02. Tables: `results/ltl331_nepc/state_biology_20261101/nonharmony_v4/`
+(10_state_biology.py; v3 for the same retention and signature tables, couplings of two labels only) and
 `signatures_v1/` (11_signature_scores.py), from the existing gates of all 64 fitted configurations
 (`PDX_CELL_GATES.tsv.gz`, 7 adjacent pairs, M4-E and M4-R). Nothing was refitted, and no configuration was excluded for
 calibration, convergence or depth; those are columns. A gate says which cells have, or lack, a counterpart in the
@@ -105,17 +106,52 @@ configurations with that sign.
 These are associations between a gate and an expression program within one tumour. Cells are not replicates; the
 configuration share is a robustness count, not a p-value.
 
-## 4. State-to-state coupling
+## 4. State-to-state coupling (all 64 configurations; nonharmony_v4/STATE_COUPLING.tsv)
 
-- Enrichment = mass × total / (row mass × column mass), so 1 is what the two state marginals alone give.
-- Only the two frozen labels (ranknm256_noscale_ds_cos, logcpm) have couplings locally. The 64-configuration export is a
-  TACC job (`submit_author_harmony.sh nonharmony-export`).
-- In those two labels the diagonal is strongly enriched, for example:
-  - 12→16: ASCL1+→ASCL1+ 18.6×, intermediate→intermediate 18.6×;
-  - 16→20: intermediate→intermediate 8.5×, intermediate→early ASCL1− 2.7×.
-- States with very few cells (e.g. intermediate at 22 weeks, 2 cells) give unstable ratios and are read with their cell
-  counts.
-- No transition is required to carry mass.
+- **Source of the couplings:** `PDX_STATE_COUPLING.tsv.gz`, TACC job 1117157. All 448 fits (64 configurations × 7
+  pairs) were read, and none was missing.
+- **Enrichment** = mass × total / (row mass × column mass), so 1 is what the two state marginals alone give. Each
+  finding is for M4-E, in the retained block: median enrichment over configurations (interquartile range), the share
+  of configurations with enrichment > 1, and P(target state | source state).
+- **Cell counts:** a state that is absent from the retained block in a configuration has no ratio there, so some rows
+  cover fewer than 64 configurations. States with few cells give wide ranges; read them with their counts.
+- **Upper bound:** when one target state dominates, as terminal ASCL1− does at 22 weeks, enrichment cannot exceed
+  1 / its share. A small ratio there is not a weak correspondence.
+
+| Pair | Source → target | Median (IQR) | > 1 | P(target given source) | Configurations |
+|---|---|---|---|---|---|
+| 8→12 | intermediate → intermediate | 23.6 (16.7–38.1) | 100% | 0.12 | 52 |
+| 8→12 | ASCL1+ → intermediate | 7.6 (5.1–10.7) | 94% | 0.04 | 62 |
+| 12→16 | ASCL1+ → ASCL1+ | 13.2 (10.7–23.8) | 100% | 0.60 | 64 |
+| 12→16 | intermediate → intermediate | 10.4 (7.9–15.4) | 100% | 0.24 | 64 |
+| 12→16 | ASCL1+ → intermediate | 1.50 (1.24–1.77) | 83% | 0.04 | 64 |
+| 12→16 | intermediate → ASCL1+ | 1.05 (0.91–1.38) | 56% | 0.05 | 64 |
+| 16→20 | intermediate → early ASCL1− | 3.26 (2.45–4.22) | 100% | 0.17 | 63 |
+| 16→20 | intermediate → NEPC other | 2.29 (1.36–3.13) | 95% | 0.13 | 63 |
+| 16→20 | intermediate → terminal ASCL1− | 1.15 (0.97–1.38) | 74% | 0.14 | 62 |
+| 16→20 | ASCL1+ → ASCL1+ | 1.13 (1.02–1.32) | 98% | 0.81 | 64 |
+| 16→20 | ASCL1+ → terminal ASCL1− | 0.89 (0.75–0.99) | 13% | 0.13 | 63 |
+| 20→22 | early ASCL1− → early ASCL1− | 9.10 (6.78–10.45) | 100% | 0.32 | 64 |
+| 20→22 | intermediate → early ASCL1− | 5.14 (3.76–7.18) | 100% | 0.20 | 54 |
+| 20→22 | terminal ASCL1− → terminal ASCL1− | 1.20 (1.19–1.22) | 100% | 0.86 | 64 |
+| 20→22 | ASCL1+ → terminal ASCL1− | 1.06 (1.05–1.07) | 100% | 0.74 | 64 |
+| 20→22 | ASCL1+ → early ASCL1− | 0.75 (0.71–0.84) | 0% | 0.03 | 64 |
+
+- **Same state on both sides:** every state present on both sides is enriched in 89–100% of configurations at every
+  pair. The pre-EMT diagonal ranges from 2.8× (12→16) to 15.8× (2→4).
+- **Leaving a state:**
+  - 16→20: the intermediate EMT-like cells of 16 weeks correspond above independence to early ASCL1− at 20 weeks
+    (100% of configurations). Their correspondence to terminal ASCL1− is weaker (74%).
+  - 20→22: the ASCL1+ cells of 20 weeks sit mostly in terminal ASCL1− at 22 weeks (P 0.74, enrichment 1.06 in every
+    configuration, near the bound set by terminal ASCL1−'s share). Their correspondence to early ASCL1− is below
+    independence in every configuration.
+- **Frozen labels:** the two frozen labels of v3 sit inside the full range over configurations, though not always
+  inside the interquartile range. ranknm256_noscale_ds_cos is below the median and logcpm above it. For example, at
+  12→16 intermediate → intermediate is 6.1× in ranknm256_noscale_ds_cos and 31.2× in logcpm, against a range of
+  3.0–218 over configurations. The size of an enrichment therefore depends on the preprocessing; its direction (above
+  or below 1) is the robust part.
+- **What this is not:** these are correspondences between expression states at two time points, not transitions of
+  cells. No transition is required to carry mass.
 
 ## 5. Author-provided Harmony branch (pending)
 
