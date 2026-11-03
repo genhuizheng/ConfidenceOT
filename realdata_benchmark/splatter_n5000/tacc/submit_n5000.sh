@@ -1,7 +1,7 @@
 #!/bin/bash
 # Splatter N = 5,000 benchmark, levels L0-L5 + ablations, on TACC. The user submits; nothing runs by itself.
 #
-#   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] chain
+#   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--param-set S] [--procs P] chain
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] cleanup-audit
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] generate
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] worklist
@@ -10,10 +10,12 @@
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] f1
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--pilot] status
 #
-# chain          generate -> worklist (afterok every generation job) -> run (afterok the worklist job) -> collect
-#                (afterany every run job, so failed rows are still collected and listed). A failed generation or
-#                worklist leaves the later jobs in DependencyNeverSatisfied: cancel them. --pilot: replicate 1, the
-#                18-row pilot worklist, 1 node, the _PILOT tables.
+# chain          everything in one submission: generate -> worklist (afterok every generation job) -> run (afterok
+#                the worklist job) -> collect (afterany every run job, so failed rows are still collected and listed)
+#                -> f1 (afterok collect); beside it the batch-effect audit (batch_effect_audit.slurm, afterok every
+#                generation job, read only). A failed generation or worklist leaves the later jobs in
+#                DependencyNeverSatisfied: cancel them. --pilot: replicate 1, the 18-row pilot worklist, 1 node, the
+#                _PILOT tables (no audit).
 # cleanup-audit  one short job, read-only: TACC_CLEANUP_MANIFEST.tsv of the old Splatter directories; deletes nothing
 # generate       one gg job per replicate (generate_n5000.slurm): 8 levels, L0-L2 checked against the native
 #                generation, conditions + truth. A generation job exits non-zero if any level fails.
@@ -21,16 +23,20 @@
 # run            N nodes (default 4 x 6 h; pilot 1 x 3 h) of realdata_benchmark/tacc/benchmark_workers.slurm
 # collect        one short job: 32_collect_n5000.py (--pilot: the _PILOT tables)
 # f1             one short job: 33_f1_summary.py on the collected tables (SPLATTER_N5000_F1_ROWS / F1_SUMMARY, --pilot:
-#                _PILOT); the chain does not submit it
+#                _PILOT); also the last job of chain
 # --after IDS    colon-separated job ids this stage waits for (afterok; collect: afterany)
 # --param-set S  benchmark (default; the frozen run, root splatter_n5000_benchmark_20261101) or splatter_default (every
 #                Splatter parameter at its installed default, 20_generate_n5000.R; own root splatter_n5000_default_20261103
 #                unless RB5_ROOT is set; the frozen root is refused for it)
+# --procs P      workers per run node (default 18 on gg, 9 on gh). Each worker runs one row; only the calibration is
+#                threaded (up to 5 null fits at once), the final M4-E / M4-R fits, comparators and extras are single
+#                threaded, so 18 workers keep about a quarter of a gg node busy; more workers fill it (memory about
+#                2-3 GB per N = 5,000 row)
 # --partition P  gg (default, every stage) or gh-dev / gh (72 cores, so 9 workers per node; gh-dev's 2 h limit clips
 #                the job times and limits pilot generation to the two levels it reads, L2_depth_dropout and L4_batch_perturb)
 # No set -e / -u / pipefail (TACC rules). Root is versioned; frozen roots are read only.
 
-dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""; param_set=benchmark
+dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""; param_set=benchmark; procs_opt=""
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -40,6 +46,7 @@ while (( $# )); do
         --after) after=$2; shift 2 ;;
         --partition) partition=$2; shift 2 ;;
         --param-set) param_set=$2; shift 2 ;;
+        --procs) procs_opt=$2; shift 2 ;;
         chain|cleanup-audit|generate|worklist|run|status|collect|f1) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -66,6 +73,7 @@ case $partition in
     gh) cores=72; procs=9; max_hours=48 ;;
     *) echo "unknown partition $partition" >&2; exit 2 ;;
 esac
+[[ -n "$procs_opt" ]] && procs=$procs_opt
 part=(-p "$partition" -c "$cores")
 clip() { if (( $1 > max_hours )); then echo "$max_hours"; else echo "$1"; fi; }
 
@@ -121,13 +129,27 @@ do_collect() {  # $1 ids to wait for (afterany)
     echo "collect job $id${1:+ (after $1)}" >&2; echo "$id"
 }
 
+do_f1() {  # $1 ids to wait for (afterok)
+    local id; id=$(submit $(dep_args afterok "$1") -p "$partition" -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb5_f1 -o "$root/logs/f1_%j.out" \
+        --wrap "$activate && python realdata_benchmark/splatter_n5000/33_f1_summary.py --root $root $pilot_flag") || return 1
+    echo "F1 summary job $id${1:+ (after $1)} -> $root/SPLATTER_N5000_F1_SUMMARY${pilot_flag:+_PILOT}.tsv" >&2; echo "$id"
+}
+do_audit() {  # $1 ids to wait for (afterok)
+    local id; id=$(submit $(dep_args afterok "$1") -o "$root/logs/batch_audit_%j.out" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB5_ROOT="$root" \
+        "$repo/realdata_benchmark/splatter_n5000/tacc/batch_effect_audit.slurm") || return 1
+    echo "batch audit job $id${1:+ (after $1)} -> $root/BATCH_EFFECT_AUDIT_<date>" >&2; echo "$id"
+}
+
 case $stage in
 chain)
     [[ -f "$wl" ]] && { echo "$wl exists: the chain would not rebuild it; submit run / collect on their own" >&2; exit 2; }
     g=$(do_generate) || exit 1
     w=$(do_worklist "$g") || exit 1
+    (( pilot )) || do_audit "$g" > /dev/null || exit 1
     r=$(do_run "$w") || exit 1
-    do_collect "$r" > /dev/null || exit 1
+    c=$(do_collect "$r") || exit 1
+    do_f1 "$c" > /dev/null || exit 1
     ;;
 cleanup-audit)
     id=$(submit -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J rb5_audit -o "$root/logs/cleanup_audit_%j.out" \
@@ -138,11 +160,7 @@ generate) do_generate > /dev/null || exit 1 ;;
 worklist) do_worklist "$after" > /dev/null || exit 1 ;;
 run) do_run "$after" > /dev/null || exit 1 ;;
 collect) do_collect "$after" > /dev/null || exit 1 ;;
-f1)
-    id=$(submit $(dep_args afterok "$after") -p "$partition" -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb5_f1 -o "$root/logs/f1_%j.out" \
-        --wrap "$activate && python realdata_benchmark/splatter_n5000/33_f1_summary.py --root $root $pilot_flag") || exit 1
-    echo "F1 summary job $id -> $root/SPLATTER_N5000_F1_SUMMARY${pilot_flag:+_PILOT}.tsv"
-    ;;
+f1) do_f1 "$after" > /dev/null || exit 1 ;;
 status)
     [[ -f "$wl" ]] || { echo "no worklist at $wl"; exit 0; }
     rows=0; done_n=0; fail_n=0
