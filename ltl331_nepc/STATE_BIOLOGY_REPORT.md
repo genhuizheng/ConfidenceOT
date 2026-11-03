@@ -1,6 +1,6 @@
-# LTL331 state-level readout of ConfidenceOT (Non-Harmony branch; author-Harmony branch audited, fits pending)
+# LTL331 state-level readout of ConfidenceOT (Non-Harmony and author-Harmony branches)
 
-Written 2026-11-01, coupling section 2026-11-02. Tables: `results/ltl331_nepc/state_biology_20261101/nonharmony_v4/`
+Written 2026-11-01, coupling section 2026-11-02, author-Harmony section 2026-11-03 (`both_v1/`, below). Tables: `results/ltl331_nepc/state_biology_20261101/nonharmony_v4/`
 (10_state_biology.py; v3 for the same retention and signature tables, couplings of two labels only) and
 `signatures_v1/` (11_signature_scores.py), from the existing gates of all 64 fitted configurations
 (`PDX_CELL_GATES.tsv.gz`, 7 adjacent pairs, M4-E and M4-R). Nothing was refitted, and no configuration was excluded for
@@ -153,7 +153,7 @@ configuration share is a robustness count, not a p-value.
 - **What this is not:** these are correspondences between expression states at two time points, not transitions of
   cells. No transition is required to carry mass.
 
-## 5. Author-provided Harmony branch (pending)
+## 5. Author-provided Harmony branch
 
 - **What the authors' Harmony is** (Additional files 1 §6.2 and 2 Table S9): a joint integration of LTL331 with the Gao
   and Li tumour-epithelium cohorts, by cohort (theta 2, max_iter 10, human one-to-one orthologs, Leiden res 0.55, 27
@@ -180,3 +180,86 @@ configuration share is a robustness count, not a p-value.
   - **Difference from Non-Harmony:** 30 Harmony dimensions from a 3,000-HVG, three-cohort PCA, against every
     Non-Harmony configuration's own genes and dimensions; the same 51,726 cells and the same frozen equalised
     manifest.
+
+### 5.1 Fits and checks (TACC jobs 1117154-1117156, 2026-11-02; `both_v1/`, 2026-11-03)
+
+- **Fits:** 2 configurations (`author_harmony|X_harmony_dataset|cos` and `|sqeuc`) × 7 pairs × M4-E / M4-R = 28 fits,
+  14 of 14 rows SUCCESS.
+- **Same cells as Non-Harmony:** for every pair, side and method the Harmony gates hold exactly the cells of the
+  Non-Harmony gates, one set for all 64 configurations. The branches differ only in the representation.
+- **Calibration (diagnostic only):** held-out acceptance reaches 0.99 in 12 of 14 calibrations. The two short ones are
+  cos at 4→8 (source 0.9890) and cos at 16→20 (source 0.9899). M4-E converges in all 14 fits, M4-R in 1 of 14.
+  Nothing is excluded.
+- **Coupling export:** total plan mass 0.72–0.83, the same range as Non-Harmony (0.70–0.83).
+- **Code check:** `both_v1/` was run with both branches; its Non-Harmony rows equal `nonharmony_v4/` exactly
+  (STATE_RETENTION, ROBUSTNESS, COUPLING_ROBUSTNESS, SIGNATURE_ROBUSTNESS; maximum absolute difference 0).
+
+### 5.2 Comparison with the Non-Harmony branch (M4-E)
+
+How to read it: Non-Harmony gives a distribution over 64 configurations, Harmony gives two values (cos, sqeuc). For
+each quantity the question is whether the Harmony value has the same direction as the Non-Harmony median, and
+whether it falls inside the Non-Harmony range. "Robust in Non-Harmony" means one direction in at least 90% of the 64
+configurations.
+
+| Readout | Robust in Non-Harmony | Same direction, cos | Same direction, sqeuc | Inside Non-Harmony range (cos / sqeuc) |
+|---|---|---|---|---|
+| State retention vs rest of side | 34 state × side × pair | 32 | 27 | 27 / 26 |
+| State coupling (retained block, > or < 1) | 82 state pairs | 77 | 75 | 40 / 48 |
+| Program contrast, retained − rejected | 79 state × program × side × pair | 62 of 77 | 60 of 75 | 58 / 56 |
+
+(Program contrasts: two to four rows have too few cells on one side of the Harmony gate to be estimated.)
+
+**Every same-state diagonal is enriched in both Harmony fits** (23 of 23, as in Non-Harmony).
+
+**Findings of sections 2-4 that hold in both Harmony fits:**
+- **16→20, 16 weeks:** ASCL1+ is retained far above the rest (cos +0.91, sqeuc +0.73; Non-Harmony median +0.84).
+  NE is higher and PRAD/AR lower in retained cells (NE +0.115 / +0.115, PRAD/AR −0.075 / −0.087; Non-Harmony +0.089,
+  −0.072).
+- **16→20, 20 weeks:** terminal ASCL1− is retained below the rest (−0.61 / −0.48), and ASCL1+ above it.
+- **20→22, 20 weeks:** terminal ASCL1− is retained above the rest (+0.63 / +0.60), NEPC other above it, and ASCL1+
+  below it (−0.42 / −0.38). Within ASCL1+, NE is lower in retained cells (−0.081 / −0.079; Non-Harmony −0.056).
+- **0→2, preCx:** rejected cells carry more PRAD/AR program (−0.122 / −0.139; Non-Harmony −0.150).
+- **12→16, 12 weeks:** retained intermediate cells carry more EMT (+0.121 / +0.163; Non-Harmony +0.119).
+- **Couplings:**
+  - 12→16: ASCL1+ → ASCL1+ and intermediate → intermediate are enriched, much more than the Non-Harmony medians
+    (73× / 163× and 79× / 158×; Non-Harmony 13× and 10×, maxima 71× and 218×). The ASCL1+ diagonal exceeds every
+    Non-Harmony configuration in both fits.
+  - 16→20: intermediate → early ASCL1− is enriched (21× / 25×; Non-Harmony 3.3×, range 1.2–10.2).
+  - 20→22: ASCL1+ → terminal ASCL1− is above 1 (1.18 / 1.15; P 0.84 / 0.81), and ASCL1+ → early ASCL1− below 1
+    (0.23 / 0.37).
+
+**Where Harmony differs:**
+- **12→16, 16 weeks (target):** Non-Harmony retains ASCL1+ (+0.27, 97% of configurations) and intermediate cells
+  (+0.29, 100%) above the rest.
+  - Harmony: ASCL1+ is below the rest in both fits (−0.09 / −0.24), and intermediate is +0.04 / −0.11.
+  - Retained fractions: ASCL1+ 0.63 / 0.15 and intermediate 0.76 / 0.28, against Non-Harmony 0.93 and 0.96.
+  - The Section 2 statement that 16-week intermediate and ASCL1+ cells are retained does not hold in this branch.
+- **12→16, 12 weeks (source):** ASCL1+ is above the rest with cos (+0.30) and below it with sqeuc (−0.12).
+- **Couplings between different states with few cells, near zero in Harmony:**
+  - ASCL1+ → intermediate at 8→12 (0.01 / 0.00; Non-Harmony 7.6×, 94%);
+  - ASCL1+ → intermediate at 12→16 with cos (0.04; Non-Harmony 1.50×);
+  - intermediate → terminal ASCL1− at 16→20 (0.31 / 0.15; Non-Harmony 1.15×, 74%).
+  - Harmony couples each of these states to itself more tightly (12→16 P(ASCL1+ | ASCL1+) 0.95 / 0.53, Non-Harmony
+    0.60), so less mass is left for other states.
+- **8→12 intermediate → intermediate:** not estimable in Harmony. The single intermediate cell of 8 weeks is rejected
+  in both fits, so the 23.6× of Non-Harmony rests on one cell.
+- **20→22, 22 weeks (target):** Harmony retains almost the whole side (0.97 / 0.99; Non-Harmony 0.77, range
+  0.65–0.995). Its small AR-low PRAD (38 cells) and pre-EMT (4 cells) groups are retained at 0.11 / 0.40 and 0.
+  Early ASCL1− is +0.17 above the rest in Non-Harmony (97%), −0.10 / −0.05 in Harmony.
+- **Side-level retention:** Harmony retains more of the target than the Non-Harmony median at five of the seven pairs
+  (for example 2→4 target 0.98 / 0.99 vs 0.85). At 12→16 the sqeuc fit retains only 0.38 of the target.
+
+### 5.3 What this means
+
+- **The robust part is shared.** Where Non-Harmony is consistent across its 64 configurations, Harmony agrees in
+  direction in most cases (retention 32 / 27 of 34; coupling 77 / 75 of 82). This includes:
+  - the ASCL1+ correspondence from 16 to 20 weeks;
+  - the shift of retention from ASCL1+ to terminal ASCL1− at 20→22;
+  - the PRAD/AR and NE program contrasts.
+- **Magnitudes differ.** Harmony values often lie outside the Non-Harmony range, and same-state couplings are larger.
+- **One statement depends on the branch:** the retention of intermediate and ASCL1+ cells at 16 weeks (12→16 target).
+- **Why the branches differ cannot be separated here.** The Harmony branch changes the correction, the genes (the
+  joint object's 3,000 HVGs), the joint PCA and the dimension (30) at once, and has 2 configurations against 64.
+- **Possible control, not run:** the authors' uncorrected joint `X_pca` is in the same object. It would separate the
+  Harmony correction from the joint gene space.
+- Both branches are reported side by side. Neither is the reference for the other.
