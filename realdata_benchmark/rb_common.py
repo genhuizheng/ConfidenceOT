@@ -16,6 +16,13 @@ which breaks ties by numpy's stable argsort over each row's entries in their STO
                 values of the slots the group occupies, and a group straddling the top-N cut shares the slots it is
                 competing for, each member receiving (mean slot value) x (slots / group size). Deterministic, and does
                 not depend on gene order.
+  midrank       (added 2026-11-03, preprocessing factorial) tied genes share their mean rank: a group at 0-based
+                positions st .. st + n - 1 has mean position p = st + (n - 1) / 2 and every member gets 1 - p / N, or 0
+                when p >= N. Equal to expected for a group wholly inside the top N; at a straddling group expected
+                spreads the slots it wins over all members, midrank gives each member the value at the group's mean
+                rank (so a straddling group can put more than N genes above 0).
+rankhvg_encode takes production (the joint matrix's stored entry order, as rank_encode production), expected (slot
+average over random tie-breaking) and midrank / order; with no top-N cut, expected equals midrank exactly.
 """
 
 from __future__ import annotations
@@ -89,9 +96,9 @@ def scaled_for_rank(joint: sp.csr_matrix, gene_median: bool, sort: bool) -> sp.c
 
 
 def rank_encode(joint: sp.csr_matrix, top_n: int, gene_median: bool, rule: str = "production", seed: int = 0):
-    """Rank encoding with an explicit tie rule (production / alphabetical / random / expected); also per-cell tie
-    statistics at the top-N cut."""
-    if rule not in ("production", "alphabetical", "random", "expected"):
+    """Rank encoding with an explicit tie rule (production / alphabetical / random / expected / midrank); also per-cell
+    tie statistics at the top-N cut."""
+    if rule not in ("production", "alphabetical", "random", "expected", "midrank"):
         raise ValueError(rule)
     s = scaled_for_rank(joint, gene_median, sort=rule == "alphabetical")
     rng = np.random.default_rng(seed)
@@ -117,14 +124,20 @@ def rank_encode(joint: sp.csr_matrix, top_n: int, gene_median: bool, rule: str =
             sel = order[:keep]
             rows.append(np.full(keep, i)); cols.append(g[sel]); vals.append(slot[:keep])
             continue
-        # expected over random tie-breaking
+        # expected over random tie-breaking, or midrank
         _, start, counts = np.unique(-dv, return_index=True, return_counts=True)
         for st, n in zip(start, counts):
             if st >= keep:
                 break
             members = g[order[st:st + n]]
-            taken = min(n, keep - st)
-            value = slot[st:st + taken].mean() * taken / n
+            if rule == "midrank":
+                p = st + (n - 1) / 2.0
+                if p >= top_n:
+                    continue
+                value = 1.0 - p / float(top_n)
+            else:
+                taken = min(n, keep - st)
+                value = slot[st:st + taken].mean() * taken / n
             rows.append(np.full(n, i)); cols.append(members); vals.append(np.full(n, value))
     enc = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=s.shape)
     stats = pd.DataFrame({"tied_slots_at_cut": tied_slots, "cut_tie_group_size": cut_group, "cut_value": cut_value,
@@ -200,11 +213,18 @@ def production_label(enc: str, K: int, scale: bool, ds: bool, cost: str) -> str 
 def rankhvg_encode(joint_counts: sp.csr_matrix, H: int, rule: str):
     """Rank-HVG: H genes of highest variance of log1p(1e4 x count / total) over both sides; within them each cell's
     expressed genes ranked by count (descending), value 1 - (r - 1) / H, zeros stay 0. rule 'midrank': ties share
-    their average rank; 'order': ties keep column order (keys sorted as strings), to measure gene-order sensitivity."""
+    their average rank; 'order': ties keep column order (keys sorted as strings), to measure gene-order sensitivity;
+    'production': ties keep the stored entry order of joint_counts[:, hvg] (rank_encode's production mechanism);
+    'expected': each tie group gets the mean of the slot values it occupies (average over random tie-breaking), which
+    with no top-N cut equals midrank."""
+    if rule not in ("midrank", "order", "production", "expected"):
+        raise ValueError(rule)
     totals = np.asarray(joint_counts.sum(axis=1)).ravel()
     ln = sp.csr_matrix(sp.diags(1e4 / np.maximum(totals, 1.0)) @ joint_counts); ln.data = np.log1p(ln.data)
     hvg = top_variance(ln, min(H, joint_counts.shape[1]))
-    sub = sp.csr_matrix(joint_counts[:, hvg]); sub.sort_indices()
+    sub = sp.csr_matrix(joint_counts[:, hvg])
+    if rule != "production":
+        sub.sort_indices()
     vals = np.empty_like(sub.data, dtype=np.float64)
     for i in range(sub.shape[0]):
         a, b = sub.indptr[i], sub.indptr[i + 1]
@@ -213,12 +233,20 @@ def rankhvg_encode(joint_counts: sp.csr_matrix, H: int, rule: str):
         d = sub.data[a:b]
         if rule == "midrank":
             r = pd.Series(-d).rank(method="average").to_numpy()
-        elif rule == "order":
+        elif rule in ("order", "production"):
             r = np.empty(d.size); r[np.argsort(-d, kind="stable")] = np.arange(1, d.size + 1)
-        else:
-            raise ValueError(rule)
+        else:  # expected: mean slot value of each tie group's positions
+            order = np.argsort(-d, kind="stable"); dv = d[order]
+            slot = 1.0 - np.arange(d.size, dtype=np.float64) / H
+            v = np.empty(d.size)
+            _, start, counts = np.unique(-dv, return_index=True, return_counts=True)
+            for st, n in zip(start, counts):
+                v[order[st:st + n]] = slot[st:st + n].mean()
+            vals[a:b] = v
+            continue
         vals[a:b] = 1.0 - (r - 1.0) / H
     enc = sp.csr_matrix((vals, sub.indices.copy(), sub.indptr.copy()), shape=sub.shape)
+    enc.sort_indices()
     return enc, hvg
 
 
