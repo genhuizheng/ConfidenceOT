@@ -6,8 +6,8 @@ by level x case x configuration x method. Reads the tables of 32_collect_n5000.p
 F1 is the convention of benchmark/58_summarise_arms.directional_f1 (imported): 2PR / (P + R) from 40_score.py's
 precision and recall of rejection, 0 when the side holds cells to reject and none was rejected. One addition: a side
 with nothing to reject has no F1 (NaN; it is never averaged in), which is Case 1 on both sides and the shared side of
-Case 2. The comparators (IC-POT, Vanilla UOT; solver_comparison.csv, one row per method and side) carry their deployable
-fixed-cutoff precision / recall, put through the same rule.
+Case 2. The comparators (IC-POT, Vanilla UOT; solver_comparison.csv, one row per method and side, its repeated
+ConfidenceOT M4-E rows dropped) carry their deployable fixed-cutoff precision / recall, put through the same rule.
 Per case the reading is: Case 1 (all shared) false rejection rate; Case 2 (one side holds an unmatched population) F1
 of that side, the primary scenario, with precision / recall to explain it and the false rejection rate of the other
 side; Case 3 (nothing shared) recall.
@@ -66,7 +66,8 @@ def main() -> None:
         for c in ("precision", "recall", "false_rejection_rate"):
             x[c] = cot[f"{side}_{c}"].to_numpy()
         rows.append(x)
-    comp = g[g.solver_family != "ConfidenceOT"]
+    # solver_comparison.csv repeats ConfidenceOT M4-E beside each comparator: the ConfidenceOT rows above already hold it
+    comp = g[(g.solver_family != "ConfidenceOT") & ~g.method.astype(str).str.startswith("ConfidenceOT")]
     if len(comp):
         x = comp[KEYS + ["method", "side", "solver_family"]].copy()
         wide = pd.DataFrame({"biological_case": "population_lost", "source_precision": comp.fixed_precision.to_numpy(),
