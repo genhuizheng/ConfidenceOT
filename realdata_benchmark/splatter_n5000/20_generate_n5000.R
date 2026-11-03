@@ -3,7 +3,18 @@
 # (benchmark/tacc/10_generate_splatter_native.R, route D: same seeds, same route, same output files).
 #
 #   benchmark/tacc/rscript.sh realdata_benchmark/splatter_n5000/20_generate_n5000.R --out DIR --n 5000 \
-#       --replicate R --level LEVEL --seed S
+#       --replicate R --level LEVEL --seed S [--param-set benchmark | splatter_default]
+#
+# --param-set (added 2026-11-03; default benchmark = the frozen L0-L5 of splatter_n5000_benchmark_20261101):
+#   benchmark         the values written below: batch.facLoc 0, batch.facScale sqrt(0.5 D / 2), target-only dropout
+#                     with dropout.mid 1.0 (--dropout-mid-target), dropout.shape -1.
+#   splatter_default  every Splatter parameter at the installed package's newSplatParams() default, read at run time
+#                     and recorded: a level with batch uses the default batch.facLoc / batch.facScale (0 / 0 when the
+#                     level has no batch, so the factor is absent); a level with dropout uses dropout.type "experiment"
+#                     with the default dropout.mid / dropout.shape on BOTH sides; lib.loc / lib.scale are the defaults.
+#                     Kept as design factors: the target depth (lib.loc + log 0.5, L1), the Group1 perturbation
+#                     (drawn from the default DE parameters, as below) and the L5 target proportions. L0 and L1 are the
+#                     same simulation under either set (no batch, no dropout).
 #
 # N semantics, as the native benchmark: --n is cells PER SIDE (batchCells = c(N, N)); source = batch 1 of the deep
 # call, target = batch 2 of the shallow call. N = 5,000 means 5,000 source + 5,000 target cells. Recorded.
@@ -48,6 +59,8 @@ replicate <- as.integer(value_of("--replicate", "1"))
 level <- value_of("--level", "L0_matched")
 groups <- as.integer(value_of("--groups", "5"))
 seed <- as.integer(value_of("--seed", "20260925"))
+param_set <- value_of("--param-set", "benchmark")
+if (!(param_set %in% c("benchmark", "splatter_default"))) stop("--param-set must be benchmark or splatter_default")
 lib_loc <- as.numeric(value_of("--lib-loc", "11.0"))
 lib_scale <- as.numeric(value_of("--lib-scale", "0.2"))
 depth_ratio <- as.numeric(value_of("--depth-ratio", "0.50"))
@@ -71,20 +84,30 @@ if (file.exists(file.path(out, "GENERATION_DONE"))) stop(paste(out, "already gen
 dir.create(out, recursive = TRUE, showWarnings = FALSE)
 
 target_ratio <- if (sp$depth) depth_ratio else 1.0
-target_dropout <- if (sp$dropout) dropout_mid_target else NA_real_
-lib_loc_target <- lib_loc + log(target_ratio)
 ref <- newSplatParams()
+if (param_set == "splatter_default") {
+  lib_loc <- getParam(ref, "lib.loc"); lib_scale <- getParam(ref, "lib.scale")
+  dropout_mid_target <- getParam(ref, "dropout.mid"); dropout_shape <- getParam(ref, "dropout.shape")
+}
+lib_loc_target <- lib_loc + log(target_ratio)
+target_dropout <- if (sp$dropout) dropout_mid_target else NA_real_
+source_dropout <- if (sp$dropout && param_set == "splatter_default") dropout_mid_target else NA_real_
 de_prob <- getParam(ref, "de.prob"); de_loc <- getParam(ref, "de.facLoc"); de_scale <- getParam(ref, "de.facScale")
 de_down <- getParam(ref, "de.downProb")
 D <- 2 * de_prob * (de_loc^2 + de_scale^2)
-batch_fac_scale <- sqrt(sp$batch * D / 2)
+batch_fac_scale <- sqrt(sp$batch * D / 2); batch_fac_loc <- 0
+if (param_set == "splatter_default") {
+  batch_fac_loc <- if (sp$batch > 0) getParam(ref, "batch.facLoc") else 0
+  batch_fac_scale <- if (sp$batch > 0) getParam(ref, "batch.facScale") else 0
+}
 target_prob <- if (sp$imbalance) IMBALANCE else rep(1 / groups, groups)
-cat(sprintf("splatter %s, level %s: D %.5f, batch.facScale %.5f, perturbation gene probability %.4f, target group.prob %s\n",
-            as.character(packageVersion("splatter")), level, D, batch_fac_scale, 2 * sp$perturb * de_prob,
+cat(sprintf("splatter %s, %s, level %s: D %.5f, batch.facLoc %.4f, batch.facScale %.5f, dropout mid %s shape %s (source %s), perturbation gene probability %.4f, target group.prob %s\n",
+            as.character(packageVersion("splatter")), param_set, level, D, batch_fac_loc, batch_fac_scale, target_dropout, dropout_shape,
+            if (is.na(source_dropout)) "none" else "same", 2 * sp$perturb * de_prob,
             paste(round(target_prob, 3), collapse = "/")))
 
 base_params <- function(cells_per_batch, prob) {
-  setParams(newSplatParams(), batchCells = cells_per_batch, batch.facLoc = 0, batch.facScale = batch_fac_scale,
+  setParams(newSplatParams(), batchCells = cells_per_batch, batch.facLoc = batch_fac_loc, batch.facScale = batch_fac_scale,
             group.prob = prob, lib.scale = lib_scale, seed = seed)
 }
 n_genes <- getParam(base_params(c(n_cells, n_cells), rep(1 / groups, groups)), "nGenes")
@@ -119,7 +142,7 @@ both_sides <- function(this_lib_loc, this_dropout, prob, perturb) {
   on.exit(st$active <- FALSE)
   splatSimulate(params, method = "groups", verbose = FALSE)
 }
-deep <- both_sides(lib_loc, NA_real_, rep(1 / groups, groups), FALSE)
+deep <- both_sides(lib_loc, source_dropout, rep(1 / groups, groups), FALSE)
 shallow <- both_sides(lib_loc_target, target_dropout, target_prob, TRUE)
 untrace("splatSimBCVMeans", where = asNamespace("splatter"))
 if (sp$perturb > 0 && st$cells == 0) stop("perturbation requested but no target cell of ", perturb_group)
@@ -151,9 +174,9 @@ depth <- Matrix::colSums(counts_all); detected <- Matrix::colSums(counts_all > 0
 record <- list(
   generator = "realdata_benchmark/splatter_n5000/20_generate_n5000.R", route = "D", n_cells_per_side = n_cells,
   n_semantics = "cells per side (batchCells = c(N, N)), as the native benchmark", groups = groups, replicate = replicate,
-  technical_level = level, seed = seed, depth = sp$depth, dropout = sp$dropout, lib_loc_source = lib_loc,
-  lib_loc_target = lib_loc_target, lib_scale = lib_scale, dropout_mid_target = target_dropout, dropout_shape = dropout_shape,
-  batch_strength = sp$batch, batch_fac_loc = 0, batch_fac_scale = batch_fac_scale,
+  technical_level = level, param_set = param_set, seed = seed, depth = sp$depth, dropout = sp$dropout, lib_loc_source = lib_loc,
+  lib_loc_target = lib_loc_target, lib_scale = lib_scale, dropout_mid_target = target_dropout, dropout_mid_source = source_dropout,
+  dropout_shape = dropout_shape, batch_strength = sp$batch, batch_fac_loc = batch_fac_loc, batch_fac_scale = batch_fac_scale,
   perturb_strength = sp$perturb, perturb_group = perturb_group, perturb_gene_probability = 2 * sp$perturb * de_prob,
   perturbed_genes = sum(pert_factor != 1), perturbed_assay = st$assay, perturbed_target_cells = st$cells, perturb_seed = seed + 7919L,
   target_group_prob = target_prob, source_group_prob = rep(1 / groups, groups),

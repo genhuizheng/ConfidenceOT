@@ -23,11 +23,14 @@
 # f1             one short job: 33_f1_summary.py on the collected tables (SPLATTER_N5000_F1_ROWS / F1_SUMMARY, --pilot:
 #                _PILOT); the chain does not submit it
 # --after IDS    colon-separated job ids this stage waits for (afterok; collect: afterany)
+# --param-set S  benchmark (default; the frozen run, root splatter_n5000_benchmark_20261101) or splatter_default (every
+#                Splatter parameter at its installed default, 20_generate_n5000.R; own root splatter_n5000_default_20261103
+#                unless RB5_ROOT is set; the frozen root is refused for it)
 # --partition P  gg (default, every stage) or gh-dev / gh (72 cores, so 9 workers per node; gh-dev's 2 h limit clips
 #                the job times and limits pilot generation to the two levels it reads, L2_depth_dropout and L4_batch_perturb)
 # No set -e / -u / pipefail (TACC rules). Root is versioned; frozen roots are read only.
 
-dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""
+dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""; param_set=benchmark
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -36,13 +39,19 @@ while (( $# )); do
         --hours) hours=$2; shift 2 ;;
         --after) after=$2; shift 2 ;;
         --partition) partition=$2; shift 2 ;;
+        --param-set) param_set=$2; shift 2 ;;
         chain|cleanup-audit|generate|worklist|run|status|collect|f1) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 [[ -n "$stage" ]] || { echo "usage: bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--pilot] [--after IDS] [--nodes N] [--hours H] chain|cleanup-audit|generate|worklist|run|status|collect|f1" >&2; exit 2; }
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
-root=${RB5_ROOT:-/scratch/10119/ghzheng/OT_project/splatter_n5000_benchmark_20261101}
+case $param_set in
+    benchmark) root=${RB5_ROOT:-/scratch/10119/ghzheng/OT_project/splatter_n5000_benchmark_20261101} ;;
+    splatter_default) root=${RB5_ROOT:-/scratch/10119/ghzheng/OT_project/splatter_n5000_default_20261103}
+        [[ $(basename "$root") == splatter_n5000_benchmark_20261101 ]] && { echo "the frozen root is not used for splatter_default" >&2; exit 2; } ;;
+    *) echo "unknown --param-set $param_set" >&2; exit 2 ;;
+esac
 native=${RB5_NATIVE_ROOT:-/scratch/10119/ghzheng/OT_project/benchmark_native}
 frozen_fits=${RB5_FROZEN_FITS:-/scratch/10119/ghzheng/OT_project/realdata_benchmark_20261031/splatter/acc0.99}
 env_path=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
@@ -79,7 +88,7 @@ do_generate() {  # prints colon-joined ids
     [[ $pilot == 1 && $partition == gh-dev ]] && levels="L2_depth_dropout L4_batch_perturb"
     for rep in "${reps[@]}"; do
         id=$(submit "${part[@]}" -t "$(printf '%02d:00:00' "$(clip 6)")" -J rb5_gen -o "$root/logs/generate_rep${rep}_%j.out" \
-            --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB5_ROOT="$root",RB5_REP="$rep",RB5_NATIVE_ROOT="$native",RB5_LEVELS="$levels" \
+            --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",RB5_ROOT="$root",RB5_REP="$rep",RB5_NATIVE_ROOT="$native",RB5_LEVELS="$levels",RB5_PARAM_SET="$param_set" \
             "$repo/realdata_benchmark/splatter_n5000/tacc/generate_n5000.slurm") || return 1
         echo "generate rep $rep: job $id" >&2; ids+=("$id")
     done

@@ -8,7 +8,8 @@
 # L0-L2 compared with the native generation (25_check_native_identity.py), then the conditions and truth
 # (21_build_conditions_n5000.py). Submitted by submit_n5000.sh with RB5_ROOT, RB5_REP, RB5_NATIVE_ROOT.
 # Seeds as the native benchmark: base 20260925 + 1000 x replicate + 137 x level index (L0 0, L1 1, L2 2); L3-L5 and
-# the ablations take L2's seed, so they are the L2 simulation plus their factors. A level already generated
+# the ablations take L2's seed, so they are the L2 simulation plus their factors. RB5_PARAM_SET (benchmark | splatter_default,
+# default benchmark) is passed to 20_generate_n5000.R --param-set. A level already generated
 # (GENERATION_DONE) or built (manifest.csv) is skipped. No set -e / -u / pipefail (TACC rules).
 
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
@@ -30,7 +31,7 @@ for level in "${levels[@]}"; do
     cond=$RB5_ROOT/conditions/N5000/rep$rep/$level
     if [[ ! -f "$gen/GENERATION_DONE" ]]; then
         echo "== generate $level seed $seed"
-        $rscript realdata_benchmark/splatter_n5000/20_generate_n5000.R --out "$gen" --n 5000 --replicate "$rep" --level "$level" --seed "$seed" \
+        $rscript realdata_benchmark/splatter_n5000/20_generate_n5000.R --out "$gen" --n 5000 --replicate "$rep" --level "$level" --seed "$seed" --param-set "${RB5_PARAM_SET:-benchmark}" \
             || { echo "generation FAILED: $level"; status=1; continue; }
     fi
     source /home1/10119/ghzheng/.bashrc

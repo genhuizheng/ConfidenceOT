@@ -42,9 +42,9 @@ NATIVE = {"L0_matched", "L1_depth", "L2_depth_dropout"}
 LEVELS = {
     "L0_matched": ("", "matched depth, no dropout"),
     "L1_depth": ("L0", "target library size x 0.5"),
-    "L2_depth_dropout": ("L1", "target dropout"),
-    "L3_batch": ("L2", "source / target batch effect (strength 0.5 D)"),
-    "L4_batch_perturb": ("L3", "target perturbation of Group1 (strength 0.5 D)"),
+    "L2_depth_dropout": ("L1", "dropout (target only; both sides under param_set splatter_default, generation.json)"),
+    "L3_batch": ("L2", "source / target batch effect (batch_fac_loc / batch_fac_scale in generation.json)"),
+    "L4_batch_perturb": ("L3", "target perturbation of Group1 (default DE parameters, gene probability de.prob)"),
     "L5_batch_perturb_imbalance": ("L4", "target population proportions 0.40 / 0.25 / 0.15 / 0.12 / 0.08"),
     "A4_perturb_only": ("L2", "target perturbation of Group1 (ablation: no batch)"),
     "A5_imbalance_only": ("L2", "target population proportions (ablation: no batch, no perturbation)"),
@@ -99,7 +99,7 @@ def main() -> None:
     m["level_adds"] = adds
     m["case"] = m.biological_case.map(CASE)
     m["benchmark_pair_id"] = [f"N{a.n_cells}_rep{a.replicate}_{a.level}_{c}" for c in m.biological_case]
-    for k in ("batch_strength", "batch_fac_scale", "perturb_strength", "perturb_group", "perturbed_genes", "perturbed_target_cells",
+    for k in ("param_set", "batch_strength", "batch_fac_loc", "batch_fac_scale", "dropout_mid_target", "dropout_mid_source", "dropout_shape", "perturb_strength", "perturb_group", "perturbed_genes", "perturbed_target_cells",
               "group_de_distance_D", "seed", "splatter_version", "n_semantics"):
         m[f"gen_{k}"] = gen.get(k)
     m["gen_target_group_prob"] = "/".join(f"{v:g}" for v in gen.get("target_group_prob", []))
