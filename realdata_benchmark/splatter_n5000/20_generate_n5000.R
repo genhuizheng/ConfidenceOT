@@ -15,6 +15,23 @@
 #                     Kept as design factors: the target depth (lib.loc + log 0.5, L1), the Group1 perturbation
 #                     (drawn from the default DE parameters, as below) and the L5 target proportions. L0 and L1 are the
 #                     same simulation under either set (no batch, no dropout).
+# --pairing (added 2026-11-03; default none = everything above unchanged; paired needs --param-set splatter_default):
+#   paired            makes the levels of one replicate differ only by their own factors.
+#                     (1) Batch: the default batch.facLoc / batch.facScale are used in EVERY level, so Splatter draws
+#                     the batch factors (and so consumes the same random numbers) everywhere; a level without batch sets
+#                     the drawn factors to 1 at the entry of splatSimBatchCellMeans (trace), before they touch the means.
+#                     Without this, rnorm(sd = 0) draws nothing at scale 0 and the group DE factors that follow are a
+#                     different draw (BATCH_EFFECT_AUDIT_20261103.md section 3).
+#                     (2) Counts: Splatter's own BCV / Poisson / dropout draws (rchisq, rgamma, rpois, rbinom over the
+#                     whole matrix) shift the random stream for every later entry whenever any mean changes. In paired
+#                     mode the counts are re-sampled from Splatter's BaseCellMeans with the same model and parameters
+#                     (bcv = (bcv.common + 1 / sqrt(mean)) x sqrt(bcv.df / chisq_gene); CellMeans ~ Gamma(1 / bcv^2,
+#                     mean x bcv^2); TrueCounts ~ Poisson(CellMeans); dropout keep ~ Bernoulli(1 - logistic(log CellMeans,
+#                     dropout.mid, dropout.shape))) by inverse CDF of common uniforms fixed per replicate and call
+#                     (seed + 271829 deep, seed + 271830 shallow), drawn in that order whatever the level. An entry whose
+#                     latent mean is unchanged gets exactly the same count; a changed mean moves its count monotonically.
+#                     This sampler is ours (custom), not Splatter's code; sampler_check.csv compares it per gene with
+#                     Splatter's own counts of the same call (means, zero fractions).
 #
 # N semantics, as the native benchmark: --n is cells PER SIDE (batchCells = c(N, N)); source = batch 1 of the deep
 # call, target = batch 2 of the shallow call. N = 5,000 means 5,000 source + 5,000 target cells. Recorded.
@@ -61,6 +78,9 @@ groups <- as.integer(value_of("--groups", "5"))
 seed <- as.integer(value_of("--seed", "20260925"))
 param_set <- value_of("--param-set", "benchmark")
 if (!(param_set %in% c("benchmark", "splatter_default"))) stop("--param-set must be benchmark or splatter_default")
+pairing <- value_of("--pairing", "none")
+if (!(pairing %in% c("none", "paired"))) stop("--pairing must be none or paired")
+if (pairing == "paired" && param_set != "splatter_default") stop("--pairing paired needs --param-set splatter_default")
 lib_loc <- as.numeric(value_of("--lib-loc", "11.0"))
 lib_scale <- as.numeric(value_of("--lib-scale", "0.2"))
 depth_ratio <- as.numeric(value_of("--depth-ratio", "0.50"))
@@ -97,9 +117,10 @@ de_down <- getParam(ref, "de.downProb")
 D <- 2 * de_prob * (de_loc^2 + de_scale^2)
 batch_fac_scale <- sqrt(sp$batch * D / 2); batch_fac_loc <- 0
 if (param_set == "splatter_default") {
-  batch_fac_loc <- if (sp$batch > 0) getParam(ref, "batch.facLoc") else 0
-  batch_fac_scale <- if (sp$batch > 0) getParam(ref, "batch.facScale") else 0
+  batch_fac_loc <- if (sp$batch > 0 || pairing == "paired") getParam(ref, "batch.facLoc") else 0
+  batch_fac_scale <- if (sp$batch > 0 || pairing == "paired") getParam(ref, "batch.facScale") else 0
 }
+batch_neutralised <- pairing == "paired" && sp$batch == 0
 target_prob <- if (sp$imbalance) IMBALANCE else rep(1 / groups, groups)
 cat(sprintf("splatter %s, %s, level %s: D %.5f, batch.facLoc %.4f, batch.facScale %.5f, dropout mid %s shape %s (source %s), perturbation gene probability %.4f, target group.prob %s\n",
             as.character(packageVersion("splatter")), param_set, level, D, batch_fac_loc, batch_fac_scale, target_dropout, dropout_shape,
@@ -132,6 +153,20 @@ inject <- quote({
   }
 })
 suppressMessages(trace("splatSimBCVMeans", tracer = inject, where = asNamespace("splatter"), print = FALSE))
+# drawn batch factors: recorded in every call; set to 1 before they are applied when the level has no batch (paired)
+bst <- new.env(); bst$neutralise <- batch_neutralised; bst$drawn <- list()
+assign(".rb_batch_state", bst, envir = globalenv())
+batch_hook <- quote({
+  b_ <- get(".rb_batch_state", envir = globalenv())
+  rd_ <- SummarizedExperiment::rowData(sim)
+  bc_ <- grep("^BatchFacBatch", colnames(rd_), value = TRUE)
+  b_$drawn[[length(b_$drawn) + 1]] <- as.data.frame(rd_[, bc_, drop = FALSE])
+  if (isTRUE(b_$neutralise)) {
+    for (c_ in bc_) rd_[[c_]] <- rep(1, nrow(rd_))
+    SummarizedExperiment::rowData(sim) <- rd_
+  }
+})
+suppressMessages(trace("splatSimBatchCellMeans", tracer = batch_hook, where = asNamespace("splatter"), print = FALSE))
 both_sides <- function(this_lib_loc, this_dropout, prob, perturb) {
   params <- setParams(base_params(c(n_cells, n_cells), prob), lib.loc = this_lib_loc)
   if (is.na(this_dropout)) params <- setParams(params, dropout.type = "none") else {
@@ -145,6 +180,43 @@ both_sides <- function(this_lib_loc, this_dropout, prob, perturb) {
 deep <- both_sides(lib_loc, source_dropout, rep(1 / groups, groups), FALSE)
 shallow <- both_sides(lib_loc_target, target_dropout, target_prob, TRUE)
 untrace("splatSimBCVMeans", where = asNamespace("splatter"))
+untrace("splatSimBatchCellMeans", where = asNamespace("splatter"))
+if (length(bst$drawn) != 2 || !identical(bst$drawn[[1]], bst$drawn[[2]])) stop("the two calls drew different batch factors")
+
+crn_counts <- function(sim, crn_seed, this_dropout, keep_cols) {
+  # paired sampler (see --pairing): Splatter's model on its BaseCellMeans, inverse CDF of common uniforms
+  base <- SummarizedExperiment::assay(sim, "BaseCellMeans")
+  G <- nrow(base); C <- ncol(base)
+  bcv_common <- getParam(ref, "bcv.common"); bcv_df <- getParam(ref, "bcv.df")
+  set.seed(crn_seed)
+  chisq <- qchisq(runif(G), df = bcv_df)
+  bcv <- (bcv_common + 1 / sqrt(base)) * sqrt(bcv_df / chisq)
+  means <- matrix(qgamma(runif(G * C), shape = 1 / (bcv^2), scale = base * (bcv^2)), nrow = G)
+  rm(bcv); means[base == 0 | !is.finite(means)] <- 0
+  counts <- matrix(qpois(runif(G * C), lambda = means), nrow = G)
+  u_drop <- runif(G * C)
+  if (!is.na(this_dropout)) {
+    p_drop <- 1 / (1 + exp(-dropout_shape * (log(means) - this_dropout)))
+    counts <- counts * (u_drop < (1 - p_drop))
+    rm(p_drop)
+  }
+  rm(u_drop)
+  spl <- as.matrix(BiocGenerics::counts(sim))[, keep_cols, drop = FALSE]; ours <- counts[, keep_cols, drop = FALSE]
+  check <- data.frame(gene_id = rownames(sim), mean_splatter = rowMeans(spl), mean_paired = rowMeans(ours),
+                      zero_splatter = rowMeans(spl == 0), zero_paired = rowMeans(ours == 0))
+  dimnames(counts) <- dimnames(base)
+  BiocGenerics::counts(sim) <- counts
+  list(sim = sim, check = check)
+}
+sampler_check <- NULL
+if (pairing == "paired") {
+  d_ <- crn_counts(deep, seed + 271829L, source_dropout, as.character(colData(deep)$Batch) == "Batch1")
+  s_ <- crn_counts(shallow, seed + 271830L, target_dropout, as.character(colData(shallow)$Batch) == "Batch2")
+  deep <- d_$sim; shallow <- s_$sim
+  sampler_check <- rbind(cbind(side = "source", d_$check), cbind(side = "target", s_$check))
+  write.csv(sampler_check, file.path(out, "sampler_check.csv"), row.names = FALSE)
+  rm(d_, s_); gc()
+}
 if (sp$perturb > 0 && st$cells == 0) stop("perturbation requested but no target cell of ", perturb_group)
 
 source_sim <- deep[, as.character(colData(deep)$Batch) == "Batch1"]
@@ -163,7 +235,8 @@ group_labels <- c(src_groups, tgt_groups)
 writeMM(as(counts_all, "CsparseMatrix"), file.path(out, "counts.mtx"))
 write.csv(data.frame(cell_id = cell_ids, batch = batch_labels, group = group_labels), file.path(out, "cells.csv"), row.names = FALSE)
 write.csv(data.frame(gene_id = rownames(source_sim), gene_mean = as.numeric(rd_deep$GeneMean)), file.path(out, "genes.csv"), row.names = FALSE)
-write.csv(data.frame(gene_id = rownames(source_sim), rd_deep[, truth_cols, drop = FALSE], PerturbationFactor = pert_factor),
+drawn <- bst$drawn[[1]]; colnames(drawn) <- sub("^BatchFac", "BatchFacDrawn", colnames(drawn))
+write.csv(data.frame(gene_id = rownames(source_sim), rd_deep[, truth_cols, drop = FALSE], drawn, PerturbationFactor = pert_factor),
           file.path(out, "genes_truth.csv"), row.names = FALSE)
 write.csv(data.frame(cell_id = cell_ids, side = ifelse(batch_labels == "Batch1", "source", "target"), batch = batch_labels,
                      group = group_labels,
@@ -182,6 +255,12 @@ record <- list(
   target_group_prob = target_prob, source_group_prob = rep(1 / groups, groups),
   group_de_distance_D = D, de_prob = de_prob, de_fac_loc = de_loc, de_fac_scale = de_scale, de_down_prob = de_down,
   n_genes = n_genes, splatter_version = as.character(packageVersion("splatter")), r_version = R.version.string,
+  pairing = pairing, batch_neutralised = batch_neutralised,
+  count_sampler = if (pairing == "paired") "paired inverse-CDF sampler of Splatter's BCV / Poisson / dropout model (custom)" else "splatter",
+  crn_seeds = if (pairing == "paired") c(seed + 271829L, seed + 271830L) else NULL,
+  sampler_check_median_abs_log2_mean_ratio = if (is.null(sampler_check)) NULL else {
+    k_ <- sampler_check$mean_splatter > 0.5; median(abs(log2(sampler_check$mean_paired[k_] / sampler_check$mean_splatter[k_]))) },
+  sampler_check_max_abs_zero_fraction_difference = if (is.null(sampler_check)) NULL else max(abs(sampler_check$zero_paired - sampler_check$zero_splatter)),
   source_median_nCount = median(depth[is_source]), target_median_nCount = median(depth[!is_source]),
   source_median_nFeature = median(detected[is_source]), target_median_nFeature = median(detected[!is_source]),
   source_min_nFeature = min(detected[is_source]), target_min_nFeature = min(detected[!is_source]),

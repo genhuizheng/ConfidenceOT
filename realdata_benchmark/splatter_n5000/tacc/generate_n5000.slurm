@@ -9,7 +9,7 @@
 # (21_build_conditions_n5000.py). Submitted by submit_n5000.sh with RB5_ROOT, RB5_REP, RB5_NATIVE_ROOT.
 # Seeds as the native benchmark: base 20260925 + 1000 x replicate + 137 x level index (L0 0, L1 1, L2 2); L3-L5 and
 # the ablations take L2's seed, so they are the L2 simulation plus their factors. RB5_PARAM_SET (benchmark | splatter_default,
-# default benchmark) is passed to 20_generate_n5000.R --param-set. A level already generated
+# default benchmark) is passed to 20_generate_n5000.R --param-set, RB5_PAIRING (none | paired, default none) to --pairing. A level already generated
 # (GENERATION_DONE) or built (manifest.csv) is skipped. The levels are independent (each its own Splatter calls, seed,
 # native check and conditions), so they run concurrently, one process each (R is single-threaded; about 6-8 GB per
 # level at N = 5,000); RB5_SERIAL=1 runs them one after another as before. No set -e / -u / pipefail (TACC rules).
@@ -33,7 +33,7 @@ one_level() {  # $1 level; returns non-zero if its generation or conditions fail
     cond=$RB5_ROOT/conditions/N5000/rep$rep/$level
     if [[ ! -f "$gen/GENERATION_DONE" ]]; then
         echo "== generate $level seed $seed"
-        $rscript realdata_benchmark/splatter_n5000/20_generate_n5000.R --out "$gen" --n 5000 --replicate "$rep" --level "$level" --seed "$seed" --param-set "${RB5_PARAM_SET:-benchmark}" \
+        $rscript realdata_benchmark/splatter_n5000/20_generate_n5000.R --out "$gen" --n 5000 --replicate "$rep" --level "$level" --seed "$seed" --param-set "${RB5_PARAM_SET:-benchmark}" --pairing "${RB5_PAIRING:-none}" \
             || { echo "generation FAILED: $level"; return 1; }
     fi
     source /home1/10119/ghzheng/.bashrc
