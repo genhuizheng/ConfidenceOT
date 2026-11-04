@@ -213,6 +213,15 @@ def take_slot(slots: Path, n: int) -> Path | None:
     return None
 
 
+def max_large(a) -> int:
+    """--max-large, or the number in MAX_LARGE_PER_NODE next to the worklist when that file exists: read before every
+    large row, so running and queued jobs take a new limit without a resubmission (scheduling only, results unchanged)."""
+    try:
+        return max(1, int((a.worklist.parent / "MAX_LARGE_PER_NODE").read_text().strip()))
+    except (OSError, ValueError):
+        return a.max_large
+
+
 _FINISHED: set[str] = set()
 
 
@@ -276,7 +285,7 @@ def main() -> None:
             out.mkdir(parents=True, exist_ok=True)
             slot = None
             if a.large_slots is not None and float(row["size"]) > a.large_size:
-                slot = take_slot(a.large_slots, a.max_large)
+                slot = take_slot(a.large_slots, max_large(a))
                 if slot is None:
                     waiting += 1; continue  # every large slot of this node is busy: come back to the row
             if not claim(out, owner) and not (a.retry_failed and (out / "FAILED").exists()):

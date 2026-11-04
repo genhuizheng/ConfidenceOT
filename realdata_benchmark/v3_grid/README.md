@@ -56,6 +56,17 @@ The local L1-L5 grid (`splatter_local/`, `GRID_V3_REPORT.md`) at full size, on t
 
 Defaults are in `submit_v3.sh`; the pilot measures time and memory.
 
+**Large-unit concurrency.**
+- A number in `<dataset root>/MAX_LARGE_PER_NODE` replaces `--max-large` for every worker, running or queued, from its
+  next large row.
+- This changes only how many large rows run at once on a node, never a result.
+
+**Pilot timing (2026-11-04).**
+- No pilot fit failed.
+- KP: per fit about 1e-5 s per source × target cell, from 1 s on small units to about 1,000 s on the largest unit
+  (9.6k × 9.6k). The large rows (148, over 2e7) carry about 219 of 287 estimated worker-hours.
+- LTL331: 60-490 s per fit; the pilot finished in 1 h 9 min.
+
 **Coupling storage.** Compressed float32 takes about 3.4 bytes per entry (measured locally), for both methods:
 - Splatter: about 3 TB;
 - LTL331: about 0.27 TB;
