@@ -59,6 +59,11 @@ FIT_ARGS = ["--analysis-scope", "all", "--epsilon", "0.1", "--lambda-a", "1.0", 
             "--save-coupling", "--device", "cpu", "--workers", "1", "--seed", "20260925", "--within-side-acceptance-minimum", "0.99",
             "--allow-precomputed"]
 KEYS = ["stage", "level", "replicate", "case", "pair_id", "config_id", "arm"]
+# one fixed column order for every appended chunk (arms write different diagnostics)
+COLUMNS = KEYS + ["seconds", "status", "method", "side", "cells", "to_reject", "rejected", "rejected_fraction", "precision", "recall", "f1",
+                  "false_rejection_rate", "rejection_cost", "m4e_inference_valid", "asserted_mass", "false_asserted_mass",
+                  "false_asserted_share", "error", "diag_genebatch_scale", "diag_genebatch_clipped_share", "diag_mnnc_consistency",
+                  "diag_mnncred_share", "diag_mnncred_reference", "diag_mnncred_weight", "diag_mnncred_disjoint_reference"]
 _RUN_PAIR = None
 _DEPTH = {}
 
@@ -119,6 +124,28 @@ def depth_target(manifest: str, ds: str) -> int:
     return int(np.quantile(_DEPTH[manifest], rb.DS_QUANTILES[ds]))
 
 
+_LAST: dict = {}
+
+
+def gene_batch(S, T):
+    """Splatter-informed gene-wise batch estimate on the counts, needing no matched cells: the batch is a dense, small,
+    population-independent log shift of every gene, biology a sparse, large one ('most genes are not differential',
+    as DESeq2 / TMM). Per gene with CPM >= 1 on both sides: d = log2(CPM_target + 1) - log2(CPM_source + 1); robust
+    centre m = median(d), scale s = 1.4826 MAD(d); batch b = m + clip(d - m, -1.345 s, 1.345 s) (Huber's constant);
+    genes below CPM 1 on either side are left alone. The target's counts are divided by 2^b gene by gene (they become
+    non-integer); the source is untouched."""
+    import scipy.sparse as sp
+    xs = np.asarray(S.X.sum(0)).ravel(); xt = np.asarray(T.X.sum(0)).ravel()
+    cs, ct = xs / max(xs.sum(), 1) * 1e6, xt / max(xt.sum(), 1) * 1e6
+    ok = (cs >= 1) & (ct >= 1)
+    d = np.log2(ct[ok] + 1) - np.log2(cs[ok] + 1)
+    m = np.median(d); s = 1.4826 * np.median(np.abs(d - m))
+    b = np.zeros(len(cs)); b[ok] = m + np.clip(d - m, -1.345 * s, 1.345 * s)
+    _LAST["genebatch_scale"] = float(s); _LAST["genebatch_clipped_share"] = float((np.abs(d - m) > 1.345 * s).mean())
+    T = T.copy(); T.X = sp.csr_matrix(sp.csr_matrix(T.X, dtype=np.float64) @ sp.diags(2.0 ** (-b)))
+    return S, T
+
+
 def correct(X: np.ndarray, Y: np.ndarray, correction: str) -> tuple[np.ndarray, np.ndarray]:
     if not correction:
         return X, Y
@@ -131,6 +158,88 @@ def correct(X: np.ndarray, Y: np.ndarray, correction: str) -> tuple[np.ndarray, 
         return Zc[: len(X)], Zc[len(X):]
     if correction == "center":
         return X - X.mean(0), Y - Y.mean(0)
+    if correction in ("mnnc", "genebatch-mnnc"):
+        # MNN shift weighted by its consistency across source regions (8 k-means regions of the source, regions with >= 5
+        # anchors): c = |mean of the regional median displacements|^2 / mean |regional displacement|^2, in [0, 1]. A shift
+        # common to every region (a batch acting on all populations alike) gives c near 1; anchors pulled towards
+        # different populations in different regions (nothing shared) give a low c; no shift at all gives noise and a
+        # low c. The target moves by c x the global median displacement; no threshold.
+        from sklearn.cluster import KMeans
+        from sklearn.neighbors import NearestNeighbors
+        k = min(20, len(X) - 1, len(Y) - 1)
+        nx = NearestNeighbors(n_neighbors=k).fit(X).kneighbors(Y, return_distance=False)
+        ny = NearestNeighbors(n_neighbors=k).fit(Y).kneighbors(X, return_distance=False)
+        pairs = [(i, j) for j in range(len(Y)) for i in nx[j] if j in set(ny[i])]
+        if not pairs:
+            return X, Y
+        i, j = map(np.asarray, zip(*pairs))
+        D = Y[j] - X[i]
+        region = KMeans(n_clusters=min(8, len(X)), n_init=10, random_state=0).fit(X).labels_[i]
+        V = np.array([np.median(D[region == r], axis=0) for r in np.unique(region) if (region == r).sum() >= 5])
+        if len(V) == 0:
+            return X, Y
+        c = float(np.sum(V.mean(0) ** 2) / max(np.mean(np.sum(V ** 2, axis=1)), 1e-12))
+        _LAST["mnnc_consistency"] = c
+        return X, Y - c * np.median(D, axis=0)
+    if correction in ("mnncred", "mnncred2", "mnncred3"):
+        # credible-anchor MNN translation, soft-weighted by data-internal evidence (no labels, no threshold tuned on F1):
+        # 1. anchors = cross-side mutual nearest neighbours (k = 20); shift = their median displacement;
+        # 2. credible anchors = pairs whose distance after the shift is below the 20th same-side neighbour distance of
+        #    both cells; the shift is re-estimated from the credible anchors (3 rounds);
+        # 3. reference = the same credible share between two random halves of the source (a split known to share
+        #    everything, no batch); weight w = min(1, observed credible share / reference);
+        # 4. the target moves by w x shift. Nothing shared -> few credible anchors -> w small -> no forced alignment.
+        from sklearn.neighbors import NearestNeighbors
+        def credible(A, B):
+            k = min(20, len(A) - 1, len(B) - 1)
+            ra = NearestNeighbors(n_neighbors=k + 1).fit(A).kneighbors(A)[0][:, k]
+            rb = NearestNeighbors(n_neighbors=k + 1).fit(B).kneighbors(B)[0][:, k]
+            na = NearestNeighbors(n_neighbors=k).fit(A).kneighbors(B, return_distance=False)
+            nb = NearestNeighbors(n_neighbors=k).fit(B).kneighbors(A, return_distance=False)
+            pairs = [(i, j) for j in range(len(B)) for i in na[j] if j in set(nb[i])]
+            if not pairs:
+                return np.zeros(A.shape[1]), 0.0
+            i, j = map(np.asarray, zip(*pairs))
+            D = B[j] - A[i]; shift = np.median(D, axis=0); share = 0.0
+            for _ in range(3):
+                ok = np.linalg.norm(D - shift, axis=1) < np.minimum(ra[i], rb[j])
+                share = float(ok.mean())
+                if ok.sum() < 5:
+                    break
+                shift = np.median(D[ok], axis=0)
+            if correction == "mnncred3":
+                # the evidence is the most credible region: 8 k-means regions of the B side, regions with >= 10 anchors;
+                # one sizeable shared population is enough to trust the translation, while with nothing shared every
+                # region stays low. The shift is re-estimated from that region's credible anchors.
+                from sklearn.cluster import KMeans
+                reg = KMeans(n_clusters=min(8, len(B)), n_init=10, random_state=0).fit(B).labels_[j]
+                best, best_r = -1.0, None
+                for r_ in np.unique(reg):
+                    m_ = reg == r_
+                    if m_.sum() >= 10 and ok[m_].mean() > best:
+                        best, best_r = float(ok[m_].mean()), r_
+                if best_r is None:
+                    return shift, share
+                sel = (reg == best_r) & ok
+                if sel.sum() >= 5:
+                    shift = np.median(D[sel], axis=0)
+                return shift, best
+            return shift, share
+        shift, share = credible(X, Y)
+        rng = np.random.default_rng(0); order = rng.permutation(len(X)); h = len(X) // 2
+        _, ref = credible(X[order[:h]], X[order[h:2 * h]])
+        if correction == "mnncred":
+            w = float(min(1.0, share / ref)) if ref > 0 else 0.0
+        else:  # mnncred2: also a 'nothing shared' reference from the data -- the source split into its two k-means halves
+            from sklearn.cluster import KMeans
+            lab = KMeans(n_clusters=2, n_init=10, random_state=0).fit(X).labels_
+            _, dis = credible(X[lab == 0], X[lab == 1]) if min((lab == 0).sum(), (lab == 1).sum()) > 21 else (None, 0.0)
+            w = float(np.clip((share - dis) / (ref - dis), 0.0, 1.0)) if ref > dis else 0.0
+            _LAST.update(mnncred_disjoint_reference=dis)
+        _LAST.update(mnncred_share=share, mnncred_reference=ref, mnncred_weight=w)
+        return X, Y - w * shift
+    if correction == "genebatch":  # applied on the counts (gene_batch), nothing left to do on the PCA
+        return X, Y
     if correction == "mnn":
         # rigid translation of the target by the median displacement of cross-side mutual nearest neighbours (k = 20,
         # the fastMNN default): estimated from matched pairs, so a population present on one side only barely moves it;
@@ -230,10 +339,18 @@ def run_task(task: dict) -> list[dict]:
             if spec["ds"] != "none":
                 tg = depth_target(task["manifest"], spec["ds"]); s = int(float(spec["ds_seed"]))
                 S, T = rb.equalised(S, tg, 1000 * s + 1), rb.equalised(T, tg, 1000 * s + 2)
-            X0, Y0, _ = rb.build_config(dict(spec), S, T, 20260925 + i)
+            coords = {}
             for arm in task["arms"]:
-                X, Y = correct(X0, Y0, (arm.split("+") + [""])[1])
-                rows += fit_coords(task, X, Y, spec["cost"] == "cos", head | {"config_id": task["config_id"], "arm": arm},
+                corr = (arm.split("+") + [""])[1]
+                key = "genebatch" if corr.startswith("genebatch") else "raw"
+                if key not in coords:
+                    S2, T2 = gene_batch(S, T) if key == "genebatch" else (S, T)
+                    coords[key] = rb.build_config(dict(spec), S2, T2, 20260925 + i)[:2] + (dict(_LAST),)
+                X0, Y0, diag = coords[key]
+                _LAST.clear(); _LAST.update(diag)
+                X, Y = correct(X0, Y0, corr)
+                extra = {f"diag_{k}": v for k, v in _LAST.items()}
+                rows += fit_coords(task, X, Y, spec["cost"] == "cos", head | {"config_id": task["config_id"], "arm": arm} | extra,
                                    work / arm.replace("+", "_"))
         else:  # grid: one encoding key; PCA {30, 50} x scaling; both costs share the PCA
             spec = task["spec"]
@@ -284,6 +401,8 @@ def main() -> None:
     done = set()
     if res.exists():
         old = pd.read_csv(res, sep="\t")
+        if list(old.columns) != COLUMNS:  # realign a file written with an older column set before appending to it
+            old.reindex(columns=COLUMNS).to_csv(res, sep="\t", index=False)
         old = old[old.status == "ok"]
         done = set(zip(old.level, old.replicate.astype(int), old.pair_id, old.config_id, old.arm))
     if a.stage == "grid":
@@ -325,7 +444,7 @@ def main() -> None:
         futures = [ex.submit(run_task, t) for t in tasks]
         for f in as_completed(futures):
             rows = f.result(); n += 1; fits += len({(x.get("config_id"), x.get("arm")) for x in rows})
-            pd.DataFrame(rows).to_csv(res, sep="\t", index=False, mode="a", header=not res.exists())
+            pd.DataFrame(rows).reindex(columns=COLUMNS).to_csv(res, sep="\t", index=False, mode="a", header=not res.exists())
             if n % 20 == 0 or n == len(tasks):
                 el = time.time() - started
                 print(f"{n} / {len(tasks)} tasks, {fits} fits, {el:.0f} s, eta {el / n * (len(tasks) - n):.0f} s", flush=True)
