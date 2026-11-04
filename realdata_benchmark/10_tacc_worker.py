@@ -57,6 +57,16 @@ def pooled_targets(manifest: pd.DataFrame) -> dict:
     return {k: int(np.quantile(depth, q)) for k, q in rb.DS_QUANTILES.items()}
 
 
+CALIBRATION_ARM = "|cross_side_rotation"  # config id suffix of the rotation-calibrated arm (31_ --calibration-nulls)
+
+
+def base_config(config_id: str) -> tuple[str, str]:
+    """(registry config id, calibration null) of a worklist config id."""
+    if config_id.endswith(CALIBRATION_ARM):
+        return config_id[: -len(CALIBRATION_ARM)], "cross_side_rotation"
+    return config_id, "within_side_split"
+
+
 def splatter_row(row, spec, out: Path) -> int:
     man = pd.read_csv(row.manifest)
     r = man.iloc[int(row.pair_index)]
@@ -98,7 +108,8 @@ def splatter_row(row, spec, out: Path) -> int:
             m.loc[int(row.pair_index), f"{side}_h5ads_json"] = json.dumps([str(files[0 if side == "source" else 1])])
     m.to_csv(out / "manifest.csv", index=False)
     cmd = [sys.executable, str(REPO / "cancer_metastasis" / "02_run_pair.py"), str(out / "manifest.csv"), str(out / "runs"),
-           "--index", str(int(row.pair_index)), "--preprocessing", label, *SPLATTER_ARGS,
+           "--index", str(int(row.pair_index)), "--preprocessing", label,
+           *[base_config(str(row.config_id))[1] if a == "within_side_split" else a for a in SPLATTER_ARGS],
            "--within-side-acceptance-minimum", str(row.acceptance)] + (["--allow-precomputed"] if precomputed or label.startswith("raw") else [])
     (out / "fit_label.txt").write_text(label)
     with open(out / "run.log", "w") as log:
@@ -185,7 +196,7 @@ def main() -> None:
             elif row.dataset == "ltl331":
                 code = ltl331_row(row, out, a.registry)
             else:
-                spec = reg.loc[row.config_id].to_dict(); spec["config_id"] = row.config_id
+                spec = reg.loc[base_config(row.config_id)[0]].to_dict(); spec["config_id"] = row.config_id
                 code = n5000_row(row, spec, out) if row.dataset == "splatter_n5000" else splatter_row(row, spec, out)
         except Exception:
             code = -1; (out / "error.txt").write_text(traceback.format_exc())

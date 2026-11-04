@@ -53,6 +53,7 @@ def main() -> None:
     fw = f1.pivot_table(index=KEYS, columns="side", values=["f1", "precision", "recall"], aggfunc="first")
     fw.columns = [f"{side}_{m}" for m, side in fw.columns]
     rows = rows.merge(fw.reset_index(), on=KEYS, how="left")
+    rows["calibration_null"] = np.where(rows.config_id.astype(str).str.endswith("|cross_side_rotation"), "cross_side_rotation", "within_side_split")
     rows.to_csv(outs[0], sep="\t", index=False)
     agg = {"rows": ("replicate", "size"), "source_rejected_fraction": ("source_rejected_fraction", "mean"),
            "target_rejected_fraction": ("target_rejected_fraction", "mean"), "one_side_all_share": ("one_side_all", "mean"),

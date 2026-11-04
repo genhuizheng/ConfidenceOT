@@ -14,6 +14,8 @@ Rows:
                             level is identical to the native one (NATIVE_IDENTITY.json), otherwise they are refitted
                             here; every row then gets IC-POT, Vanilla UOT and 23_row_extras.py
   splatter_n5000_condition  level x replicate x case pair: 24_condition_deg.py and 26_representation_diagnostics.py
+--calibration-nulls (added 2026-11-03): within_side_split (default; config ids unchanged) and / or cross_side_rotation
+(config id + '|cross_side_rotation'; never reuses a frozen fit). Everything else of a row is identical between the arms.
 Writes ROOT/TACC_N5000_WORKLIST.tsv, ROOT/SPLATTER_N5000_CONFIG_REGISTRY.tsv and ROOT/SPLATTER_N5000_SIMULATION_MANIFEST.tsv
 (one row per level x replicate x pair with the generation record); refuses if the worklist exists.
 """
@@ -45,6 +47,7 @@ def main() -> None:
     p.add_argument("--registry", type=Path, required=True)
     p.add_argument("--frozen-fits", type=Path, required=True)
     p.add_argument("--replicates", type=int, nargs="*", default=[1, 2, 3])
+    p.add_argument("--calibration-nulls", nargs="+", default=["within_side_split"], choices=["within_side_split", "cross_side_rotation"])
     p.add_argument("--pilot", action="store_true",
                    help="TACC_N5000_PILOT_WORKLIST.tsv only: replicate 1, Case 2 source-unmatched pair, L2 (frozen fits reused, "
                         "native identity checked) and L4 (new fits with batch + perturbation), 8 configurations + the condition rows")
@@ -82,9 +85,9 @@ def main() -> None:
                           "converted": "", "acceptance": 0.99, "size": 5000, "level": level, "replicate": rep, "case": r.case, "truth_dir": str(truth)}
                 rows.append({**common, "dataset": "splatter_n5000_condition", "config_id": "", "fit_out": "",
                              "out": str(a.root / "rows" / "condition" / level / f"rep{rep}" / str(r.pair_id))})
-                for cid in CONFIGS:
+                for cid in [c if null == "within_side_split" else f"{c}|{null}" for null in a.calibration_nulls for c in CONFIGS]:
                     fit_out = ""
-                    if identical:
+                    if identical and not cid.endswith("|cross_side_rotation"):
                         fo = a.frozen_fits / safe(cid) / "N5000" / f"rep{rep}" / level / str(r.pair_id)
                         if (fo / "SUCCESS").exists():
                             fit_out = str(fo)

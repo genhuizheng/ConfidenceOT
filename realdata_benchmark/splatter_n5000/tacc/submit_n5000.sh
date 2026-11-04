@@ -32,6 +32,8 @@
 # fit            worklist -> run -> collect -> f1 -> case report (34_) on an already generated root
 # pairing-audit  one job: 29_pairing_audit.py -> ROOT/PAIRING_AUDIT_<date>/ (any root, also one generated without pairing)
 # case-report    one job: 34_case_report.py -> ROOT/CASE_REPORT*.{tsv,md}
+# --calibration-nulls "N ..."  calibration arms of the worklist (default within_side_split; e.g. "within_side_split
+#                cross_side_rotation" fits every row under both, rotation rows' config id + |cross_side_rotation)
 # --pairing P    none (default) or paired (20_generate_n5000.R --pairing: batch factors drawn at every level and set to 1
 #                where the level has no batch; counts by the paired sampler); paired needs --param-set splatter_default
 #                and has its own root splatter_n5000_default_paired_20261103 unless RB5_ROOT is set
@@ -46,7 +48,7 @@
 #                the job times and limits pilot generation to the two levels it reads, L2_depth_dropout and L4_batch_perturb)
 # No set -e / -u / pipefail (TACC rules). Root is versioned; frozen roots are read only.
 
-dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""; param_set=benchmark; procs_opt=""; pairing=none
+dry_run=0; pilot=0; nodes=""; hours=""; stage=""; after=""; partition=""; param_set=benchmark; procs_opt=""; pairing=none; nulls=within_side_split
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -58,6 +60,7 @@ while (( $# )); do
         --param-set) param_set=$2; shift 2 ;;
         --procs) procs_opt=$2; shift 2 ;;
         --pairing) pairing=$2; shift 2 ;;
+        --calibration-nulls) nulls=$2; shift 2 ;;
         chain|cleanup-audit|generate|worklist|run|status|collect|f1|generate-audit|fit|pairing-audit|case-report) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -116,7 +119,7 @@ do_generate() {  # prints colon-joined ids
 }
 do_worklist() {  # $1 ids to wait for
     [[ -f "$wl" ]] && { echo "$wl exists; not rebuilt" >&2; return 2; }
-    local cmd="$activate && { [[ -f $root/PREPROCESSING_CONFIG_REGISTRY.tsv ]] || python realdata_benchmark/01_config_registry.py --out $root; } && python realdata_benchmark/splatter_n5000/31_build_n5000_worklist.py --root $root --registry $root/PREPROCESSING_CONFIG_REGISTRY.tsv --frozen-fits $frozen_fits $pilot_flag"
+    local cmd="$activate && { [[ -f $root/PREPROCESSING_CONFIG_REGISTRY.tsv ]] || python realdata_benchmark/01_config_registry.py --out $root; } && python realdata_benchmark/splatter_n5000/31_build_n5000_worklist.py --root $root --registry $root/PREPROCESSING_CONFIG_REGISTRY.tsv --frozen-fits $frozen_fits --calibration-nulls $nulls $pilot_flag"
     local id; id=$(submit $(dep_args afterok "$1") -p "$partition" -N 1 -n 1 -t 00:30:00 -A MCB26031 -J rb5_work -o "$root/logs/worklist_%j.out" --wrap "$cmd") || return 1
     echo "worklist job $id${1:+ (after $1)}" >&2; echo "$id"
 }
