@@ -1,0 +1,57 @@
+# Frozen calibration v3 grid on TACC (2026-11-04)
+
+The local L1-L5 grid (`splatter_local/`, `GRID_V3_REPORT.md`) at full size, on three datasets with one code path:
+- Splatter N = 5,000;
+- LTL331 (PDX time course);
+- KP-Tracer (CRISPR lineage units of the lineage factorial).
+
+## What is fixed
+
+| Item | Value |
+|---|---|
+| Calibration | `within_side_split+mnncovlocal` (`CALIBRATION_V3.md`). `v3_common.py` imports `run_local_benchmark.correct`; it does not copy it. |
+| Readout | Effective readout (`summarize_local.py`) |
+| Acceptance | 0.99 |
+| Rejection cap | None |
+| Downsampling | None |
+| Grid | 37 encoding keys × PCA {30, 50} × scaling × {cos, sqeuc} = 296 configurations |
+| Baseline | `ranknm256-production\|none\|noscale\|cos\|pca30`. Locally it gave the same gates as the production-path baseline on all 160 rows. |
+| Fit arguments | Splatter: the local benchmark's. LTL331: `05_` factorial arguments without `--cell-qc`. KP: `factorial_common.fit_command` without `--cell-qc`. `--cell-qc` filters nothing at thresholds 0 / 0 / 100, and it refuses coordinates. |
+
+## Files
+
+- `v3_common.py`: the grid keys, the representations (encoding once, then each PCA once per key), the correction, and
+  the in-process `02_run_pair` fit on the corrected coordinates.
+- `build_worklist.py`: one row per unit × key, 8 fits per row.
+- `worker.py`: claim-based workers.
+  - A claim left by an ended job is taken over.
+  - Large units take a limited number of node-local slots.
+  - Each configuration is resumable.
+  - Outputs per configuration:
+    - all datasets: gates;
+    - Splatter: the scored rows;
+    - LTL331: cluster-level coupling mass;
+    - KP: full couplings.
+- `collect.py`: `STATUS`, `FIT_METRICS`, Splatter `RESULTS_grid_v3tacc.tsv` (read by
+  `summarize_local.py --stage grid`), and LTL331 / KP `CELL_GATES` per unit.
+- `tacc/submit_v3.sh` with `tacc/v3_workers.slurm`. The chain is worklist → pilot (1 node) → run → collect.
+
+## Checks done locally
+
+**Splatter equivalence.**
+- Setup: `build_worklist.py --conditions-subdir ""` on the local N = 200 root, then `worker.py` on 24 rows (192 fits:
+  L3 and L5, replicate 1, keys ranknm256-production, logcpm and rankhvg2000-midrank).
+- Compared with `RESULTS_grid_v3.tsv` on 768 rows: rejected counts, rejection cost, asserted and false-asserted mass and
+  F1 are all identical (maximum absolute difference 0).
+- This includes the row-blocked kernel step of `mnncovlocal`, added for N ≥ 5,000 with the same element-wise
+  arithmetic.
+
+## Sizes
+
+| Dataset | Units | Rows | Fits |
+|---|---|---|---|
+| Splatter | L1-L5 × 4 pairs × replicates 1-3 = 60 | 2,220 | 17,760 |
+| LTL331 | 7 adjacent pairs | 259 | 2,072 |
+| KP | Every unit of `UNITS.tsv` | 37 per unit | |
+
+Defaults are in `submit_v3.sh`; the pilot measures time and memory.

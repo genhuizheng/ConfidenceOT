@@ -280,10 +280,14 @@ def correct(X: np.ndarray, Y: np.ndarray, correction: str) -> tuple[np.ndarray, 
             # same gate; when open, each target cell moves by the Gaussian-kernel average of the credible anchor
             # displacements around it (bandwidth = median 20th same-side neighbour distance of the target), shrunk
             # towards the global credible shift by one pseudo-anchor of weight 1
+            # in row blocks of the target (the same element-wise arithmetic; bounded memory at N = 5,000 and above)
             ja, Da, h = anchors
-            d2 = ((Y[:, None, :] - Y[ja][None, :, :]) ** 2).sum(-1)
-            K = np.exp(-d2 / (2 * h * h))
-            disp = (K @ Da + shift[None, :]) / (K.sum(1, keepdims=True) + 1.0)
+            Ya = Y[ja]; disp = np.empty_like(Y)
+            step = max(1, int(2e7 // max(1, len(ja) * Y.shape[1])))
+            for b in range(0, len(Y), step):
+                d2 = ((Y[b:b + step, None, :] - Ya[None, :, :]) ** 2).sum(-1)
+                K = np.exp(-d2 / (2 * h * h))
+                disp[b:b + step] = (K @ Da + shift[None, :]) / (K.sum(1, keepdims=True) + 1.0)
             return X, Y - disp
         return X, Y - w * shift
     if correction == "genebatch":  # applied on the counts (gene_batch), nothing left to do on the PCA
