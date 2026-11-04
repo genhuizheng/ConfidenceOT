@@ -238,6 +238,42 @@ def correct(X: np.ndarray, Y: np.ndarray, correction: str) -> tuple[np.ndarray, 
             _LAST.update(mnncred_disjoint_reference=dis)
         _LAST.update(mnncred_share=share, mnncred_reference=ref, mnncred_weight=w)
         return X, Y - w * shift
+    if correction in ("mnncov", "mnncovgate"):
+        # credible-coverage MNN (shared_evidence_v2.py, statistic cover_min): after the iterative credible-anchor
+        # translation (k = 20 anchors, credible = closer than both cells' 20th same-side neighbour), the share of each
+        # side's cells covered by a credible anchor, the smaller side's; normalised between two references from the
+        # data itself (random halves of the source: shares everything; its two k-means halves: shares nothing):
+        # score = clip((observed - disjoint) / (shared - disjoint), 0, 1).
+        # mnncov: target moves by score x shift; mnncovgate: by the full shift when score > 0 (coverage above what two
+        # disjoint population sets give), else not at all.
+        from sklearn.cluster import KMeans
+        from sklearn.neighbors import NearestNeighbors
+        def evidence(A, B):
+            k = min(20, len(A) - 1, len(B) - 1)
+            ra = NearestNeighbors(n_neighbors=k + 1).fit(A).kneighbors(A)[0][:, k]
+            rb = NearestNeighbors(n_neighbors=k + 1).fit(B).kneighbors(B)[0][:, k]
+            na = NearestNeighbors(n_neighbors=k).fit(A).kneighbors(B, return_distance=False)
+            nb = NearestNeighbors(n_neighbors=k).fit(B).kneighbors(A, return_distance=False)
+            pairs = [(i, j) for j in range(len(B)) for i in na[j] if j in set(nb[i])]
+            if not pairs:
+                return np.zeros(A.shape[1]), 0.0
+            i, j = map(np.asarray, zip(*pairs))
+            D = B[j] - A[i]; shift = np.median(D, axis=0)
+            for _ in range(3):
+                ok = np.linalg.norm(D - shift, axis=1) < np.minimum(ra[i], rb[j])
+                if ok.sum() < 5:
+                    break
+                shift = np.median(D[ok], axis=0)
+            return shift, float(min(len(set(i[ok])) / len(A), len(set(j[ok])) / len(B)))
+        shift, obs = evidence(X, Y)
+        rng = np.random.default_rng(0); o = rng.permutation(len(X)); h = len(X) // 2
+        _, ref = evidence(X[o[:h]], X[o[h:2 * h]])
+        lab = KMeans(n_clusters=2, n_init=10, random_state=0).fit(X).labels_
+        _, dis = evidence(X[lab == 0], X[lab == 1]) if min((lab == 0).sum(), (lab == 1).sum()) > 21 else (None, 0.0)
+        score = float(np.clip((obs - dis) / (ref - dis), 0.0, 1.0)) if ref > dis else 0.0
+        w = score if correction == "mnncov" else float(score > 0)
+        _LAST.update(mnncred_share=obs, mnncred_reference=ref, mnncred_disjoint_reference=dis, mnncred_weight=w)
+        return X, Y - w * shift
     if correction == "genebatch":  # applied on the counts (gene_batch), nothing left to do on the PCA
         return X, Y
     if correction == "mnn":

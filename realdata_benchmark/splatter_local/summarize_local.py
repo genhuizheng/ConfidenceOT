@@ -97,16 +97,17 @@ def calibration(a) -> None:
     print("\n".join(md[:8]))
     if a.freeze:
         sel = pd.read_csv(a.root / (f"CALIBRATION_SELECTION_{a.selection}.tsv" if a.selection else "CALIBRATION_SELECTION.tsv"), sep="\t").set_index("arm")
-        val = pd.read_csv(a.root / "CALIBRATION_SELECTION_validation.tsv", sep="\t").set_index("arm")
+        val = pd.read_csv(a.root / f"CALIBRATION_SELECTION_{a.tag}.tsv", sep="\t").set_index("arm")
         c1, c2 = sel.index[sel.chosen][0], val.index[val.chosen][0]
         if c1 == c2:
-            arm, note = c1, "replicates 1-2 and the independent replicates 3-4 choose the same arm"
+            arm, note = c1, f"the development selection ({a.selection or 'default'}) and the independent seeds ({a.tag}) choose the same arm"
         else:
-            both = pd.concat([pd.read_csv(a.root / "RESULTS_calibration.tsv", sep="\t"), pd.read_csv(a.root / "RESULTS_calibration_validation.tsv", sep="\t")])
+            both = pd.concat([pd.read_csv(a.root / (f"RESULTS_calibration_{a.selection}.tsv" if a.selection else "RESULTS_calibration.tsv"), sep="\t"),
+                              pd.read_csv(a.root / f"RESULTS_calibration_{a.tag}.tsv", sep="\t")])
             ff = per_fit(both, "arm"); tt = by_level(ff, "arm")
             pooled = tt.groupby("arm")[["case1_frr", "case2_f1", "case3_recall"]].mean().sort_values("case2_f1", ascending=False)
-            arm, note = pooled.index[0], f"replicates 1-2 chose {c1}, replicates 3-4 chose {c2}; frozen by replicates 1-4 pooled"
-        (a.root / "FROZEN_CALIBRATION.json").write_text(json.dumps({"arm": arm, "note": note, "rules": "SELECTION_RULES.md"}, indent=1))
+            arm, note = pooled.index[0], f"development chose {c1}, independent seeds chose {c2}; frozen by both pooled"
+        (a.root / a.freeze_name).write_text(json.dumps({"arm": arm, "note": note, "rules": "SELECTION_RULES.md", "selection": a.selection, "validation": a.tag}, indent=1))
         print("FROZEN:", arm, "-", note)
 
 
@@ -131,6 +132,7 @@ if __name__ == "__main__":
     p.add_argument("--stage", choices=("calibration", "grid"), required=True)
     p.add_argument("--tag", default="")
     p.add_argument("--freeze", action="store_true")
+    p.add_argument("--freeze-name", default="FROZEN_CALIBRATION.json")
     p.add_argument("--selection", default="", help="tag of the replicates 1-2 selection table to freeze against (all = the 4 arms + exploration)")
     a = p.parse_args()
     calibration(a) if a.stage == "calibration" else grid(a)
