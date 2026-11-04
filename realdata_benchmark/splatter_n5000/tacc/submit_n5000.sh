@@ -13,7 +13,7 @@
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] --param-set splatter_default --pairing paired [--procs P] fit
 #   bash realdata_benchmark/splatter_n5000/tacc/submit_n5000.sh [--dry-run] [--after IDS] pairing-audit | case-report
 #
-# chain          everything in one submission: generate -> worklist (afterok every generation job) -> run (afterok
+# chain          everything in one submission: generate -> [--pairing paired: pairing audit 29_, afterok] -> worklist -> run (afterok
 #                the worklist job) -> collect (afterany every run job, so failed rows are still collected and listed)
 #                -> f1 (afterok collect); beside it the batch-effect audit (batch_effect_audit.slurm, afterok every
 #                generation job, read only). A failed generation or worklist leaves the later jobs in
@@ -170,7 +170,12 @@ case $stage in
 chain)
     [[ -f "$wl" ]] && { echo "$wl exists: the chain would not rebuild it; submit run / collect on their own" >&2; exit 2; }
     g=$(do_generate) || exit 1
-    w=$(do_worklist "$g") || exit 1
+    if [[ $pairing == paired ]]; then  # the fit waits for a passing pairing audit (29_ exits 1 when a check fails)
+        pa=$(do_pairing_audit "$g") || exit 1
+        w=$(do_worklist "$pa") || exit 1
+    else
+        w=$(do_worklist "$g") || exit 1
+    fi
     (( pilot )) || do_audit "$g" > /dev/null || exit 1
     r=$(do_run "$w") || exit 1
     c=$(do_collect "$r") || exit 1

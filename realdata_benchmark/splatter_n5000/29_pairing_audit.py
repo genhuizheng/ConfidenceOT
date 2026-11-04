@@ -21,7 +21,8 @@ Checks (each a row of PAIRING_AUDIT.tsv with expected / observed and holds True 
                       |log2 mean ratio| over genes with mean > 0.5, maximum |zero-fraction difference|
 Also every level of a replicate must share the drawn batch factors. On a root generated without --pairing paired the
 same checks show what Splatter's own sampler does to unaffected blocks (the RNG-consumption question).
-Writes OUT/PAIRING_AUDIT.tsv and OUT/PAIRING_AUDIT.md (refuses if OUT exists).
+Writes OUT/PAIRING_AUDIT.tsv, OUT/PAIRING_AUDIT.md and OUT/PASSED or OUT/FAILED (refuses if OUT exists); exits 1 when
+any check does not hold, so a fit chained afterok on it (submit_n5000.sh chain --pairing paired) does not start.
 """
 
 from __future__ import annotations
@@ -152,6 +153,9 @@ def main() -> None:
         lines.append(f"| {r.replicate} | {r.pair} | {r.check} | {r.expected} | {r.observed} | {r.detail} |")
     (a.out / "PAIRING_AUDIT.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
+    # a non-zero exit stops a fit chained afterok on this audit (submit_n5000.sh chain --pairing paired)
+    (a.out / ("PASSED" if bad.empty else "FAILED")).write_text(f"{len(bad)} checks do not hold\n")
+    sys.exit(0 if bad.empty else 1)
 
 
 if __name__ == "__main__":
