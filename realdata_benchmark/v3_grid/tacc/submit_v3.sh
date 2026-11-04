@@ -2,8 +2,8 @@
 # Frozen-calibration-v3 preprocessing grid on TACC (296 configurations, DS none, within_side_split+mnncovlocal) for
 # Splatter N = 5,000, LTL331 (PDX) and KP-Tracer (CRISPR lineage). The user submits; nothing runs by itself.
 #
-#   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--nodes N] [--hours H] [--procs P] [--fit-workers W] DATASET chain
-#   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] DATASET worklist
+#   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after IDS] [--nodes N] [--hours H] [--procs P] [--fit-workers W] DATASET chain
+#   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after IDS] DATASET worklist
 #   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after ID] DATASET pilot
 #   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after ID] [--nodes N] [--hours H] DATASET run
 #   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after ID] DATASET collect
@@ -68,11 +68,11 @@ submit() {
 dep() { [[ -n "$2" ]] && echo "--dependency=$1:$2"; }
 (( dry_run )) || mkdir -p "$root/logs/workers" || exit 1
 
-do_worklist() {
-    [[ -e "$src" ]] || (( dry_run )) || { echo "input $src does not exist" >&2; return 1; }
-    local id; id=$(submit -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J "v3${dataset:0:2}_wl" -o "$root/logs/worklist_%j.out" \
+do_worklist() {  # --after IDS: the worklist waits for these jobs (afterok), e.g. the Splatter pairing audit
+    [[ -e "$src" || -n "$after" ]] || (( dry_run )) || { echo "input $src does not exist" >&2; return 1; }
+    local id; id=$(submit $(dep afterok "$after") -p gg -N 1 -n 1 -t 01:00:00 -A MCB26031 -J "v3${dataset:0:2}_wl" -o "$root/logs/worklist_%j.out" \
         --wrap "$activate && python $here/build_worklist.py --dataset $dataset --root $root $wl_args") || return 1
-    echo "worklist job $id" >&2; echo "$id"
+    echo "worklist job $id${after:+ after $after}" >&2; echo "$id"
 }
 do_array() {  # $1 dependency (type:ids or empty), $2 worklist file, $3 tasks, $4 hours, $5 name
     local queued; queued=$(squeue -u "$USER" -h -r 2> /dev/null | wc -l)
