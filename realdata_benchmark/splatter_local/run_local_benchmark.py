@@ -238,7 +238,7 @@ def correct(X: np.ndarray, Y: np.ndarray, correction: str) -> tuple[np.ndarray, 
             _LAST.update(mnncred_disjoint_reference=dis)
         _LAST.update(mnncred_share=share, mnncred_reference=ref, mnncred_weight=w)
         return X, Y - w * shift
-    if correction in ("mnncov", "mnncovgate"):
+    if correction in ("mnncov", "mnncovgate", "mnncovlocal"):
         # credible-coverage MNN (shared_evidence_v2.py, statistic cover_min): after the iterative credible-anchor
         # translation (k = 20 anchors, credible = closer than both cells' 20th same-side neighbour), the share of each
         # side's cells covered by a credible anchor, the smaller side's; normalised between two references from the
@@ -264,15 +264,27 @@ def correct(X: np.ndarray, Y: np.ndarray, correction: str) -> tuple[np.ndarray, 
                 if ok.sum() < 5:
                     break
                 shift = np.median(D[ok], axis=0)
+            _LAST["_anchors"] = (j[ok], D[ok], float(np.median(rb)))
             return shift, float(min(len(set(i[ok])) / len(A), len(set(j[ok])) / len(B)))
         shift, obs = evidence(X, Y)
+        anchors = _LAST.pop("_anchors", None)
         rng = np.random.default_rng(0); o = rng.permutation(len(X)); h = len(X) // 2
         _, ref = evidence(X[o[:h]], X[o[h:2 * h]])
         lab = KMeans(n_clusters=2, n_init=10, random_state=0).fit(X).labels_
         _, dis = evidence(X[lab == 0], X[lab == 1]) if min((lab == 0).sum(), (lab == 1).sum()) > 21 else (None, 0.0)
         score = float(np.clip((obs - dis) / (ref - dis), 0.0, 1.0)) if ref > dis else 0.0
         w = score if correction == "mnncov" else float(score > 0)
+        _LAST.pop("_anchors", None)
         _LAST.update(mnncred_share=obs, mnncred_reference=ref, mnncred_disjoint_reference=dis, mnncred_weight=w)
+        if correction == "mnncovlocal" and w > 0 and anchors is not None and len(anchors[0]) >= 5:
+            # same gate; when open, each target cell moves by the Gaussian-kernel average of the credible anchor
+            # displacements around it (bandwidth = median 20th same-side neighbour distance of the target), shrunk
+            # towards the global credible shift by one pseudo-anchor of weight 1
+            ja, Da, h = anchors
+            d2 = ((Y[:, None, :] - Y[ja][None, :, :]) ** 2).sum(-1)
+            K = np.exp(-d2 / (2 * h * h))
+            disp = (K @ Da + shift[None, :]) / (K.sum(1, keepdims=True) + 1.0)
+            return X, Y - disp
         return X, Y - w * shift
     if correction == "genebatch":  # applied on the counts (gene_batch), nothing left to do on the PCA
         return X, Y
@@ -426,6 +438,10 @@ def main() -> None:
     p.add_argument("--max-tasks", type=int, default=0, help="run only the first N tasks (smoke test; finished keys are skipped later)")
     p.add_argument("--rscript", default="D:/R-4.4.1/bin/Rscript.exe")
     p.add_argument("--registry", type=Path, default=REPO / "results" / "realdata_benchmark_20261031" / "PREPROCESSING_CONFIG_REGISTRY.tsv")
+    p.add_argument("--config", default=BASELINE, help="calibration stage: the fixed representation (registry config id)")
+    p.add_argument("--frozen", default="FROZEN_CALIBRATION.json", help="grid stage: the frozen calibration file (arm, config)")
+    p.add_argument("--no-ds", action="store_true", help="grid stage: depth-equalised configurations left out (DS none only)")
+    p.add_argument("--drop-duplicates", action="store_true", help="grid stage: rankhvg expected left out (identical to midrank, no cut)")
     a = p.parse_args()
     levels = a.levels or (ALL_LEVELS if a.stage == "calibration" else GRID_LEVELS)
     a.root.mkdir(parents=True, exist_ok=True)
@@ -441,11 +457,15 @@ def main() -> None:
             old.reindex(columns=COLUMNS).to_csv(res, sep="\t", index=False)
         old = old[old.status == "ok"]
         done = set(zip(old.level, old.replicate.astype(int), old.pair_id, old.config_id, old.arm))
+    cfg = a.config
     if a.stage == "grid":
-        frozen = json.loads((a.root / "FROZEN_CALIBRATION.json").read_text())["arm"]
+        fz = json.loads((a.root / a.frozen).read_text())
+        frozen, cfg = fz["arm"], fz.get("config", BASELINE)
         import factorial_common as fc
         keys = {}
         for s in fc.grid():
+            if (a.no_ds and s["ds"] != "none") or (a.drop_duplicates and s["encoding"] == "rankhvg" and s["tie"] == "expected"):
+                continue
             k = (s["encoding"], s["K"], s["H"], s["tie"], s["ds"])
             keys.setdefault(k, s)
     tasks = []
@@ -458,13 +478,13 @@ def main() -> None:
                         "manifest": str(cond / "manifest.csv"), "pair_index": i, "truth": str(cond / str(r.pair_id) / "truth" / "population_truth.tsv")}
                 tag = f"{lv}_rep{rep}_{i}"
                 if a.stage == "calibration":
-                    arms = [x for x in a.arms if (lv, rep, r.pair_id, BASELINE, x) not in done]
+                    arms = [x for x in a.arms if (lv, rep, r.pair_id, cfg, x) not in done]
                     if arms:
-                        tasks.append(base | {"kind": "production", "config_id": BASELINE, "spec": reg.loc[BASELINE].to_dict(), "arms": arms,
+                        tasks.append(base | {"kind": "production", "config_id": cfg, "spec": reg.loc[cfg].to_dict(), "arms": arms,
                                              "work": str(a.root / "work" / tag)})
                 else:
-                    if (lv, rep, r.pair_id, BASELINE, frozen) not in done:
-                        tasks.append(base | {"kind": "production", "config_id": BASELINE, "spec": reg.loc[BASELINE].to_dict(), "arms": [frozen],
+                    if (lv, rep, r.pair_id, cfg, frozen) not in done:
+                        tasks.append(base | {"kind": "production", "config_id": cfg, "spec": reg.loc[cfg].to_dict(), "arms": [frozen],
                                              "work": str(a.root / "work" / f"{tag}_baseline")})
                     for k, s in keys.items():
                         probe = fc.config_id({**s, "scale": True, "cost": "sqeuc"}).replace(f"|pca{fc.N_PCS}", f"|pca{a.pcs[-1]}")

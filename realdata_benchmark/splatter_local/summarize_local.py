@@ -45,15 +45,35 @@ def per_fit(r: pd.DataFrame, group: str) -> pd.DataFrame:
         elif case.startswith("Case3"):
             rec["case3_recall"] = float(g.recall.mean()); rec["case3_false_asserted_mass"] = float(g.false_asserted_mass.iloc[0])
         rec["one_side_all"] = (rec["source_rejected"] >= 0.99 and rec["target_rejected"] <= 0.01) or (rec["target_rejected"] >= 0.99 and rec["source_rejected"] <= 0.01)
+        # effective readout (frozen calibration v3): when one side retains no cell at all, the other side's retained cells
+        # have no possible partner (their asserted mass is exactly 0), so they count as unmatched; nothing else changes
+        eff = {}
+        for side, other in (("source", "target"), ("target", "source")):
+            d = g[g.side == side].iloc[0]
+            if float(g[g.side == other].rejected_fraction.iloc[0]) == 1.0:
+                n, pos = int(d.cells), int(d.to_reject)
+                eff[side] = {"rec": 1.0 if pos else np.nan, "prec": pos / n if n else np.nan, "frr": 1.0 if n - pos else np.nan}
+            else:
+                eff[side] = {"rec": float(d.recall), "prec": float(d.precision), "frr": float(d.false_rejection_rate)}
+            r_, p_ = eff[side]["rec"], eff[side]["prec"]
+            eff[side]["f1"] = np.nan if not np.isfinite(r_) else (0.0 if r_ == 0 or not np.isfinite(p_) else 2 * p_ * r_ / (p_ + r_))
+        if case.startswith("Case1"):
+            rec["case1_frr_eff"] = float(np.nanmean([eff["source"]["frr"], eff["target"]["frr"]]))
+        elif case.startswith("Case2"):
+            pos_side = "source" if int(g[g.side == "source"].to_reject.iloc[0]) > 0 else "target"
+            rec["case2_f1_eff"] = eff[pos_side]["f1"]
+        elif case.startswith("Case3"):
+            rec["case3_recall_eff"] = float(np.nanmean([eff["source"]["rec"], eff["target"]["rec"]]))
         rows.append(rec)
     return pd.DataFrame(rows)
 
 
 def by_level(f: pd.DataFrame, group: str) -> pd.DataFrame:
-    metrics = ["case1_frr", "case2_f1", "case3_recall", "reject_all_f1", "case2_precision", "case2_recall", "case2_other_frr",
-               "case3_false_asserted_mass", "rejection_cost", "one_side_all"]
+    metrics = ["case1_frr", "case2_f1", "case3_recall", "case1_frr_eff", "case2_f1_eff", "case3_recall_eff", "reject_all_f1",
+               "case2_precision", "case2_recall", "case2_other_frr", "case3_false_asserted_mass", "rejection_cost", "one_side_all"]
+    f = f.reindex(columns=list(dict.fromkeys(list(f.columns) + metrics)))  # a metric whose case is absent stays NaN
     m = f.groupby([group, "level"])[metrics].mean()
-    rep = f.groupby([group, "level", "replicate"])[["case1_frr", "case2_f1", "case3_recall"]].mean()
+    rep = f.groupby([group, "level", "replicate"])[["case1_frr", "case2_f1", "case3_recall", "case1_frr_eff", "case2_f1_eff", "case3_recall_eff"]].mean()
     sd = rep.groupby([group, "level"]).std().add_suffix("_rep_sd")
     return m.join(sd).reset_index()
 
@@ -111,19 +131,51 @@ def calibration(a) -> None:
         print("FROZEN:", arm, "-", note)
 
 
+def pareto(x: pd.DataFrame) -> pd.Series:
+    """Not dominated on (lower case1_frr_eff, higher case2_f1_eff, higher case3_recall_eff)."""
+    v = x[["case1_frr_eff", "case2_f1_eff", "case3_recall_eff"]].to_numpy(float)
+    out = []
+    for k in range(len(v)):
+        a_, others = v[k], np.delete(v, k, axis=0)
+        dom = (others[:, 0] <= a_[0]) & (others[:, 1] >= a_[1]) & (others[:, 2] >= a_[2]) & \
+              ((others[:, 0] < a_[0]) | (others[:, 1] > a_[1]) | (others[:, 2] > a_[2]))
+        out.append(not dom.any())
+    return pd.Series(out, index=x.index)
+
+
 def grid(a) -> None:
-    r = pd.read_csv(a.root / "RESULTS_grid.tsv", sep="\t")
+    sfx = f"_{a.tag}" if a.tag else ""
+    r = pd.read_csv(a.root / f"RESULTS_grid{sfx}.tsv", sep="\t")
+    base = json.loads((a.root / a.frozen).read_text()).get("config", "") if a.frozen else ""
     f = per_fit(r, "config_id"); t = by_level(f, "config_id")
-    t.to_csv(a.root / "GRID_SUMMARY.tsv", sep="\t", index=False)
-    md = ["# L1-L5 preprocessing grid (M4-E; frozen calibration)", ""]
-    for lv in [l for l in LEVELS if l in set(t.level)]:
-        x = t[t.level == lv].sort_values("case2_f1", ascending=False)
-        top = x.case2_f1.iloc[0]; sd = x.case2_f1_rep_sd.iloc[0] if np.isfinite(x.case2_f1_rep_sd.iloc[0]) else 0
-        best = x[x.case2_f1 >= top - sd]
-        md += [f"## {lv}: best set {len(best)} configurations (Case 2 F1 >= {top - sd:.3f})", "",
-               x.head(15)[["config_id", "case2_f1", "case2_f1_rep_sd", "case1_frr", "case3_recall", "one_side_all"]].round(3).to_markdown(index=False), ""]
-    (a.root / "GRID_SUMMARY.md").write_text("\n".join(md) + "\n", encoding="utf-8")
-    print("\n".join(md[:30]))
+    t["pareto"] = False
+    for lv in set(t.level):
+        m = t.level == lv
+        t.loc[m, "pareto"] = pareto(t[m]).to_numpy()
+    t.to_csv(a.root / f"GRID_SUMMARY{sfx}.tsv", sep="\t", index=False)
+    cols = ["config_id", "case1_frr_eff", "case2_f1_eff", "case3_recall_eff", "case2_f1_rep_sd", "one_side_all", "case1_frr", "case3_recall"]
+    levels = [l for l in LEVELS if l in set(t.level)]
+    md = [f"# L1-L5 preprocessing grid (M4-E; frozen calibration {a.frozen}; effective readout)", "",
+          "Each level: the Pareto front on (Case 1 FRR low, Case 2 Rejection F1 high, Case 3 unmatched recall high), "
+          "sorted by Case 2 F1; the baseline is shown whether or not it is on the front. Raw-gate FRR / recall beside.", ""]
+    for lv in levels:
+        x = t[t.level == lv]
+        front = x[x.pareto].sort_values("case2_f1_eff", ascending=False)
+        bl = x[x.config_id == base]
+        md += [f"## {lv}: {len(front)} configurations on the front (of {len(x)})", "",
+               pd.concat([front.head(20), bl]).drop_duplicates("config_id")[cols].round(3).to_markdown(index=False), ""]
+    # robust view over L1-L5: on the front at how many levels, and the mean of each metric
+    agg = t.groupby("config_id").agg(levels_on_front=("pareto", "sum"), case1_frr_eff=("case1_frr_eff", "mean"),
+                                     case2_f1_eff=("case2_f1_eff", "mean"), case3_recall_eff=("case3_recall_eff", "mean"),
+                                     worst_case2_f1=("case2_f1_eff", "min"), one_side_all=("one_side_all", "mean")).reset_index()
+    agg["pareto_overall"] = pareto(agg).to_numpy()
+    agg = agg.sort_values(["levels_on_front", "case2_f1_eff"], ascending=False)
+    agg.to_csv(a.root / f"GRID_OVERALL{sfx}.tsv", sep="\t", index=False)
+    md += ["## Over L1-L5", "", "Configurations on the Pareto front at the most levels, then by mean Case 2 F1; the overall front "
+           "(on the three means) is marked. Baseline included.", "",
+           pd.concat([agg.head(25), agg[agg.config_id == base]]).drop_duplicates("config_id").round(3).to_markdown(index=False), ""]
+    (a.root / f"GRID_SUMMARY{sfx}.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    print("\n".join(md[-30:]))
 
 
 if __name__ == "__main__":
@@ -133,6 +185,7 @@ if __name__ == "__main__":
     p.add_argument("--tag", default="")
     p.add_argument("--freeze", action="store_true")
     p.add_argument("--freeze-name", default="FROZEN_CALIBRATION.json")
+    p.add_argument("--frozen", default="", help="grid: the frozen calibration file (its config is the baseline)")
     p.add_argument("--selection", default="", help="tag of the replicates 1-2 selection table to freeze against (all = the 4 arms + exploration)")
     a = p.parse_args()
     calibration(a) if a.stage == "calibration" else grid(a)
