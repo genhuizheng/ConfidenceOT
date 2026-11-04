@@ -154,3 +154,55 @@ reproduce the gates of the earlier KP run (E1) exactly.
 - CNV.
 - Quinn L1: Quinn has clones, not families.
 - Any configuration chosen after seeing lineage scores.
+
+---
+
+## 2026-11-03 amendment (user, before any score; replaces section 8's "CRISPR-informed costs" exclusion)
+
+The factorial keeps four input settings. **RNA-only (R)** is unchanged: sections 1-7, ready to run. The three CRISPR
+settings below are prepared, not run. Their open decisions are marked **DECIDE**.
+
+| Setting | Cost | Evaluation status |
+|---|---|---|
+| R: RNA only | RNA block | L1-L3: valid. Lineage is used only for scoring |
+| C: CRISPR only | CRISPR block | L1-L3 are circular (the truth is derived from the same characters): upper bound only, never validation |
+| RC: RNA + full CRISPR | RNA block + CRISPR block | L1-L3 circular: upper bound only |
+| RH: RNA + held-out intBCs | RNA block + CRISPR block over the input intBCs | L1-L3 partly circular (the authors' trees and families use every character); the clean readout is L3h below |
+
+**CRISPR block (fixed here):**
+- **Distance:** per cell pair, over characters observed in both cells (`-` = missing, never a state). It is Cassiopeia's
+  weighted Hamming distance (Jones et al. 2020):
+  - a character in the same state costs 0;
+  - uncut (`0`) against an allele costs 1;
+  - two different alleles cost 2;
+  - with the authors' indel priors available, an allele mismatch is weighted by −log prior (rarer alleles weigh more);
+  - the sum is divided by the number of shared observed characters.
+- **Pairs with no shared observed character** get the unit's median distance.
+- **Coordinates:** classical MDS of the unit's full distance matrix (source and target cells together), 30 dimensions.
+  This lets the block enter the existing coordinate-based cost and the within-side calibration null unchanged.
+- **Combined with RNA:** as `rna_cnv` (02_run_pair.py). Each block is divided by the square root of its median random
+  source-target pair cost and the two are concatenated. The weight is label-free and never tuned on CRISPR.
+
+**Held-out intBCs (RH):**
+- The intBC is the independent unit: three consecutive characters r0-r2, r3-r5, … This is proven by shared
+  missingness for 3454, 3457 T1, 3508 and 3515; for 3724 and 3457 T4 the allele table must confirm it.
+- **Two fixed partitions, both reported:**
+  - P1: even-indexed intBCs into the cost, odd-indexed held out;
+  - P2: the reverse.
+- **L3h (clean readout):** per metastatic cell, the coupling-weighted held-out-character distance to its matched
+  primary cells, against the independent coupling with the method's own marginals. ΔDh_norm is as L3 with the tree
+  distance replaced by the held-out character distance.
+- **3724 and 3457 T4 have about 3 intBCs** (1-2 per half). Their RH result is reported, marked low-powered.
+
+**DECIDE 1, scope:**
+- (a) RC and RH over all 592 RNA configurations (brute force; about 3 x 67,000 more rows: RC, RH-P1, RH-P2);
+- (b) RC and RH on the RNA-only best set plus `ranknm256_noscale_ds_cos`.
+
+C is one configuration either way (no RNA preprocessing).
+
+**DECIDE 2, Quinn:** its character matrices, trees and allele tables are on TACC only and not audited. Include Quinn
+in C / RC / RH after an audit, or KP only.
+
+**Needed from TACC before any CRISPR code runs:**
+- KP allele tables (intBC × cut site) and indel priors from `KPTracer-Data`;
+- Quinn's `converted/lineage/<tag>/` inventory (format, cell-id alignment, intBC structure).
