@@ -3,13 +3,15 @@
     python realdata_benchmark/splatter_n5000/29_pairing_audit.py --root ROOT --out OUT [--replicates 1 2 3]
 
 For each replicate, level pairs that should differ by one factor only:
-  batch only          L2_depth_dropout -> L3_batch, A4_perturb_only -> L4_batch_perturb, A5_imbalance_only -> L5_...
+  batch only          L2_depth_dropout -> L3_batch, A4_perturb_only -> L4_batch_perturb
   perturbation only   L3_batch -> L4_batch_perturb, L2_depth_dropout -> A4_perturb_only
   proportions only    L2_depth_dropout -> A5_imbalance_only, L4_batch_perturb -> L5_batch_perturb_imbalance
+  batch+perturbation  A5_imbalance_only -> L5_batch_perturb_imbalance (A5 = L2 + imbalance has neither, 20_generate_n5000.R;
+                      no level is L2 + perturbation + imbalance, so L5 has no batch-only partner)
 Checks (each a row of PAIRING_AUDIT.tsv with expected / observed and holds True / False):
   gene truth          GeneMean, BaseGeneMean, OutlierFactor, DEFacGroup*, BatchFacDrawn* identical; the applied
-                      BatchFacBatch* identical except across a batch-only pair; PerturbationFactor identical except
-                      across a perturbation-only pair
+                      BatchFacBatch* identical except across a pair whose kind includes batch; PerturbationFactor
+                      identical except across a pair whose kind includes perturbation
   cells               cell ids, sides and expected library sizes identical; groups identical except the target side of
                       a proportions-only pair
   counts              per side and population block: share of identical entries. Expected bit-identical: every block
@@ -38,7 +40,7 @@ import scipy.io
 import scipy.sparse as sp
 
 PAIRS = [("batch", "L2_depth_dropout", "L3_batch"), ("batch", "A4_perturb_only", "L4_batch_perturb"),
-         ("batch", "A5_imbalance_only", "L5_batch_perturb_imbalance"), ("perturbation", "L3_batch", "L4_batch_perturb"),
+         ("batch+perturbation", "A5_imbalance_only", "L5_batch_perturb_imbalance"), ("perturbation", "L3_batch", "L4_batch_perturb"),
          ("perturbation", "L2_depth_dropout", "A4_perturb_only"), ("proportions", "L2_depth_dropout", "A5_imbalance_only"),
          ("proportions", "L4_batch_perturb", "L5_batch_perturb_imbalance")]
 BASE_TRUTH = ("GeneMean", "BaseGeneMean", "OutlierFactor", "DEFacGroup", "BatchFacDrawn")
@@ -95,14 +97,15 @@ def main() -> None:
             if l1 not in data or l2 not in data:
                 continue
             A, B = data[l1], data[l2]; pair = f"{l1} -> {l2}"
+            has_batch = "batch" in kind.split("+"); has_pert = "perturbation" in kind.split("+")
             ok, d = same_cols(A["genes"], B["genes"], BASE_TRUTH)
             add(rep, kind, pair, "gene means, outliers, group DE, drawn batch factors", "identical", "identical" if ok else "differ", ok, d)
             okb, d = same_cols(A["genes"], B["genes"], ("BatchFacBatch",))
-            add(rep, kind, pair, "applied batch factors", "differ" if kind == "batch" else "identical",
-                "identical" if okb else "differ", okb != (kind == "batch"), d)
+            add(rep, kind, pair, "applied batch factors", "differ" if has_batch else "identical",
+                "identical" if okb else "differ", okb != has_batch, d)
             okp = np.array_equal(A["genes"].PerturbationFactor.to_numpy(), B["genes"].PerturbationFactor.to_numpy())
-            add(rep, kind, pair, "perturbation factors", "differ" if kind == "perturbation" else "identical",
-                "identical" if okp else "differ", okp != (kind == "perturbation"))
+            add(rep, kind, pair, "perturbation factors", "differ" if has_pert else "identical",
+                "identical" if okp else "differ", okp != has_pert)
             ca, cb = A["cells"], B["cells"]
             same_ids = ca.cell_id.equals(cb.cell_id) and ca.side.equals(cb.side)
             add(rep, kind, pair, "cell ids and sides", "identical", "identical" if same_ids else "differ", same_ids)
@@ -127,14 +130,14 @@ def main() -> None:
                     share = 1.0 - diff.nnz / (xa.shape[0] * xa.shape[1])
                     # a proportions-only pair is compared on the cells whose group is the same in both levels: their
                     # latent means are the same, so their counts must be too
-                    affected = (kind == "batch") or (kind == "perturbation" and side == "target" and g == "Group1")
+                    affected = has_batch or (kind == "perturbation" and side == "target" and g == "Group1")
                     detail = ""
                     if kind == "perturbation" and side == "target" and g == "Group1":
                         dcols = np.unique(diff.tocoo().col)
                         outside = int((~pert[dcols]).sum())
                         add(rep, kind, pair, f"{side} {g}: entries differing outside perturbed genes", "0", str(outside), outside == 0,
                             f"{len(dcols)} genes differ, {int(pert.sum())} perturbed")
-                    if kind == "batch":
+                    if has_batch:
                         bcol = "BatchFacBatch1" if side == "source" else "BatchFacBatch2"
                         tb = np.log2(B["genes"][bcol].to_numpy(float) / A["genes"][bcol].to_numpy(float))
                         pa = np.asarray(xa.sum(0)).ravel(); pb = np.asarray(xb.sum(0)).ravel()

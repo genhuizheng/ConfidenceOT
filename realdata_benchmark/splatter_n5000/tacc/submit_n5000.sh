@@ -151,7 +151,7 @@ do_f1() {  # $1 ids to wait for (afterok)
 }
 do_pairing_audit() {  # $1 ids to wait for (afterok)
     local id; id=$(submit $(dep_args afterok "$1") -p "$partition" -N 1 -n 1 -t 02:00:00 -A MCB26031 -J rb5_pair_audit -o "$root/logs/pairing_audit_%j.out" \
-        --wrap "$activate && python realdata_benchmark/splatter_n5000/29_pairing_audit.py --root $root --out $root/PAIRING_AUDIT_$(date +%Y%m%d)") || return 1
+        --wrap "$activate && python realdata_benchmark/splatter_n5000/29_pairing_audit.py --root $root --out ${RB5_PAIR_AUDIT_OUT:-$root/PAIRING_AUDIT_$(date +%Y%m%d)}") || return 1
     echo "pairing audit job $id${1:+ (after $1)} -> $root/PAIRING_AUDIT_<date>/PAIRING_AUDIT.md" >&2; echo "$id"
 }
 do_case_report() {  # $1 ids to wait for (afterok)
