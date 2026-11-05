@@ -513,6 +513,18 @@ def main() -> None:
         "Replaced by: retained cells of one state grouped by fate (next slides), on original and depth-equalised counts."],
         size=13, fill=PEACH)
 
+    for cfg in ("splatter_l5_best", "logcpm"):
+        for side in ("source", "target"):
+            q = "the next" if side == "source" else "the previous"
+            s = d.slide(f"Rejected vs retained GSEA, {LABEL[cfg]}, as {side}", notes=(
+                f"Each row: the cells of one state at one time point, split by the gate against {q} time point into "
+                "rejected and retained; counts and the depth AUC (rejected vs retained, > 0.5 = rejected deeper) on the "
+                "left. Units with >= 20 cells in both groups (pdx_deg_gsea.py, units.tsv lists the rest).\n"
+                "Colour: NES, orange = higher in rejected, blue = higher in retained; one scale (±2.5); FDR not drawn.\n"
+                "Shown for reference only: rows follow the depth AUC (previous slide), so whole rows lean one way. The "
+                "fate contrasts on the next slides replace this analysis."))
+            picture(s, a.figures / "pdx_gsea" / f"pdx_gsea_{cfg}_{side}.png", LEFT, TOP, W, BOTTOM - TOP)
+
     s = d.slide("PDX DEG and GSEA by fate: logCPM", notes=(
         "Script realdata_benchmark/v3_grid/figures/pdx_fate_deg_gsea.py; tables in results/v3_grid_20261104/"
         "pdx_fate_deg_gsea_20261105 (fates_logcpm.tsv.gz: every retained cell's dominant fate and its share; "
