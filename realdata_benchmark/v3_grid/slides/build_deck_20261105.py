@@ -520,7 +520,8 @@ def main() -> None:
                 f"Each row: the cells of one state at one time point, split by the gate against {q} time point into "
                 "rejected and retained; counts and the depth AUC (rejected vs retained, > 0.5 = rejected deeper) on the "
                 "left. Units with >= 20 cells in both groups (pdx_deg_gsea.py, units.tsv lists the rest).\n"
-                "Colour: NES, orange = higher in rejected, blue = higher in retained; one scale (±2.5); FDR not drawn.\n"
+                "Colour: NES, orange = higher in rejected, blue = higher in retained; one scale (±2.5); dot size −log10 FDR, "
+                "outlined FDR < 0.05 (pseudo-replicated cells: a ranking aid, not a test).\n"
                 "Shown for reference only: rows follow the depth AUC (previous slide), so whole rows lean one way. The "
                 "fate contrasts on the next slides replace this analysis."))
             picture(s, a.figures / "pdx_gsea" / f"pdx_gsea_{cfg}_{side}.png", LEFT, TOP, W, BOTTOM - TOP)
@@ -566,8 +567,8 @@ def main() -> None:
             "largest share of its coupling mass). Row = group X vs the reference group (the cells that stay in their "
             "state, else the largest group); counts and the depth AUC (X vs reference) on the left.\n"
             "Columns: all 50 hallmark sets by the process categories of Liberzon et al. 2015. Colour: NES, orange = higher "
-            "in group X, blue = higher in the reference; one scale (±2.5). FDR not drawn (pseudo-replicated cells; it is "
-            "in gsea_hallmark.tsv).\n"
+            "in group X, blue = higher in the reference; one scale (±2.5). Dot size: −log10 FDR in four "
+            "bins, outlined FDR < 0.05; the cells are pseudo-replicates, so size ranks the sets and is not a test.\n"
             "Equalised = each cell's counts binomially downsampled to 2,817 UMIs (27_), so the two groups cannot differ "
             "in depth; original = the QC-passed counts."))
         if len(kinds) == 2:

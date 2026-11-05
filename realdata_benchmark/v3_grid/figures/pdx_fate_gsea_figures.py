@@ -8,8 +8,9 @@ One panel per configuration x side x expression (rawqc, ds), every analysed cont
   rows     contrasts in time order, then the published state order; left columns: the cells' time point and the one
            they are coupled to, the state, the two groups compared, their cell counts, and the AUC of
            pre-equalisation depth for the fate group vs the reference (> 0.5: the fate group is deeper);
-  colour   NES of the fate group vs the reference (orange: higher in the fate group), one scale (+-2.5) for every
-           panel; the FDR is not drawn (pseudo-replicated cells; it is in gsea_hallmark.tsv).
+  dots     colour = NES of the fate group vs the reference (orange: higher in the fate group), one scale (+-2.5) for
+           every panel; area = -log10 FDR in four bins, outlined FDR < 0.05 (pseudo-replicated cells: a ranking aid,
+           not a test).
 Depth check (one point per row: mean NES over the 50 sets vs the depth AUC of its two groups):
 pdx_depth_check_fate_<expression> and, with --rejected-gsea, pdx_depth_check_rejected_rawqc (pdx_deg_gsea.py units).
 Also writes fate_composition_<cfg>.tsv: every pair x side x state, retained cells by dominant fate / origin.
@@ -24,11 +25,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import TwoSlopeNorm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import nbt_style as st  # noqa: E402
-from pdx_gsea_figures import CATEGORIES, CM, NAME, NES_LIM, PATHWAYS, SAMPLES, WEEK, pretty, term_key  # noqa: E402
+from pdx_gsea_figures import (CATEGORIES, NAME, RULE_LIGHT, SAMPLES, WEEK, PATHWAYS, dot_matrix, size_legend,
+                               term_key)  # noqa: E402
 from pdx_prepare import STATES  # noqa: E402
 
 EXPR = {"rawqc": "original counts", "ds": "depth-equalised counts (2,817 UMIs per cell)"}
@@ -38,14 +39,14 @@ TITLE = {"source": "Retained cells of one state, split by where ConfidenceOT sen
 EXPLAIN = {
     "source": ("Each row: retained cells of one state at one time point. Each cell's fate = the next-time-point state "
                "that receives most of its coupling mass. Row = cells with fate X vs cells with the reference fate "
-               "(their own state when\nthat group has >= 20 cells, else the largest group). Each square: hallmark "
-               "GSEA NES on genes ranked by Wilcoxon, X vs reference. One tumour per time point: read the NES, not a "
-               "p-value."),
+               "(their own state when\nthat group has >= 20 cells, else the largest group). Each dot: hallmark "
+               "GSEA NES on genes ranked by Wilcoxon, X vs reference. One tumour per time point: dot size (FDR) ranks "
+               "the sets, it is not a test."),
     "target": ("Each row: retained cells of one state at one time point. Each cell's origin = the previous-time-point "
                "state that sends most of its coupling mass. Row = cells from X vs cells from the reference origin "
-               "(their own state when\nthat group has >= 20 cells, else the largest group). Each square: hallmark "
-               "GSEA NES on genes ranked by Wilcoxon, X vs reference. One tumour per time point: read the NES, not a "
-               "p-value."),
+               "(their own state when\nthat group has >= 20 cells, else the largest group). Each dot: hallmark "
+               "GSEA NES on genes ranked by Wilcoxon, X vs reference. One tumour per time point: dot size (FDR) ranks "
+               "the sets, it is not a test."),
 }
 
 
@@ -57,28 +58,19 @@ def panel(gs: pd.DataFrame, con: pd.DataFrame, cfg: str, side: str, kind: str, o
     u["fi"] = u.fate.map(STATES.index)
     u = u.sort_values(["pi", "si", "fi"]).reset_index(drop=True)
     g = gs[(gs.config == cfg) & (gs.side == side) & (gs.expression == kind)].copy(); g["key"] = g.term.map(term_key)
-    nes = np.full((len(u), 50), np.nan)
+    nes = np.full((len(u), 50), np.nan); fdr = np.full_like(nes, np.nan)
     for i, r in u.iterrows():
         h = g[(g.pair == r.pair) & (g.state == r.state) & (g.fate == r.fate)].set_index("key")
         for j, pw in enumerate(PATHWAYS):
             if pw in h.index:
-                nes[i, j] = float(h.at[pw, "nes"])
+                nes[i, j] = float(h.at[pw, "nes"]); fdr[i, j] = float(h.at[pw, "fdr"])
 
     row_h, col_w = 0.15, 0.105
-    left, top_pad, bottom = 5.05, 0.92, 1.40
+    left, top_pad, bottom = 5.05, 0.92, max(1.40, 2.25 - len(u) * row_h)
     W = left + 50 * col_w + 1.35; H = top_pad + len(u) * row_h + bottom
     sh = st.Sheet(W, H)
     ax = sh.ax(left, bottom, 50 * col_w, len(u) * row_h)
-    cm = CM.copy(); cm.set_bad("#EEEFF0")
-    im = ax.pcolormesh(np.arange(51) - 0.5, np.arange(len(u) + 1) - 0.5, np.ma.masked_invalid(nes), cmap=cm,
-                       norm=TwoSlopeNorm(0, -NES_LIM, NES_LIM), edgecolors="white", lw=0.3)
-    ax.set_xlim(-0.5, 49.5); ax.set_ylim(len(u) - 0.5, -0.5)
-    ax.set_yticks([])
-    ax.set_xticks(range(50)); ax.set_xticklabels([pretty(p) for p in PATHWAYS], rotation=60,
-                                                 ha="right", rotation_mode="anchor", fontsize=st.FS_MIN)
-    ax.tick_params(length=0)
-    for s_ in ax.spines.values():
-        s_.set_visible(False)
+    im = dot_matrix(sh, ax, nes, fdr)
 
     x_week, x_state, x_fate, x_ref, x_nf, x_nr, x_auc = 0.08, 1.80, 1.92, 3.05, left - 0.80, left - 0.46, left - 0.08
     y_of = lambda k: bottom + (len(u) - k - 0.5) * row_h  # noqa: E731
@@ -95,7 +87,7 @@ def panel(gs: pd.DataFrame, con: pd.DataFrame, cfg: str, side: str, kind: str, o
         if new_block:
             sh.text(x_week, y_of(k), f"{WEEK[here]}  ({VERB[side]} {WEEK[other]})", fontsize=st.FS_MIN, va="center")
             if k:
-                ax.axhline(k - 0.5, color=st.INK, lw=0.5)
+                ax.axhline(k - 0.5, color=RULE_LIGHT, lw=0.5)
                 sh.fig.add_artist(plt.Line2D([x_week / W, left / W], [(y_of(k) + row_h / 2) / H] * 2, color=st.GUIDE,
                                              lw=0.5, transform=sh.fig.transFigure))
         if new_block or u.si.iat[k] != u.si.iat[k - 1]:
@@ -113,10 +105,10 @@ def panel(gs: pd.DataFrame, con: pd.DataFrame, cfg: str, side: str, kind: str, o
                     arrowprops=dict(arrowstyle="-", lw=0.5, color=st.INK), annotation_clip=False)
         ax.text((x0 + x1) / 2, -1.1, cat, ha="center", va="bottom", fontsize=st.FS_MIN, clip_on=False)
         if x0:
-            ax.axvline(x0 - 0.5, color="white", lw=1.2)
+            ax.axvline(x0 - 0.5, color=RULE_LIGHT, lw=0.5)
         x0 = x1 + 1
 
-    cx, ch = left + 50 * col_w + 0.22, min(1.1, max(0.6, len(u) * row_h))
+    cx, ch = left + 50 * col_w + 0.22, min(1.0, max(0.6, len(u) * row_h))
     cy = bottom + len(u) * row_h - ch
     cax = sh.ax(cx, cy, 0.08, ch)
     cb = sh.fig.colorbar(im, cax=cax, extend="both"); cb.outline.set_linewidth(0.4)
@@ -124,6 +116,7 @@ def panel(gs: pd.DataFrame, con: pd.DataFrame, cfg: str, side: str, kind: str, o
     sh.text(cx, cy + ch + 0.06, "NES", fontsize=st.FS_MIN, va="bottom")
     sh.text(cx + 0.32, cy + ch - 0.02, "higher in\ngroup X", fontsize=st.FS_MIN, color="#c06a08", va="top")
     sh.text(cx + 0.32, cy + 0.02, "higher in\nreference", fontsize=st.FS_MIN, color="#2b6cb4", va="bottom")
+    size_legend(sh, cx, cy - 0.12)
 
     sh.text(0.08, H - 0.08, f"{TITLE[side]}  ·  ConfidenceOT {NAME[cfg]}  ·  {EXPR[kind]}", fontsize=st.FS_TITLE,
             va="top")
