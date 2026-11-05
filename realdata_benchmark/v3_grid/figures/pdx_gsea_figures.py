@@ -6,8 +6,11 @@
 Per configuration and side (every analysed unit, both sides, all 50 hallmark sets; nothing filtered):
   pdx_gsea_<cfg>_<side>    rows = pair x state units (time order, then the published state order), columns = the 50
                            hallmark sets by the process categories of Liberzon et al. 2015; colour = NES of rejected vs
-                           retained (orange: higher in rejected); size = -log10 FDR in four bins. The cells are
-                           pseudo-replicates (one tumour per time point), so the size is a ranking aid, not a test.
+                           retained (orange: higher in rejected), one colour scale (+-2.5) for every panel; the NES only.
+                           The cells are pseudo-replicates (one tumour per time point), so the FDR is not drawn (it is
+                           in gsea_hallmark.tsv). Left columns: the time point of the gated cells and the one it is
+                           gated against, the state, the rejected and retained cell counts, and the AUC of pre-equalisation
+                           depth for rejected vs retained (> 0.5: rejected cells are deeper).
   pdx_deg_top.tsv          every unit: the 10 genes highest and lowest by Wilcoxon score, with log fold change and the
                            detected fraction in rejected cells
 """
@@ -45,7 +48,6 @@ CATEGORIES = [
 ]
 PATHWAYS = [p for _, m in CATEGORIES for p in m]
 assert len(PATHWAYS) == 50 and len(set(PATHWAYS)) == 50
-SIZE_BREAKS, SIZE_AREAS, SIZE_LABELS = (1.0, 2.0, 3.0), (3.0, 12.0, 26.0, 46.0), ("< 1", "1-2", "2-3", ">= 3")
 CM = LinearSegmentedColormap.from_list("nes", ["#2b6cb4", "#ffffff", "#f28c1c"])
 SAMPLES = ["w00_preCX_1", "w02_2wkCX_2", "w04_4wkCX_1", "w08_8wkCX_1", "w12_12wkCX_2", "w16_16wkCX_1", "w20_20wkCX_1_R",
            "w22_22wkCX_2_R"]
@@ -53,8 +55,22 @@ WEEK = dict(zip(SAMPLES, ["wk 0", "wk 2", "wk 4", "wk 8", "wk 12", "wk 16", "wk 
 NAME = {"baseline": "production baseline (ranknm256 production noscale cos PCA30)",
         "splatter_l5_best": "Splatter L5 best (ranknm256 midrank scale cos PCA50)",
         "logcpm": "logCPM (logcpm noscale cos PCA30)"}
-SIDE = {"source": "as source (does the cell have a counterpart at the next time point?)",
-        "target": "as target (does the cell have a counterpart at the previous time point?)"}
+NES_LIM = 2.5  # one colour scale for every panel; |NES| max 3.2, 99th percentile 2.2
+WEEK_HEAD = {"source": "cells at", "target": "cells at"}
+TITLE = {"source": "What differs between the cells ConfidenceOT rejects and keeps, gated against the NEXT time point",
+         "target": "What differs between the cells ConfidenceOT rejects and keeps, gated against the PREVIOUS time point"}
+EXPLAIN = {
+    "source": ("Each row: the cells of one state at one time point. ConfidenceOT (time point -> next time point) splits them "
+               "into rejected (no counterpart at the next time point) and retained (a counterpart there).\n"
+               "Each square: hallmark GSEA NES on genes ranked by Wilcoxon, rejected vs retained cells of that row. "
+               "One tumour per time point, so the cells are pseudo-replicates: read the NES, not a p-value (FDR in "
+               "gsea_hallmark.tsv). Depth AUC: rejected vs retained cells by sequencing depth (> 0.5: rejected deeper)."),
+    "target": ("Each row: the cells of one state at one time point. ConfidenceOT (previous time point -> time point) splits "
+               "them into rejected (no counterpart at the previous time point) and retained (a counterpart there).\n"
+               "Each square: hallmark GSEA NES on genes ranked by Wilcoxon, rejected vs retained cells of that row. "
+               "One tumour per time point, so the cells are pseudo-replicates: read the NES, not a p-value (FDR in "
+               "gsea_hallmark.tsv). Depth AUC: rejected vs retained cells by sequencing depth (> 0.5: rejected deeper)."),
+}
 
 
 UPPER = {"DNA", "UV", "DN", "IL6", "JAK", "STAT3", "IL2", "STAT5", "KRAS", "MTORC1", "PI3K", "AKT", "MTOR", "TGF", "TNFA",
@@ -71,11 +87,6 @@ def term_key(t: str) -> str:
     return t.replace("HALLMARK_", "").upper()
 
 
-def label(r) -> str:
-    a, b = r.pair.split("__")
-    return f"{WEEK[a]} -> {WEEK[b]} · {r.state}  ({r.rejected_n} / {r.retained_n})"
-
-
 def panel(gs: pd.DataFrame, units: pd.DataFrame, cfg: str, side: str, out: Path) -> int:
     u = units[(units.config == cfg) & (units.side == side) & (units.status == "analysed")].copy()
     if u.empty:
@@ -83,57 +94,73 @@ def panel(gs: pd.DataFrame, units: pd.DataFrame, cfg: str, side: str, out: Path)
     u["pi"] = u.pair.map(lambda p: SAMPLES.index(p.split("__")[0])); u["si"] = u.state.map(STATES.index)
     u = u.sort_values(["pi", "si"]).reset_index(drop=True)
     g = gs[(gs.config == cfg) & (gs.side == side)].copy(); g["key"] = g.term.map(term_key)
-    nes = np.full((len(u), 50), np.nan); fdr = np.full_like(nes, np.nan)
+    nes = np.full((len(u), 50), np.nan)
     for i, r in u.iterrows():
         h = g[(g.pair == r.pair) & (g.state == r.state)].set_index("key")
         for j, pw in enumerate(PATHWAYS):
             if pw in h.index:
-                nes[i, j] = float(h.at[pw, "nes"]); fdr[i, j] = float(h.at[pw, "fdr"])
-    strength = -np.log10(np.clip(fdr, 1e-3, 1))
-    area = np.asarray(SIZE_AREAS)[np.digitize(np.nan_to_num(strength), SIZE_BREAKS)]
+                nes[i, j] = float(h.at[pw, "nes"])
 
-    row_h, col_w = 0.115, 0.098
-    left, top_pad, bottom = 2.55, 0.80, 1.35
-    W = left + 50 * col_w + 1.05; H = top_pad + len(u) * row_h + bottom
+    row_h, col_w = 0.13, 0.105
+    left, top_pad, bottom = 3.15, 0.88, 1.40
+    W = left + 50 * col_w + 1.35; H = top_pad + len(u) * row_h + bottom
     sh = st.Sheet(W, H)
     ax = sh.ax(left, bottom, 50 * col_w, len(u) * row_h)
-    yy, xx = np.meshgrid(np.arange(len(u)), np.arange(50), indexing="ij")
-    ok = np.isfinite(nes)
-    lim = max(2.0, float(np.nanmax(np.abs(nes))) if ok.any() else 2.0)
-    sc_ = ax.scatter(xx[ok], yy[ok], s=area[ok], c=nes[ok], cmap=CM, norm=TwoSlopeNorm(0, -lim, lim), lw=0.25,
-                     edgecolors=np.where(fdr[ok] < 0.05, "#333333", "none"))
-    ax.set_xlim(-0.6, 49.6); ax.set_ylim(len(u) - 0.5, -0.5)
-    ax.set_yticks(range(len(u))); ax.set_yticklabels([label(r) for r in u.itertuples()], fontsize=st.FS_MIN)
+    cm = CM.copy(); cm.set_bad("#EEEFF0")
+    im = ax.pcolormesh(np.arange(51) - 0.5, np.arange(len(u) + 1) - 0.5, np.ma.masked_invalid(nes), cmap=cm,
+                       norm=TwoSlopeNorm(0, -NES_LIM, NES_LIM), edgecolors="white", lw=0.3)
+    ax.set_xlim(-0.5, 49.5); ax.set_ylim(len(u) - 0.5, -0.5)
+    ax.set_yticks([])
     ax.set_xticks(range(50)); ax.set_xticklabels([pretty(p) for p in PATHWAYS], rotation=60,
                                                  ha="right", rotation_mode="anchor", fontsize=st.FS_MIN)
     ax.tick_params(length=0)
     for s_ in ax.spines.values():
-        s_.set_linewidth(0.4); s_.set_color("#B0B5B9")
-    for k in range(1, len(u)):  # a rule between time-point pairs
-        if u.pi.iat[k] != u.pi.iat[k - 1]:
-            ax.axhline(k - 0.5, color="#D5D8DB", lw=0.4)
+        s_.set_visible(False)
+
+    # left columns: time point (one label per block), state, rejected and retained cell counts
+    x_week, x_state, x_rej, x_ret, x_auc = 0.08, left - 1.02, left - 0.74, left - 0.44, left - 0.08
+    y_of = lambda k: bottom + (len(u) - k - 0.5) * row_h  # noqa: E731
+    y_head = bottom + len(u) * row_h + 0.07
+    for x, t, ha in ((x_week, f"{WEEK_HEAD[side]}", "left"), (x_state, "state", "right"),
+                     (x_rej, "rejected", "right"), (x_ret, "retained", "right"),
+                     (x_auc, "depth AUC", "right")):
+        sh.text(x, y_head, t, fontsize=st.FS_MIN, color=st.SUBTLE, ha=ha, va="bottom")
+    for k, r in enumerate(u.itertuples()):
+        a_, b_ = r.pair.split("__")
+        here, other = (a_, b_) if side == "source" else (b_, a_)
+        if k == 0 or u.pi.iat[k] != u.pi.iat[k - 1]:
+            sh.text(x_week, y_of(k), f"{WEEK[here]}  (vs {WEEK[other]})", fontsize=st.FS_MIN, va="center")
+            if k:
+                ax.axhline(k - 0.5, color=st.INK, lw=0.5)
+                sh.fig.add_artist(plt.Line2D([x_week / W, left / W], [(y_of(k) + row_h / 2) / H] * 2, color=st.GUIDE,
+                                             lw=0.5, transform=sh.fig.transFigure))
+        sh.text(x_state, y_of(k), r.state, fontsize=st.FS_MIN, ha="right", va="center")
+        sh.text(x_rej, y_of(k), f"{r.rejected_n:,}", fontsize=st.FS_MIN, ha="right", va="center")
+        sh.text(x_ret, y_of(k), f"{r.retained_n:,}", fontsize=st.FS_MIN, ha="right", va="center")
+        sh.text(x_auc, y_of(k), f"{r.auc_depth_rejected:.2f}", fontsize=st.FS_MIN, ha="right", va="center")
+
     x0 = 0
     for cat, m in CATEGORIES:
         x1 = x0 + len(m) - 1
-        ax.annotate("", xy=(x0 - 0.3, -0.9), xytext=(x1 + 0.3, -0.9), xycoords="data",
+        ax.annotate("", xy=(x0 - 0.35, -0.85), xytext=(x1 + 0.35, -0.85), xycoords="data",
                     arrowprops=dict(arrowstyle="-", lw=0.5, color=st.INK), annotation_clip=False)
-        ax.text((x0 + x1) / 2, -1.2, cat, ha="center", va="bottom", fontsize=st.FS_MIN, clip_on=False)
+        ax.text((x0 + x1) / 2, -1.1, cat, ha="center", va="bottom", fontsize=st.FS_MIN, clip_on=False)
         if x0:
-            ax.axvline(x0 - 0.5, color="#D5D8DB", lw=0.4)
+            ax.axvline(x0 - 0.5, color="white", lw=1.2)
         x0 = x1 + 1
-    cax = sh.ax(left + 50 * col_w + 0.25, bottom + len(u) * row_h - 0.9, 0.08, 0.85)
-    cb = sh.fig.colorbar(sc_, cax=cax); cb.outline.set_linewidth(0.4); cb.ax.tick_params(labelsize=st.FS_MIN, length=2)
-    cb.set_label("NES (orange: higher in rejected)", fontsize=st.FS_MIN)
-    lx, ly = left + 50 * col_w + 0.25, bottom + len(u) * row_h - 1.25
-    sh.text(lx, ly, "-log10 FDR", fontsize=st.FS_MIN)
-    for k, (a_, lab) in enumerate(zip(SIZE_AREAS, SIZE_LABELS)):
-        sh.fig.add_artist(plt.Line2D([(lx + 0.06) / W], [(ly - 0.16 * (k + 1)) / H], marker="o", ms=np.sqrt(a_),
-                                     color="#808080", lw=0, transform=sh.fig.transFigure))
-        sh.text(lx + 0.16, ly - 0.16 * (k + 1), lab, fontsize=st.FS_MIN, va="center")
-    sh.text(left, H - 0.08, f"Hallmark GSEA, rejected vs retained within each state, {side}, {NAME[cfg]}",
-            fontsize=st.FS_TITLE, va="top")
-    sh.text(left, H - 0.26, SIDE[side] + "; row: pair · state (rejected / retained cells); outlined: FDR < 0.05",
-            fontsize=st.FS_MIN, color=st.SUBTLE, va="top")
+
+    cx, ch = left + 50 * col_w + 0.22, min(1.1, len(u) * row_h)
+    cy = bottom + len(u) * row_h - ch
+    cax = sh.ax(cx, cy, 0.08, ch)
+    cb = sh.fig.colorbar(im, cax=cax, extend="both"); cb.outline.set_linewidth(0.4)
+    cb.ax.tick_params(labelsize=st.FS_MIN, length=2); cb.set_ticks([-2, -1, 0, 1, 2])
+    sh.text(cx, cy + ch + 0.06, "NES", fontsize=st.FS_MIN, va="bottom")
+    sh.text(cx + 0.32, cy + ch - 0.02, "higher in\nrejected cells", fontsize=st.FS_MIN, color="#c06a08", va="top")
+    sh.text(cx + 0.32, cy + 0.02, "higher in\nretained cells", fontsize=st.FS_MIN, color="#2b6cb4", va="bottom")
+    sh.text(cx, cy - 0.12, "grey: set not\nscored (size\noutside 15-500)", fontsize=st.FS_MIN, color=st.SUBTLE, va="top")
+
+    sh.text(0.08, H - 0.08, f"{TITLE[side]}  ·  {NAME[cfg]}", fontsize=st.FS_TITLE, va="top")
+    sh.text(0.08, H - 0.26, EXPLAIN[side], fontsize=st.FS_MIN, color=st.SUBTLE, va="top", linespacing=1.4)
     sh.save(out, f"pdx_gsea_{cfg}_{side}")
     return len(u)
 
