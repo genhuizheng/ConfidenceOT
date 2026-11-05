@@ -25,6 +25,14 @@ LEVELS = ["L0_matched", "L1_depth", "L2_depth_dropout", "L3_batch", "L4_batch_pe
 BATCH = ["L3_batch", "L4_batch_perturb", "L5_batch_perturb_imbalance"]
 
 
+def md_table(t: pd.DataFrame, index: bool = True) -> str:
+    """A Markdown table without the optional tabulate dependency (absent on TACC)."""
+    t = t.reset_index() if index else t
+    head = [str(c) for c in t.columns]
+    rows = [["" if pd.isna(v) else str(v).replace("|", "\\|") for v in r] for r in t.itertuples(index=False)]
+    return "\n".join(["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(r) + " |" for r in rows])
+
+
 def per_fit(r: pd.DataFrame, group: str) -> pd.DataFrame:
     """One row per fit: the metric its case contributes, and the one-side reject-all F1 for Case 2."""
     e = r[(r.method == "M4-E") & (r.status == "ok")].drop_duplicates(["level", "replicate", "pair_id", group, "side"])
@@ -109,10 +117,10 @@ def calibration(a) -> None:
     t.to_csv(a.root / f"CALIBRATION_BY_LEVEL{sfx}.tsv", sep="\t", index=False)
     md = [f"# L−1 calibration selection{(' (' + a.tag + ')') if a.tag else ''}", "",
           "Means over the 8 levels (equal weight) and over the batch levels L3-L5; M4-E.", "",
-          s.round(3).to_markdown(), "", f"**Chosen: {choice}.** Handles batch at L3-L5 (any arm): {bool(s.handles_batch_L3_L5.any())}.", ""]
+          md_table(s.round(3)), "", f"**Chosen: {choice}.** Handles batch at L3-L5 (any arm): {bool(s.handles_batch_L3_L5.any())}.", ""]
     for col in ("case1_frr", "case2_f1", "reject_all_f1", "case3_recall", "one_side_all", "rejection_cost"):
         v = t.pivot_table(index="arm", columns="level", values=col).reindex(columns=[l for l in LEVELS if l in set(t.level)])
-        md += [f"**{col}**", "", v.round(3).to_markdown(), ""]
+        md += [f"**{col}**", "", md_table(v.round(3)), ""]
     (a.root / f"CALIBRATION_SELECTION{sfx}.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md[:8]))
     if a.freeze:
@@ -163,7 +171,7 @@ def grid(a) -> None:
         front = x[x.pareto].sort_values("case2_f1_eff", ascending=False)
         bl = x[x.config_id == base]
         md += [f"## {lv}: {len(front)} configurations on the front (of {len(x)})", "",
-               pd.concat([front.head(20), bl]).drop_duplicates("config_id")[cols].round(3).to_markdown(index=False), ""]
+               md_table(pd.concat([front.head(20), bl]).drop_duplicates("config_id")[cols].round(3), index=False), ""]
     # robust view over L1-L5: on the front at how many levels, and the mean of each metric
     agg = t.groupby("config_id").agg(levels_on_front=("pareto", "sum"), case1_frr_eff=("case1_frr_eff", "mean"),
                                      case2_f1_eff=("case2_f1_eff", "mean"), case3_recall_eff=("case3_recall_eff", "mean"),
@@ -173,7 +181,7 @@ def grid(a) -> None:
     agg.to_csv(a.root / f"GRID_OVERALL{sfx}.tsv", sep="\t", index=False)
     md += ["## Over L1-L5", "", "Configurations on the Pareto front at the most levels, then by mean Case 2 F1; the overall front "
            "(on the three means) is marked. Baseline included.", "",
-           pd.concat([agg.head(25), agg[agg.config_id == base]]).drop_duplicates("config_id").round(3).to_markdown(index=False), ""]
+           md_table(pd.concat([agg.head(25), agg[agg.config_id == base]]).drop_duplicates("config_id").round(3), index=False), ""]
     (a.root / f"GRID_SUMMARY{sfx}.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md[-30:]))
 
