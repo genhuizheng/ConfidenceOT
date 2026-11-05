@@ -18,6 +18,7 @@ import argparse
 import copy
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from PIL import Image
 from pptx import Presentation
@@ -190,6 +191,7 @@ def main() -> None:
     a.add_argument("--figures", type=Path, required=True)
     a.add_argument("--data", type=Path, required=True)
     a.add_argument("--grid-summary", type=Path, required=True)
+    a.add_argument("--deg-gsea", type=Path, required=True, help="pdx_deg_gsea.py output directory")
     a.add_argument("--out", type=Path, required=True)
     a = a.parse_args()
     F, P = a.figures / "splatter", a.figures / "pdx"
@@ -493,6 +495,68 @@ def main() -> None:
         "wk 16 AR-low PRAD 0.97 [0.94-1.00]: stable.   wk 0 AR-high PRAD 0.64 [0.44-0.80]; wk 12 AR-low PRAD "
         "0.73 [0.53-0.88]; wk 4 AR-low PRAD 0.45 [0.29-0.63]: these depend on preprocessing."], size=13, fill=PEACH)
 
+    # ---- PDX DEG / GSEA -------------------------------------------------------------------------------------------
+    G = a.figures / "pdx_gsea"
+    gu = pd.read_csv(a.deg_gsea / "units.tsv", sep="\t")
+    gg = pd.read_csv(a.deg_gsea / "gsea_hallmark.tsv", sep="\t")
+    nan = gu[gu.status == "analysed"].groupby("config").size()
+    piv = gg.pivot_table(index=["pair", "side", "state", "term"], columns="config", values="nes").dropna()
+    shared_units = piv.reset_index()[["pair", "side", "state"]].drop_duplicates().shape[0]
+    cor = piv.corr()
+    big = piv.splatter_l5_best.abs() > 1.5
+    agree = {c: float((np.sign(piv[c][big]) == np.sign(piv.splatter_l5_best[big])).mean()) for c in ("baseline", "logcpm")}
+    s = d.slide("PDX: DEG and hallmark GSEA, rejected vs retained", notes=(
+        "Design fixed on 2026-10-31 (ltl331_nepc/06_deg_gsea.py), applied to the v3 gates and the 8 published states. "
+        "Script: realdata_benchmark/v3_grid/figures/pdx_deg_gsea.py; tables in results/v3_grid_20261104/"
+        "pdx_deg_gsea_20261105 (units.tsv lists every unit, analysed or why not; deg/<config>/*.tsv.gz; "
+        "gsea_hallmark.tsv).\n"
+        "Agreement: NES of the same unit and hallmark set compared between configurations, on the "
+        f"{shared_units} units all three analyse.\n"
+        "Depth: units.tsv records the median pre-equalisation depth of rejected and retained cells and the AUC of depth "
+        "for rejected vs retained. In many units the rejected cells are deeper (AUC up to 0.77 at wk 0 AR-high PRAD, 0.70 "
+        "at wk 4 AR-low PRAD as source).\n"
+        "Immediate-early genes (FOS, JUN, EGR1, ZFP36, TRIB1) lead the rejected side in some units (e.g. wk 0 AR-high, "
+        "wk 4 AR-low as source, wk 12 AR-low as target); they are also a known dissociation-stress signature, so the "
+        "TNFα / NF-κB enrichment there need not be biology."))
+    rows = [["Item", "Setting"],
+            ["Unit", "configuration × pair × side × state, M4-E gate; every unit with ≥ 20 rejected and ≥ 20 retained cells"],
+            ["Units analysed", f"L5 best {nan.get('splatter_l5_best', 0)}, baseline {nan.get('baseline', 0)}, logCPM "
+                               f"{nan.get('logcpm', 0)} (of {len(gu) // 3} each); the rest have < 20 cells in a group"],
+            ["Contrast", "rejected vs retained within the state; positive = higher in rejected"],
+            ["Expression", "the OT cells' original counts, normalised to 10⁴, log1p; genes detected in ≥ 10 cells"],
+            ["DEG", "scanpy Wilcoxon. One tumour per time point: cells are pseudo-replicates, read effects, not p-values"],
+            ["GSEA", "gseapy prerank on the Wilcoxon score; hallmark only, all 50 sets; 1,000 permutations"],
+            ["Agreement", f"NES correlation over {shared_units} shared units: L5 best vs baseline "
+                          f"{cor.at['splatter_l5_best', 'baseline']:.2f}, vs logCPM {cor.at['splatter_l5_best', 'logcpm']:.2f}; "
+                          f"where |NES| > 1.5 under L5 best the sign agrees in {100 * agree['baseline']:.0f}% (baseline), "
+                          f"{100 * agree['logcpm']:.0f}% (logCPM)"]]
+    table(s, LEFT, TOP + 0.05, W, rows, [1.8, 10.7], size=12, row_h=0.36)
+    text(s, LEFT, TOP + 3.15, 6.15, 2.55, [
+        ("Same in all three configurations", {"b": True}),
+        "Rejected cells score higher on TNFα / NF-κB, TGF-β, inflammatory response, androgen response and hypoxia: NES > 0 "
+        "in 66-94% of the analysed units of each configuration (e.g. wk 0 AR-high and wk 4 AR-low as source; wk 12 → 16 "
+        "AR-low and pre-EMT as target).",
+        "wk 16 AR-low as source (2,455 rejected / 125 retained): the few retained cells are the cycling ones (E2F, G2M "
+        "lower in rejected; L5 best and baseline; logCPM retains none)."], size=12, fill=PEACH)
+    text(s, LEFT + 6.35, TOP + 3.15, W - 6.35, 2.55, [
+        ("Depends on the configuration, or may be technical", {"b": True}),
+        "Proliferation in wk 20 NEPC ASCL1+ as source changes sign (E2F NES −2.3 under L5 best, +1.1 to +1.3 otherwise).",
+        "Rejected cells are often deeper (depth AUC up to 0.77), and in some units immediate-early genes (FOS, JUN, "
+        "EGR1) lead the rejected side: a known dissociation-stress signature."], size=12, fill=PEACH)
+
+    for cfg in ("splatter_l5_best", "baseline", "logcpm"):
+        for side in ("source", "target"):
+            q = "the next" if side == "source" else "the previous"
+            s = d.slide(f"Hallmark GSEA, {LABEL[cfg]}, as {side}", notes=(
+                f"Each row: one pair × state unit, the cells of that state at the {'earlier' if side == 'source' else 'later'} "
+                f"time point of the pair, split by the gate as {side}: does the cell have a counterpart at {q} time point? "
+                "In brackets: rejected / retained cells. Only units with ≥ 20 cells in both groups; units.tsv lists the "
+                "others.\n"
+                "Columns: all 50 hallmark sets, grouped by the process categories of Liberzon et al. 2015. Colour: NES, "
+                "orange = higher in rejected, blue = higher in retained. Size: −log10 FDR in four bins; outlined: FDR < "
+                "0.05. Cells are pseudo-replicates (one tumour per time point), so size ranks the sets and is not a test."))
+            picture(s, G / f"pdx_gsea_{cfg}_{side}.png", LEFT, TOP, W, BOTTOM - TOP)
+
     s = d.slide("Summary and next steps", notes="")
     text(s, LEFT + 0.2, TOP + 0.2, 6.0, 5.2, [
         ("Splatter N = 5,000", {"b": True, "size": 16}),
@@ -503,10 +567,12 @@ def main() -> None:
         ("LTL331 PDX", {"b": True, "size": 16}),
         "Under three preprocessings: PRAD holds to wk 12, almost no wk 16 AR-low cell has a counterpart in the "
         "regrowth (rejected 0.97, median over 296), and NEPC ASCL1+ carries the line into wk 20-22.",
-        "The median over 296 configurations shows the same gates."], size=14)
+        "The median over 296 configurations shows the same gates.",
+        "GSEA: rejected cells score higher on TNFα / NF-κB, TGF-β and inflammatory sets in most units under all three "
+        "configurations; depth and immediate-early genes have to be ruled out before reading this as biology."], size=14)
     text(s, 6.9, TOP + 0.2, RIGHT - 6.9, 2.6, [
         ("Next", {"b": True, "size": 16}),
-        "PDX: DEG and hallmark GSEA (all 50 sets, both sides), rejected vs retained within each state.",
+        "PDX: the GSEA contrasts again within depth strata, and with the immediate-early genes left out.",
         "KP CRISPR: the last 21 rows, then the lineage scorers on the same grid.",
         "Copy the couplings off TACC scratch (Splatter about 3 TB) before the purge."], size=14, fill=PEACH)
 
