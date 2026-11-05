@@ -43,9 +43,10 @@ COLOUR = dict(zip(STATES, ["#0B3C5D", "#7FB8E0", "#1B7F5B", "#C2DF8A", "#E8A33D"
 REJECT = "#D5D8DB"
 NAME = {"baseline": "production baseline (ranknm256 production noscale cos PCA30)",
         "splatter_l5_best": "Splatter L5 best (ranknm256 midrank scale cos PCA50)",
-        "logcpm": "logCPM (logcpm noscale cos PCA30; the baseline with only the encoding changed)"}
+        "logcpm": "logCPM (logcpm noscale sqeuc PCA30: logCPM + PCA only, no cosine, no scaling)",
+        "logcpm_cos": "logCPM with cosine cost (logcpm noscale cos PCA30)"}
 CID = {"baseline": "ranknm256-production|none|noscale|cos|pca30", "splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50",
-       "logcpm": "logcpm|none|noscale|cos|pca30"}
+       "logcpm": "logcpm|none|noscale|sqeuc|pca30", "logcpm_cos": "logcpm|none|noscale|cos|pca30"}
 
 
 def legend(sh, x, y, fs=st.FS_MIN, extra=()):
@@ -382,7 +383,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
-    p.add_argument("--config", nargs="*", default=["splatter_l5_best", "baseline", "logcpm"])
+    p.add_argument("--config", nargs="*", default=["splatter_l5_best", "logcpm"])
     p.add_argument("--links", type=int, default=250, help="links drawn per pair")
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)

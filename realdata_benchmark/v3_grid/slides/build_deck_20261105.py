@@ -6,7 +6,8 @@ details in the speaker notes).
         --template D:/Xia_lab/Progress_report/progress_report7/ConfidenceOT_20261015.pptx \
         --figures results/v3_grid_20261104/figures --data results/v3_grid_20261104/figures/pdx/data \
         --grid-summary results/v3_grid_20261104/splatter/GRID_SUMMARY_v3tacc.tsv \
-        --fate-gsea results/v3_grid_20261104/pdx_fate_deg_gsea_20261105 \
+        --fate-gsea results/v3_grid_20261104/pdx_fate_deg_gsea_v2_20261105 \
+        --deg-gsea results/v3_grid_20261104/pdx_deg_gsea_v2_20261105 \
         --out results/v3_grid_20261104/slides/ConfidenceOT_20261105.pptx
 
 The template's slide 1 (method schematic) and slide 4 (Case 2 schematic) are kept; every other template slide is
@@ -34,7 +35,7 @@ from lxml import etree
 ORANGE, PEACH, INK, SUBTLE = RGBColor(0xBF, 0x57, 0x00), RGBColor(0xFD, 0xEB, 0xDC), RGBColor(0, 0, 0), RGBColor(0x59, 0x59, 0x59)
 TOP, BOTTOM, LEFT, RIGHT = 0.80, 6.55, 0.40, 12.93  # content area (inches); the orange bar starts at 6.64
 CFG = {"splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50", "baseline": "ranknm256-production|none|noscale|cos|pca30",
-       "logcpm": "logcpm|none|noscale|cos|pca30"}
+       "logcpm": "logcpm|none|noscale|sqeuc|pca30"}  # logCPM + PCA only
 LABEL = {"splatter_l5_best": "Splatter L5 best", "baseline": "Production baseline", "logcpm": "logCPM"}
 SAMPLES = ["w00_preCX_1", "w02_2wkCX_2", "w04_4wkCX_1", "w08_8wkCX_1", "w12_12wkCX_2", "w16_16wkCX_1", "w20_20wkCX_1_R",
            "w22_22wkCX_2_R"]
@@ -193,6 +194,7 @@ def main() -> None:
     a.add_argument("--data", type=Path, required=True)
     a.add_argument("--grid-summary", type=Path, required=True)
     a.add_argument("--fate-gsea", type=Path, required=True, help="pdx_fate_deg_gsea.py output directory")
+    a.add_argument("--deg-gsea", type=Path, required=True, help="pdx_deg_gsea.py output (rejected vs retained)")
     a.add_argument("--out", type=Path, required=True)
     a = a.parse_args()
     F, P = a.figures / "splatter", a.figures / "pdx"
@@ -343,7 +345,8 @@ def main() -> None:
     s = d.slide("Case 2 F1, all 296 configurations", notes=(
         "Left strips: the factors of each row (cost, PCA, scaling, encoding). Rows ranked by L5 Case 2 F1, as before.\n"
         "Table: per level, Case 1 FRR / Case 2 F1 / Case 3 recall (effective readout), mean over 3 replicates.\n"
-        "logCPM row = the baseline with only the encoding changed; it is the logCPM configuration shown on the PDX slides."))
+        "logCPM row = logcpm noscale sqeuc PCA30: logCPM + PCA only (no cosine, no scaling); it is the logCPM "
+        "configuration shown on the PDX slides."))
     picture(s, F / "splatter_f1_all296.png", LEFT, TOP, 5.9, BOTTOM - TOP)
     lv = ["L1_depth", "L2_depth_dropout", "L3_batch", "L4_batch_perturb", "L5_batch_perturb_imbalance"]
     rows = [["Level", "Metric", f"L5 best (#{rk[CFG['splatter_l5_best']]})", f"Baseline (#{rk[CFG['baseline']]})",
@@ -398,8 +401,8 @@ def main() -> None:
         "wk 20 → 22: terminal NEPC ASCL1− maps to itself; ASCL1+ goes to terminal."], size=13, fill=PEACH)
 
     s = d.slide("The same matching under logCPM", notes=(
-        "Left: Splatter L5 best (previous slide). Right: logCPM (logcpm noscale cos PCA30, the production baseline with "
-        "only the encoding changed). Same lines and sampling. The comparison on the PDX slides is logCPM vs the Splatter "
+        "Left: Splatter L5 best (previous slide). Right: logCPM + PCA only (logcpm noscale sqeuc PCA30: no cosine, no "
+        "scaling). Same lines and sampling. The comparison on the PDX slides is logCPM vs the Splatter "
         "L5 best; balanced OT on logCPM is the third arm, not run yet."))
     picture(s, P / "pdx_slices3d_splatter_l5_best.png", 1.2, TOP, 5.0, BOTTOM - TOP - 0.3)
     picture(s, P / "pdx_slices3d_logcpm.png", 7.1, TOP, 5.0, BOTTOM - TOP - 0.3)
@@ -448,27 +451,31 @@ def main() -> None:
     picture(s, P / "pdx_transitions_splatter_l5_best.png", LEFT, TOP, W, 2.85)
     picture(s, P / "pdx_transitions_logcpm.png", LEFT, TOP + 2.9, W, 2.85)
 
-    w16 = srej[srej.pair.str.contains("w16_16wkCX_1__w20") & (srej.side == "source")]
-    w4s = srej[srej.pair.str.contains("w04_4wkCX_1__w08") & (srej.side == "source")]
-    w8t = srej[srej.pair.str.contains("w04_4wkCX_1__w08") & (srej.side == "target")]
-
-    def ret(df, state, c):
-        g = df[(df.config_id == CFG[c]) & (df.state == state)]
-        return int((g.cells - g.rejected).iloc[0]), int(g.cells.iloc[0])
+    x = srej[srej.config_id.isin([CFG["splatter_l5_best"], CFG["logcpm"]])].assign(ret=lambda t: t.cells - t.rejected)
+    dv = x.pivot_table(index=["pair", "side", "state"], columns="config_id", values=["ret", "cells"]).dropna()
+    dv = pd.DataFrame({"cells": dv["cells"][CFG["splatter_l5_best"]], "l5": dv["ret"][CFG["splatter_l5_best"]],
+                       "lc": dv["ret"][CFG["logcpm"]]}).reset_index()
+    dv = dv[dv.cells >= 50].assign(diff=lambda t: (t.lc - t.l5) / t.cells)
+    dv = dv.loc[dv["diff"].abs().sort_values(ascending=False).index].head(8)
     s = d.slide("Where logCPM and the L5 best differ", notes=(
-        "Retained cells (of all cells of that state) in the gates where logCPM differs most from the Splatter L5 best. "
-        "At wk 16 → 20 logCPM rejects every AR-low PRAD cell as source, so its row of the transition matrix is blank and "
-        "only NEPC ASCL1+ carries mass into wk 20; at wk 4 → 8 it keeps more AR-low PRAD on both sides."))
+        "Retained cells of one state in one gate, Splatter L5 best vs logCPM + PCA only. Rows: the 8 state × gate cells "
+        "with the largest difference in retained share, among those with ≥ 50 cells (a display rule; every gate is on "
+        "the rejected-fraction slides)."))
     rows = [["Pair, gate", "State", "L5 best", "logCPM", "Cells"]]
-    for lab, df, st_ in (("wk 16 → 20, as source", w16, "AR-low PRAD"), ("wk 16 → 20, as source", w16, "NEPC ASCL1+"),
-                         ("wk 4 → 8, as source", w4s, "AR-low PRAD"), ("wk 4 → 8, as target", w8t, "AR-low PRAD")):
-        v = [ret(df, st_, c) for c in ("splatter_l5_best", "logcpm")]
-        rows.append([lab, st_] + [f"{x[0]:,}" for x in v] + [f"{v[0][1]:,}"])
-    table(s, LEFT + 0.6, TOP + 0.3, 8.0, rows, [2.6, 2.1, 1.1, 1.1, 1.1], size=14, row_h=0.45)
-    text(s, LEFT + 0.6, TOP + 3.0, 8.0, 2.0, [
-        ("Same under both", {"b": True}), "PRAD holds to wk 12; NEPC ASCL1+ carries wk 16 into the regrowth.",
-        ("Depends on preprocessing", {"b": True}), "Whether a few AR-low PRAD cells link wk 16 directly to NEPC."],
-        size=14, fill=PEACH)
+    for r in dv.itertuples():
+        i = PAIRS.index(r.pair)
+        rows.append([f"{WEEK[i]} → {WEEK[i + 1].replace('wk ', '')}, as {r.side}", r.state, f"{int(r.l5):,}",
+                     f"{int(r.lc):,}", f"{int(r.cells):,}"])
+    table(s, LEFT, TOP + 0.2, 7.9, rows, [2.5, 2.3, 1.0, 1.0, 1.1], size=13, row_h=0.42)
+    text(s, 8.6, TOP + 0.2, RIGHT - 8.6, 5.3, [
+        ("Same under both", {"b": True}),
+        "PRAD holds wk 2 → 8; almost no wk 16 AR-low cell has a counterpart at wk 20 (L5 best keeps 125 of 2,580, "
+        "logCPM none); NEPC ASCL1+ is what links wk 16 to the regrowth.",
+        ("logCPM keeps more early", {"b": True}),
+        "wk 0 AR-high: 1,180 of 1,267 retained (L5 best 316); wk 4 AR-low as source: 4,053 of 5,091 (2,044).",
+        ("logCPM rejects more at wk 12 → 16", {"b": True}),
+        "As source, 95% of wk 12 rejected (L5 best 72%); intermediate EMT-like keeps 13 of 66 (61)."],
+        size=13, fill=PEACH)
 
     s = d.slide("Rejected fraction per state and time point", notes=(
         "Each cell: the rejected fraction of one state at one time point, as source (pair to the next time point, left) "
@@ -493,11 +500,14 @@ def main() -> None:
     n_an = fc[fc.status == "analysed"].groupby("side").size()
     wv = fg.pivot_table(index=["pair", "side", "state", "fate", "term"], columns="expression", values="nes").dropna()
     rho_e = wv.corr(method="spearman").at["rawqc", "ds"]
+    rr = pd.read_csv(a.deg_gsea / "gsea_hallmark.tsv", sep="\t").groupby(["config", "pair", "side", "state"]).agg(
+        nes=("nes", "mean"), auc=("auc_depth_rejected", "first"))
+    rho_r = rr.corr(method="spearman").at["nes", "auc"]
     s = d.slide("Why the rejected vs retained GSEA was withdrawn", notes=(
         "One point per row of a GSEA heatmap: the mean NES over the 50 hallmark sets against the depth AUC of the two "
         "groups compared (pre-equalisation total counts; > 0.5 = the first group is deeper).\n"
-        "Left: rejected vs retained within each state, original counts (pdx_deg_gsea.py, 95 units over three "
-        "configurations). When the rejected cells are deeper, every hallmark set leans to the rejected side, and the "
+        f"Left: rejected vs retained within each state, original counts (pdx_deg_gsea.py, {len(rr)} units, Splatter "
+        "L5 best and logCPM). When the rejected cells are deeper, every hallmark set leans to the rejected side, and the "
         "reverse: the contrast reads depth, not programmes. The earlier finding (TNFα / NF-κB, TGF-β, inflammatory higher "
         "in rejected) is withdrawn.\n"
         "Middle / right: the fate contrasts of the next slides, on original and on depth-equalised counts (each cell "
@@ -508,7 +518,7 @@ def main() -> None:
         picture(s, G / f"{nm}.png", LEFT + k * 4.2, TOP + 0.1, 4.0, 3.5)
     text(s, LEFT, TOP + 3.85, W, 1.75, [
         ("Rejected vs retained reads depth", {"b": True}),
-        "Its mean NES follows the depth AUC (Spearman 0.78): deeper group → every hallmark set higher. The earlier "
+        f"Its mean NES follows the depth AUC (Spearman {rho_r:.2f}, {len(rr)} units): deeper group → every hallmark set higher. The earlier "
         "rejected-side TNFα / TGF-β / inflammatory finding is withdrawn.",
         "Replaced by: retained cells of one state grouped by fate (next slides), on original and depth-equalised counts."],
         size=13, fill=PEACH)
@@ -528,13 +538,13 @@ def main() -> None:
 
     s = d.slide("PDX DEG and GSEA by fate: logCPM", notes=(
         "Script realdata_benchmark/v3_grid/figures/pdx_fate_deg_gsea.py; tables in results/v3_grid_20261104/"
-        "pdx_fate_deg_gsea_20261105 (fates_logcpm.tsv.gz: every retained cell's dominant fate and its share; "
+        f"{a.fate_gsea.name} (fates_logcpm.tsv.gz: every retained cell's dominant fate and its share; "
         "contrasts.tsv: every group, analysed or why not; deg/<expression>/logcpm/*.tsv.gz; gsea_hallmark.tsv).\n"
         "Fate = argmax of the cell's coupling mass by state, no threshold. Most units have one fate group only (the "
         "cells stay in their state), so there is nothing to compare there; contrasts.tsv lists them.\n"
         "Balanced OT on logCPM is the third arm of this comparison; not run yet."))
     rows = [["Item", "Setting"],
-            ["Cells", "ConfidenceOT logCPM (logcpm noscale cos PCA30), M4-E; retained × retained block of the coupling; "
+            ["Cells", "ConfidenceOT logCPM + PCA only (logcpm noscale sqeuc PCA30), M4-E; retained × retained block of the coupling; "
                       "rejected cells have no fate"],
             ["Fate", "source cell: the next-time-point state receiving most of its mass; target cell: the previous-time-"
                      "point state sending most (origin)"],
@@ -548,14 +558,16 @@ def main() -> None:
     table(s, LEFT, TOP + 0.05, W, rows, [1.8, 10.7], size=12, row_h=0.36)
     text(s, LEFT, TOP + 3.05, 6.15, 2.65, [
         ("Same on original and equalised counts", {"b": True}),
-        "wk 20 NEPC ASCL1+ → NEPC other (33 vs 183 → terminal ASCL1−): E2F / G2M higher (NES +3.0 / +2.7 equalised).",
-        "wk 22 early NEPC ASCL1− from ASCL1+ or NEPC other (vs from early ASCL1−): E2F / G2M higher, EMT lower.",
-        "wk 22 NEPC other from terminal ASCL1− (vs from NEPC other): E2F / G2M lower (−2.6).",
-        "wk 2 AR-low from pre-EMT (vs from AR-low): E2F / G2M lower, TNFα higher."], size=12, fill=PEACH)
+        "wk 20 NEPC ASCL1+ → NEPC other (26 vs 195 → terminal ASCL1−): E2F / G2M higher (NES +3.0 equalised).",
+        "wk 22 early NEPC ASCL1− from ASCL1+, NEPC other or terminal (vs from early ASCL1−): E2F / G2M higher, EMT "
+        "lower (−2.0 to −2.6).",
+        "wk 22 NEPC other from ASCL1+ (2,060) or terminal (150), vs from NEPC other: E2F / G2M lower (≈ −2.5).",
+        "wk 2 AR-low from pre-EMT (vs from AR-low): E2F / G2M and MYC lower, TNFα higher (+2.5)."], size=12, fill=PEACH)
     text(s, LEFT + 6.35, TOP + 3.05, W - 6.35, 2.65, [
         ("Changes with the counts", {"b": True}),
-        "wk 12 ↔ 16 pre-EMT ↔ AR-low PRAD (depth AUC 0.28): MYC targets, TNFα and EMT change sign between original "
-        "and equalised counts.",
+        "wk 2 AR-low from AR-high (4,530 vs 148, depth AUC 0.70): E2F, EMT and androgen response change sign between "
+        "original and equalised counts.",
+        "wk 22 terminal ASCL1− from ASCL1+ (depth AUC 0.68): E2F changes sign.",
         "Read a row only where both panels agree; the depth AUC column shows how far the two groups differ in depth."],
         size=12, fill=PEACH)
 
@@ -585,8 +597,9 @@ def main() -> None:
         "L1-L5 mean (0.90). The production baseline is 171st (L5 F1 0.48, FRR 0.35).",
         "L5 (batch + perturbation + imbalance) is the only level that separates configurations; its FRR stays ≥ 0.13.",
         ("LTL331 PDX", {"b": True, "size": 16}),
-        "Under the L5 best and logCPM: PRAD holds to wk 12, almost no wk 16 AR-low cell has a counterpart in the "
-        "regrowth (rejected 0.97, median over 296), and NEPC ASCL1+ carries the line into wk 20-22.",
+        "Under the L5 best and logCPM + PCA only: PRAD holds wk 2-8, almost no wk 16 AR-low cell has a counterpart in "
+        "the regrowth (rejected 0.97, median over 296), and NEPC ASCL1+ links wk 16 to wk 20-22. logCPM keeps far more "
+        "of wk 0 and rejects more of wk 12 as source.",
         "Rejected vs retained GSEA follows depth and is withdrawn. By fate (logCPM): in the NEPC regrowth, proliferation "
         "(E2F / G2M) separates where cells go and come from, on original and equalised counts."], size=14)
     text(s, 6.9, TOP + 0.2, RIGHT - 6.9, 2.9, [

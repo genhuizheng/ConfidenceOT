@@ -54,7 +54,8 @@ SAMPLES = ["w00_preCX_1", "w02_2wkCX_2", "w04_4wkCX_1", "w08_8wkCX_1", "w12_12wk
 WEEK = dict(zip(SAMPLES, ["wk 0", "wk 2", "wk 4", "wk 8", "wk 12", "wk 16", "wk 20", "wk 22"]))
 NAME = {"baseline": "production baseline (ranknm256 production noscale cos PCA30)",
         "splatter_l5_best": "Splatter L5 best (ranknm256 midrank scale cos PCA50)",
-        "logcpm": "logCPM (logcpm noscale cos PCA30)"}
+        "logcpm": "logCPM + PCA only (logcpm noscale sqeuc PCA30)",
+        "logcpm_cos": "logCPM with cosine cost (logcpm noscale cos PCA30)"}
 NES_LIM = 2.5  # one colour scale for every panel; |NES| max 3.2, 99th percentile 2.2
 WEEK_HEAD = {"source": "cells at", "target": "cells at"}
 TITLE = {"source": "What differs between the cells ConfidenceOT rejects and keeps, gated against the NEXT time point",

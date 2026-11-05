@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 SHOWN = {"baseline": "ranknm256-production|none|noscale|cos|pca30", "splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50",
-         "logcpm": "logcpm|none|noscale|cos|pca30"}
+         "logcpm": "logcpm|none|noscale|sqeuc|pca30", "logcpm_cos": "logcpm|none|noscale|cos|pca30"}  # logcpm: logCPM + PCA only (user, 2026-11-05)
 STATE = {11: "AR-high PRAD", 15: "AR-high PRAD", 0: "AR-low PRAD", 2: "AR-low PRAD", 4: "AR-low PRAD", 5: "AR-low PRAD",
          8: "AR-low PRAD", 12: "AR-low PRAD", 16: "AR-low PRAD", 6: "pre-EMT", 17: "intermediate EMT-like",
          10: "NEPC ASCL1+", 13: "early NEPC ASCL1-", 1: "terminal NEPC ASCL1-", 7: "terminal NEPC ASCL1-",

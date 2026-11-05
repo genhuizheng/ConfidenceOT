@@ -49,7 +49,7 @@ def main() -> None:
     p.add_argument("--depth", type=Path, required=True)
     p.add_argument("--gmt", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
-    p.add_argument("--config", nargs="+", default=["splatter_l5_best", "baseline", "logcpm"])
+    p.add_argument("--config", nargs="+", default=["splatter_l5_best", "logcpm"])
     p.add_argument("--min-cells", type=int, default=20)
     a = p.parse_args()
     if a.out.exists():
