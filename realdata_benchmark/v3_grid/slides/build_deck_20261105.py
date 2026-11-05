@@ -250,7 +250,7 @@ def main() -> None:
             ["rank_value<K>", "K = 128 … 2048", "the same after dividing each gene by its nonzero median over both sides (Geneformer)"],
             ["rankhvg<H>", "H = 2,000, 3,000", "ranks within the H highest-variance log-CPM genes, no top-K cut"],
             ["logcpm", "—", "log(1 + 10⁴ × count / total)"],
-            ["ties", "production, expected, midrank", "how genes with equal counts are ordered (not for logcpm)"],
+            ["ties", "production, expected, midrank", "what value genes with equal counts in one cell get (next slide; not for logcpm)"],
             ["scaling", "scale, noscale", "scale: each gene standardised before PCA; noscale: centred only"],
             ["cost", "cos, sqeuc", "cos: PC vectors scaled to unit length (cosine distance); sqeuc: squared Euclidean"],
             ["PCA", "30, 50", "principal components on source and target together"]]
@@ -259,6 +259,47 @@ def main() -> None:
         ("37 encoding keys × 2 scalings × 2 costs × 2 PCA sizes = 296 configurations, every one fitted on every pair.", {"b": True}),
         "Production baseline: ranknm256 · production · noscale · cos · PCA30 (rank "
         f"{rk[CFG['baseline']]} of 296 by L5 Case 2 F1)."], size=14, fill=PEACH)
+
+    s = d.slide("Tie rules: production, expected, midrank", notes=(
+        "Why ties matter: counts are integers, so in a sparse cell many genes share a count of 1 or 2, and such a tie "
+        "group often sits exactly at the top-K cut. The rank encoding then has to decide which of them get the last "
+        "slots.\n"
+        "Toy cell, K = 4: slot values 1, 0.75, 0.50, 0.25 for positions 0-3; everything from position 4 on is 0. "
+        "A and B are untied (positions 0 and 1). C, D, E, F tie at count 2 and occupy positions 2-5, so the group "
+        "straddles the cut: 4 genes compete for 2 slots.\n"
+        "production: confidenceot.preprocessing.rank_value_encode, a stable argsort over the cell's entries in the order "
+        "the joint sparse matrix stores them. That order comes from scipy's column indexing into the sorted gene keys: it "
+        "is neither gene name nor gene position, but it is fixed, so the result is reproducible. Here the stored order "
+        "is taken as E, C, F, D.\n"
+        "expected: (0.50 + 0.25) x 2 slots / 4 genes = 0.1875 each. midrank: mean position 2 + (4 - 1) / 2 = 3.5, value "
+        "1 - 3.5 / 4 = 0.125 each (0 if the mean position is >= K).\n"
+        "A tie group wholly inside the top K (e.g. two genes at positions 2-3): expected = midrank = (0.50 + 0.25) / 2 "
+        "= 0.375 each; production gives 0.50 and 0.25. rankhvg has no top-K cut, so there expected = midrank exactly.\n"
+        "Implementation: realdata_benchmark/rb_common.py rank_encode."))
+    rows = [["Gene", "Count", "Position", "production", "expected", "midrank"],
+            ["A", "9", "0", "1.00", "1.00", "1.00"], ["B", "5", "1", "0.75", "0.75", "0.75"],
+            ["C", "2", "2-5 (tied)", "0.25", "0.19", "0.13"], ["D", "2", "2-5 (tied)", "0", "0.19", "0.13"],
+            ["E", "2", "2-5 (tied)", "0.50", "0.19", "0.13"], ["F", "2", "2-5 (tied)", "0", "0.19", "0.13"],
+            ["Genes above 0", "", "", "4", "6", "6"]]
+    text(s, LEFT, TOP + 0.05, 5.6, 0.75, [("Toy cell, K = 4: slot values 1, 0.75, 0.50, 0.25, then 0. C, D, E, F tie "
+                                           "at count 2: four genes for the last two slots.", {"b": True})], size=13)
+    table(s, LEFT, TOP + 0.85, 5.6, rows, [1.45, 0.75, 1.15, 1.25, 1.05, 1.0], size=13, row_h=0.40)
+    text(s, LEFT, TOP + 4.25, 5.6, 1.2, [
+        ("Why it matters", {"b": True}),
+        "Counts are integers, so in a sparse cell many genes share a count of 1 or 2, and that tie group often sits "
+        "exactly at the top-K cut."], size=13)
+    x2, w2 = 6.35, RIGHT - 6.35
+    for k, (head, body) in enumerate((
+            ("production: the order the matrix happens to store", "Ties keep the order in which the joint count matrix "
+             "stores the cell's entries. Fixed and reproducible, but which tied gene wins is arbitrary (here E, then C; "
+             "D and F get 0). This is what the production code does."),
+            ("expected: the average over random tie orders", "Every tied gene gets the mean of the slot values the "
+             "group wins, shared over all its members: (0.50 + 0.25) × 2 / 4 = 0.19. No gene order involved; the "
+             "total value 2.50 is the same as production."),
+            ("midrank: the value at the group's mean rank", "Every tied gene gets 1 − p / K at the mean position "
+             "p = 3.5: 0.13. Equal to expected when the group is wholly inside the top K; at the cut it gives all four "
+             "tied genes a value, so more than K genes can be above 0 (here 6 > 4)."))):
+        text(s, x2, TOP + 0.05 + k * 1.92, w2, 1.78, [(head, {"b": True, "size": 14}), body], size=13, fill=PEACH)
 
     s = d.slide("Splatter: all cases and levels, top 30 by L5 F1", notes=(
         "Rows: the 30 best configurations by Case 2 Rejection F1 at L5 (batch + perturbation + imbalance; outlined), ties "
