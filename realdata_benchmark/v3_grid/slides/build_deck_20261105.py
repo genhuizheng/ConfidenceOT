@@ -202,6 +202,32 @@ def main() -> None:
     W = RIGHT - LEFT
 
     # ---- Splatter -------------------------------------------------------------------------------------------------
+    lr = pd.read_csv(F / "levels_ratios.tsv", sep="\t")
+    s = d.slide("Splatter levels L1-L5: what each level adds", notes=(
+        "Drawn from the generated Splatter data, not a cartoon: the all_shared pair (Case 1) of each level, replicate 1 "
+        "of the local root (same generator and parameters as the N = 5,000 run, N = 200 per side). Source and target "
+        "embedded together per level: logcpm -> PCA -> UMAP, no batch correction.\n"
+        "Row 1, side: at L1 and L2 the two sides mix inside each group; from L3 the batch effect splits every group into "
+        "a source half and a target half, which is what calibration v3 has to correct.\n"
+        "Row 2, Splatter group: L4 perturbs target Group1 (ringed) so it moves away from source Group1; L5 additionally "
+        "makes the perturbed Group1 40% of the target (proportions 0.40 / 0.25 / 0.15 / 0.12 / 0.08).\n"
+        "Row 3, genes detected: L1 lowers target depth (target / source nCount x0.52, nFeature x0.77); from L2 Splatter "
+        "dropout (default mid / shape) acts on both sides and detection falls further (nFeature x0.70)."))
+    picture(s, F / "levels_umap.png", LEFT, TOP, W, BOTTOM - TOP)
+
+    s = d.slide("Splatter levels and evaluation cases", notes=(
+        "Top: 30 source and 30 target cells of each level's all_shared pair (drawn at random, so the group mix follows "
+        "each side's proportions), ordered by group, then by nCount. Strips: Splatter group, nCount and nFeature (log10, "
+        "one colour scale across levels). Heatmap: counts of 60 fixed genes (every 16th of the 960 most expressed in L1 "
+        "source), log scale.\n"
+        "Measured target / source medians over all 200 + 200 cells: " +
+        "; ".join(f"{t.split('_')[0]} nCount x{r.nCount_target_over_source:.2f}, nFeature x{r.nFeature_target_over_source:.2f}"
+                  for t, r in zip(lr.level, lr.itertuples())) +
+        f". L5 target group shares: {lr.target_group_share.iloc[-1]}.\n"
+        "Bottom: the three cases and their correct gates (example gates drawn, not run). Case 1: reject nothing. Case 2: "
+        "reject only the unmatched population. Case 3: reject everything."))
+    picture(s, F / "levels_benchmark.png", LEFT, TOP, W, BOTTOM - TOP)
+
     s = d.slide("Splatter N = 5,000: experimental setting", notes=(
         "Table 1. The Splatter benchmark behind the v3 grid.\n"
         "Every Splatter parameter is the installed package default (newSplatParams(), read at run time). Custom design "
