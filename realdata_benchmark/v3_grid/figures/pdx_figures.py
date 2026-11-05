@@ -8,8 +8,8 @@ Per shown configuration (M4-E):
                             retained target of largest coupling mass (a weighted sample per pair)
   pdx_slices3d_<cfg>        the same, time points stacked in 3D
   pdx_slices3d_<cfg>.html   the same, interactive (rotate, zoom, hover)
-  pdx_flow_<cfg>            state flow over time: coupling mass of the retained block between states, each pair
-                            normalised to 1
+  pdx_flow_<cfg>            state flow over time: per time point two bars of all its cells (as target, as source),
+                            states split retained / rejected; bands: coupling mass of the retained block
   pdx_transitions_<cfg>     per pair: share of each source state's retained mass going to each target state
   pdx_rejected_<cfg>        rejected fraction per state at each time point, as source (forward pair) and as target
 Over every configuration:
@@ -187,45 +187,86 @@ def slices_html(cells, kept, links, cfg, out, n_links):
     print(f"  wrote pdx_slices3d_{cfg}.html")
 
 
-def flow(tr, cfg, out):
+def tint(c: str, f: float = 0.30) -> tuple:
+    r, g, b = (int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    return (1 - f + f * r, 1 - f + f * g, 1 - f + f * b)
+
+
+def flow(tr, srej, cfg, out):
+    """Every time point has two bars of all its OT cells: as target of the pair from the previous time point (left)
+    and as source of the pair to the next (right). The cells are the same; each pair gates them separately, so only
+    the retained / rejected split differs. A state's segment is its share of the cells, solid = retained, hatched =
+    rejected. Bands join retained segments; at the source end a band's height is the source state's retained share
+    times the share of its retained mass going to that target state (row-normalised), at the target end the target
+    state's retained share times the share of its received mass coming from that source state (column-normalised)."""
     t = tr[tr.block == "retained"]
-    W, H = 7.20, 3.0
+    r = srej[srej.config_id == CID[cfg]]
+    W, H = 7.20, 3.25
     sh = st.Sheet(W, H)
-    ax = sh.ax(0.45, 0.45, 5.5, 2.15)
-    bw, inset = 0.07, 0.10
+    ax = sh.ax(0.45, 0.50, 5.5, 2.25)
+    bw, gap = 0.085, 0.05
+    hatch_lw = plt.rcParams["hatch.linewidth"]; plt.rcParams["hatch.linewidth"] = 0.45
+
+    def bar(x0, pair, side):
+        g = r[(r.pair == pair) & (r.side == side)].set_index("state").reindex(STATES).fillna(0)
+        n = g.cells.sum()
+        share, ret = (g.cells / n).to_numpy(), ((g.cells - g.rejected) / n).to_numpy()
+        y = np.concatenate([[0], np.cumsum(share)])[:-1]
+        for i, s in enumerate(STATES):
+            if share[i] <= 0:
+                continue
+            ax.add_patch(Rectangle((x0, y[i]), bw, ret[i], facecolor=COLOUR[s], lw=0))
+            ax.add_patch(Rectangle((x0, y[i] + ret[i]), bw, share[i] - ret[i], facecolor=tint(COLOUR[s]),
+                                   edgecolor=COLOUR[s], hatch="//////", lw=0))
+        rej = 1 - ret.sum()
+        # the two bars of a time point sit close together: the target bar's number ends at its right edge, the
+        # source bar's starts at its left edge, so they never overlap
+        ax.text(x0 + (bw if side == "target" else 0), -0.015, f"{100 * rej:.0f}%", ha="right" if side == "target" else "left",
+                va="bottom", fontsize=st.FS_MIN, color=st.INK)
+        return y, ret
+
     for k, pair in enumerate(PAIRS):
-        g = t[t.pair == pair]
-        M = g.pivot(index="source_state", columns="target_state", values="mass").reindex(index=STATES, columns=STATES).fillna(0)
-        tot = M.to_numpy().sum()
-        if tot <= 0:
-            continue
-        M = M / tot
-        xl, xr = k + inset, k + 1 - inset
-        src, tgt = M.sum(1), M.sum(0)
-        ys = np.concatenate([[0], np.cumsum(src.to_numpy())])[:-1]; yt = np.concatenate([[0], np.cumsum(tgt.to_numpy())])[:-1]
+        xs_, xt_ = k + gap / 2, k + 1 - gap / 2 - bw
+        ys, rs = bar(xs_, pair, "source")
+        yt, rt = bar(xt_, pair, "target")
+        M = t[t.pair == pair].pivot(index="source_state", columns="target_state", values="mass").reindex(
+            index=STATES, columns=STATES).fillna(0).to_numpy()
+        with np.errstate(invalid="ignore", divide="ignore"):
+            R = np.nan_to_num(M / M.sum(1, keepdims=True)); C = np.nan_to_num(M / M.sum(0, keepdims=True))
+        o_src, o_tgt = ys.copy(), yt.copy()
+        xl, xr = xs_ + bw, xt_
+        xx = np.linspace(xl, xr, 40); w = (1 - np.cos(np.pi * (xx - xl) / (xr - xl))) / 2
         for i, s in enumerate(STATES):
-            ax.add_patch(Rectangle((xl - bw, ys[i]), bw, src.iat[i], color=COLOUR[s], lw=0))
-            ax.add_patch(Rectangle((xr, yt[i]), bw, tgt.iat[i], color=COLOUR[s], lw=0))
-        out_off = ys.copy(); in_off = yt.copy()
-        for i, s in enumerate(STATES):
-            for j, u in enumerate(STATES):
-                m = M.iat[i, j]
-                if m < 1e-4:
+            for j in range(len(STATES)):
+                ha, hb = rs[i] * R[i, j], rt[j] * C[i, j]
+                if ha < 2e-4 and hb < 2e-4:
                     continue
-                y0a, y1a = out_off[i], out_off[i] + m; y0b, y1b = in_off[j], in_off[j] + m
-                out_off[i] += m; in_off[j] += m
-                xs = np.linspace(xl, xr, 30); w = (1 - np.cos(np.pi * (xs - xl) / (xr - xl))) / 2
-                top = y1a + (y1b - y1a) * w; bot = y0a + (y0b - y0a) * w
-                ax.add_patch(Polygon(np.c_[np.r_[xs, xs[::-1]], np.r_[top, bot[::-1]]], closed=True, color=COLOUR[s],
-                                     alpha=0.45, lw=0))
-    ax.set_xlim(-0.05, len(PAIRS) + 0.05); ax.set_ylim(1.0, 0)
+                top = o_src[i] + (o_tgt[j] - o_src[i]) * w
+                bot = o_src[i] + ha + (o_tgt[j] + hb - o_src[i] - ha) * w
+                o_src[i] += ha; o_tgt[j] += hb
+                ax.add_patch(Polygon(np.c_[np.r_[xx, xx[::-1]], np.r_[top, bot[::-1]]], closed=True,
+                                     facecolor=COLOUR[s], alpha=0.40, lw=0))
+    plt.rcParams["hatch.linewidth"] = hatch_lw
+    ax.set_xlim(-0.05, len(PAIRS) + 0.05); ax.set_ylim(1.0, -0.06)
     ax.set_xticks(range(len(SAMPLES))); ax.set_xticklabels(TLABEL, fontsize=st.FS_TICK)
-    ax.set_yticks([0, 0.5, 1]); ax.set_ylabel("share of the pair's retained coupling mass", fontsize=st.FS_AXLAB)
+    ax.set_yticks([0, 0.5, 1]); ax.set_ylabel("share of the time point's cells", fontsize=st.FS_AXLAB)
+    ax.spines["left"].set_bounds(0, 1)
     st.tidy(ax)
-    legend(sh, 6.10, 2.55)
-    sh.text(0.45, H - 0.06, f"State flow between consecutive time points, {NAME[cfg]}", fontsize=st.FS_TITLE, va="top")
-    sh.text(0.45, 0.06, "Bars at the left of a pair: source states; at the right: target states; bands: M4-E coupling mass "
-            "on the retained x retained block. Each pair normalised to 1.", fontsize=st.FS_MIN, color=st.SUBTLE, va="bottom")
+    legend(sh, 6.10, 2.70)
+    y0 = 2.70 - 8 * st.leading(st.FS_MIN) * 1.15 - 0.10
+    for k, (lab, solid) in enumerate((("retained", True), ("rejected", False))):
+        yy = y0 - k * st.leading(st.FS_MIN) * 1.15
+        sh.fig.patches.append(Rectangle((6.10 / W, (yy - 0.03) / H), 0.07 / W, 0.06 / H, transform=sh.fig.transFigure,
+                                        figure=sh.fig, facecolor="#6B7177" if solid else tint("#6B7177"),
+                                        edgecolor="#6B7177", hatch=None if solid else "//////", lw=0))
+        sh.text(6.20, yy, lab, va="center", fontsize=st.FS_MIN)
+    sh.text(0.45, H - 0.06, f"Cell states and their M4-E gates over time, {NAME[cfg]}", fontsize=st.FS_TITLE, va="top")
+    sh.text(0.45, H - 0.22, "Each time point: left bar = its cells as target of the previous pair, right bar = the same cells "
+            "as source of the next pair; number above a bar: rejected share of all its cells.",
+            fontsize=st.FS_MIN, color=st.SUBTLE, va="top")
+    sh.text(0.45, 0.06, "Segment height: the state's share of the cells (solid retained, hatched rejected). Bands: coupling "
+            "mass on the retained x retained block; each end is scaled to the retained segment it joins.",
+            fontsize=st.FS_MIN, color=st.SUBTLE, va="bottom")
     sh.save(out, f"pdx_flow_{cfg}")
 
 
@@ -353,7 +394,7 @@ def main() -> None:
         slices_2d(cells, kept, links, cfg, a.out, a.links)
         slices_3d(cells, kept, links, cfg, a.out, a.links)
         slices_html(cells, kept, links, cfg, a.out, 2 * a.links)
-        flow(tr, cfg, a.out)
+        flow(tr, srej, cfg, a.out)
         transitions(tr, cfg, a.out)
         rejected_panel(srej, CID[cfg], "value", f"Rejected fraction by state and time point, {NAME[cfg]}", f"pdx_rejected_{cfg}", a.out)
     n_cfg = srej.config_id.nunique()
