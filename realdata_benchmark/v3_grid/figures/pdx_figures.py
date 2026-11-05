@@ -42,8 +42,10 @@ PAIRS = [f"LTL331__{a}__{b}" for a, b in zip(SAMPLES[:-1], SAMPLES[1:])]
 COLOUR = dict(zip(STATES, ["#0B3C5D", "#7FB8E0", "#1B7F5B", "#C2DF8A", "#E8A33D", "#C0392B", "#3D1236", "#A884C9"]))
 REJECT = "#D5D8DB"
 NAME = {"baseline": "production baseline (ranknm256 production noscale cos PCA30)",
-        "splatter_l5_best": "Splatter L5 best (ranknm256 midrank scale cos PCA50)"}
-CID = {"baseline": "ranknm256-production|none|noscale|cos|pca30", "splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50"}
+        "splatter_l5_best": "Splatter L5 best (ranknm256 midrank scale cos PCA50)",
+        "logcpm": "logCPM (logcpm noscale cos PCA30; the baseline with only the encoding changed)"}
+CID = {"baseline": "ranknm256-production|none|noscale|cos|pca30", "splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50",
+       "logcpm": "logcpm|none|noscale|cos|pca30"}
 
 
 def legend(sh, x, y, fs=st.FS_MIN, extra=()):
@@ -199,7 +201,7 @@ def flow(tr, srej, cfg, out):
     rejected. Bands join retained segments; at the source end a band's height is the source state's retained share
     times the share of its retained mass going to that target state (row-normalised), at the target end the target
     state's retained share times the share of its received mass coming from that source state (column-normalised)."""
-    t = tr[tr.block == "retained"]
+    t = None if tr is None else tr[tr.block == "retained"]
     r = srej[srej.config_id == CID[cfg]]
     W, H = 7.20, 3.25
     sh = st.Sheet(W, H)
@@ -229,6 +231,8 @@ def flow(tr, srej, cfg, out):
         xs_, xt_ = k + gap / 2, k + 1 - gap / 2 - bw
         ys, rs = bar(xs_, pair, "source")
         yt, rt = bar(xt_, pair, "target")
+        if t is None:
+            continue
         M = t[t.pair == pair].pivot(index="source_state", columns="target_state", values="mass").reindex(
             index=STATES, columns=STATES).fillna(0).to_numpy()
         with np.errstate(invalid="ignore", divide="ignore"):
@@ -264,8 +268,9 @@ def flow(tr, srej, cfg, out):
     sh.text(0.45, H - 0.22, "Each time point: left bar = its cells as target of the previous pair, right bar = the same cells "
             "as source of the next pair; number above a bar: rejected share of all its cells.",
             fontsize=st.FS_MIN, color=st.SUBTLE, va="top")
-    sh.text(0.45, 0.06, "Segment height: the state's share of the cells (solid retained, hatched rejected). Bands: coupling "
-            "mass on the retained x retained block; each end is scaled to the retained segment it joins.",
+    sh.text(0.45, 0.06, "Segment height: the state's share of the cells (solid retained, hatched rejected). " + (
+            "Bands: coupling mass on the retained x retained block; each end is scaled to the retained segment it joins."
+            if t is not None else "No bands: this configuration's coupling is not local; the gates are."),
             fontsize=st.FS_MIN, color=st.SUBTLE, va="bottom")
     sh.save(out, f"pdx_flow_{cfg}")
 
@@ -377,7 +382,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
-    p.add_argument("--config", nargs="*", default=["splatter_l5_best", "baseline"])
+    p.add_argument("--config", nargs="*", default=["splatter_l5_best", "baseline", "logcpm"])
     p.add_argument("--links", type=int, default=250, help="links drawn per pair")
     a = p.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
@@ -387,15 +392,19 @@ def main() -> None:
     first = pd.read_csv(a.data / f"gates_{a.config[0]}.tsv.gz", sep="	", dtype={"cell": str}, usecols=["cell"])
     composition(cells[cells.index.isin(set(first.cell))], a.out)  # the cells of the OT run (QC-passed)
     for cfg in a.config:
-        gates = pd.read_csv(a.data / f"gates_{cfg}.tsv.gz", sep="\t", dtype={"cell": str})
-        links = pd.read_csv(a.data / f"links_{cfg}.tsv.gz", sep="\t", dtype={"source": str, "target": str})
-        tr = pd.read_csv(a.data / f"transitions_{cfg}.tsv", sep="\t")
-        kept = cell_status(cells, gates)
-        slices_2d(cells, kept, links, cfg, a.out, a.links)
-        slices_3d(cells, kept, links, cfg, a.out, a.links)
-        slices_html(cells, kept, links, cfg, a.out, 2 * a.links)
-        flow(tr, srej, cfg, a.out)
-        transitions(tr, cfg, a.out)
+        if not (a.data / f"transitions_{cfg}.tsv").exists():  # no local coupling: the gate panels only
+            print(f"  {cfg}: no coupling tables, gate panels only")
+            flow(None, srej, cfg, a.out)
+        else:
+            gates = pd.read_csv(a.data / f"gates_{cfg}.tsv.gz", sep="\t", dtype={"cell": str})
+            links = pd.read_csv(a.data / f"links_{cfg}.tsv.gz", sep="\t", dtype={"source": str, "target": str})
+            tr = pd.read_csv(a.data / f"transitions_{cfg}.tsv", sep="\t")
+            kept = cell_status(cells, gates)
+            slices_2d(cells, kept, links, cfg, a.out, a.links)
+            slices_3d(cells, kept, links, cfg, a.out, a.links)
+            slices_html(cells, kept, links, cfg, a.out, 2 * a.links)
+            flow(tr, srej, cfg, a.out)
+            transitions(tr, cfg, a.out)
         rejected_panel(srej, CID[cfg], "value", f"Rejected fraction by state and time point, {NAME[cfg]}", f"pdx_rejected_{cfg}", a.out)
     n_cfg = srej.config_id.nunique()
     rejected_panel(srej, None, "median", f"Rejected fraction, median over all {n_cfg} preprocessing configurations",

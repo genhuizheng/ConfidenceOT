@@ -28,7 +28,8 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
-SHOWN = {"baseline": "ranknm256-production|none|noscale|cos|pca30", "splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50"}
+SHOWN = {"baseline": "ranknm256-production|none|noscale|cos|pca30", "splatter_l5_best": "ranknm256-midrank|none|scale|cos|pca50",
+         "logcpm": "logcpm|none|noscale|cos|pca30"}
 STATE = {11: "AR-high PRAD", 15: "AR-high PRAD", 0: "AR-low PRAD", 2: "AR-low PRAD", 4: "AR-low PRAD", 5: "AR-low PRAD",
          8: "AR-low PRAD", 12: "AR-low PRAD", 16: "AR-low PRAD", 6: "pre-EMT", 17: "intermediate EMT-like",
          10: "NEPC ASCL1+", 13: "early NEPC ASCL1-", 1: "terminal NEPC ASCL1-", 7: "terminal NEPC ASCL1-",
@@ -96,6 +97,9 @@ def main() -> None:
         tr, links = [], []
         enc, _, scale, cost, pca = cid.split("|")
         sub = f"{enc}__none/{enc}__none__{scale}__{cost}__{pca}/coupling_m4e.npz"
+        if not all((a.grid / "couplings_2cfg" / u / sub).exists() for u in g.pair.unique()):
+            print(f"{key}: couplings not all local, gates only", flush=True)
+            continue
         for unit in sorted(g.pair.unique()):
             zc = np.load(a.grid / "couplings_2cfg" / unit / sub, allow_pickle=False)
             P = zc["coupling"].astype(np.float64)
