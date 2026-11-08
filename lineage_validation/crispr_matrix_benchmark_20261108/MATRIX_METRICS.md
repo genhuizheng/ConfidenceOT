@@ -188,3 +188,20 @@ cell's pre-equalisation total counts. Reported beside the scores, never used to 
   out of S_best(j), as it already is of S_ind(j), which weights by π_i = 0.
 - In L2 and L3, a cell that is absent from the allele table, or whose lineage has no event, is not evaluable and is
   counted in the coverage denominators.
+
+## Clarification 2026-11-08 (2), data source, before any score was computed
+
+**The finding.** Building the unit bundles showed that `KPTracer.alleleTable.FINAL.txt` leaves out 21,471 KP cells. For
+example, 3724 L2 has 29% of its OT cells in FINAL and 3515 K2 has 30%. `KPTracer.alleleTable.unfiltered.txt` holds all
+of them:
+- it has no duplicated cell × intBC;
+- where the two tables share a cell and an intBC, the cut-site strings are identical (564,823 rows);
+- the authors' family character matrices and trees include these cells.
+
+FINAL's reason for dropping them is not documented.
+
+**The rule.** The KP states come from FINAL for every cell present there, and from the unfiltered table for the other
+cells.
+- Each cell carries its source table (`from_unfiltered`).
+- Coverage is reported both with and without the unfiltered-only cells.
+- The decision rests on coverage only; no score had been computed.
