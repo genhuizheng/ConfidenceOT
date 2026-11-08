@@ -180,3 +180,11 @@ cell's pre-equalisation total counts. Reported beside the scores, never used to 
 - No new OT fit, no CRISPR-informed cost, no tree re-inference.
 - No k-means on allele codes.
 - No parameter change after scores are seen.
+
+## Clarification 2026-11-08, written while implementing, before any score was computed
+
+- In L3, E_j (the evaluable sources of target j) means evaluable sources of j's lineage **with retained row mass**
+  (m_i > 0). A rejected source has no mass in the retained block, so it cannot receive OT mass. It is therefore left
+  out of S_best(j), as it already is of S_ind(j), which weights by π_i = 0.
+- In L2 and L3, a cell that is absent from the allele table, or whose lineage has no event, is not evaluable and is
+  counted in the coverage denominators.
