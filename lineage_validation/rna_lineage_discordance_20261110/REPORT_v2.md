@@ -5,9 +5,9 @@ Plan: `PLAN_v2.md` amendment 2026-11-11 (024eb14, fixed before computing), plus 
 
 Scope and status:
 - RNA configuration: Splatter L5 best.
-- 48 of 49 units have CRISPR-OT. `L23__KPTracer_3724__3724_NT_T1__family_metastases` is still fitting.
-  - A2 and A3 do not need it: they use the raw matrix only.
-  - A4 and the view-C tables do not yet include it.
+- All 49 units have CRISPR-OT (the 3724 pooled L2/L3 case finished last) and all 49 are compared.
+  - CRISPR-OT audit: all 49 converged; `m4e_inference_valid` is False in 16 units, which are kept and flagged.
+  - The 3724 units are valid except L1, with retained sources of 0.28-0.93.
 
 Code: `70_state_lineage.py` (A2/A3), `72_lineage_flags.py` (A1), `75_common_support.py` (A4),
 `78_amendment_summary.py`, `80_amendment_figures.py`.
@@ -109,14 +109,26 @@ already in the null.
   - 3513 has no coupling on either side.
 - **3724 metastases:** V is 0.705 against a null of 0.699 while the null can move every cell. Metastatic clade–state
   structure is reproduced entirely by site: each metastasis carries its own clade and state mixture.
-- **View C** (`a3_viewc_side_state.tsv`, `g3_viewc_side_state`): divergence excess per state is clearly negative in
-  the primary tumours of 3457 (−0.12 to −0.23) and 3724 (−0.15 to −0.22). In metastases it is near 0 for 3457 and
-  −0.04 to −0.15 for 3724. The other mice are near 0 on both sides.
+- **View C** (`a3_viewc_side_state.tsv`, `g3_viewc_side_state`): the divergence excess per state is clearly negative
+  in the primary tumours of 3457 (−0.12 to −0.23) and 3724 (−0.14 to −0.25). The other mice are near 0 on both sides.
+- **3724 metastases depend on the unit:**
+
+  | Unit | Mesenchymal-1 (Met) | Mesenchymal-2 (Met) | Pre-EMT | Mesenchymal-1 |
+  |---|---|---|---|---|
+  | One metastasis with the primary (L1 pairs) | −0.035 | −0.022 | −0.030 | −0.15 |
+  | Pooled case (all metastases with the primary) | −0.26 | −0.19 | −0.20 | −0.21 |
+
+  In the pooled case a metastatic cell's lineage neighbours can sit in other metastases. The within-site null keeps
+  each site's RNA, so between-metastasis structure (clade and RNA both differ by site) also counts as coupling there.
+  The pair units are the per-metastasis reading and agree with the Cramér's V result.
 
 ## A4. RNA-OT vs CRISPR-OT on a common support (`common_support/`, `g4_*`)
 
 **Gate disagreement** (unchanged; mean of mouse medians):
-- KP κ: source 0.056, target 0.007. Without 3724: 0.014 / 0.004. The 3724 L1 units reach a source κ of 0.43.
+- KP κ: source 0.054, target 0.005. Without 3724: 0.014 / 0.004.
+- 3724 units: source κ 0.32-0.79 in the L1 pairs and 0.006 in the pooled case.
+- In 3724 the RNA-OT top sources already have high edit agreement (s 0.57-0.79, against 0.10-0.34 elsewhere). This
+  lineage's s is high overall (median 0.54, distinct event sets 8%), so s separates cells less.
 - Quinn κ: 0.
 
 **Conditional coupling disagreement** (sources and targets retained by both gates, columns renormalised, evaluable
@@ -125,6 +137,7 @@ pairs only):
 | | TV, own blocks | TV, common block | Top-k overlap | Chance level (k / common sources) |
 |---|---|---|---|---|
 | KP | 0.72 | 0.68 (0.70 without 3724) | 0.10 | 0.046 |
+| KP 3724 (5 units) | 0.71 | 0.52 | 0.004 | 0.003 |
 | Quinn | 0.81 | 0.80 | 0.044 | 0.020 |
 
 - **Mass on the common block:** usually 0.7-1.0 for both couplings. The exceptions are 3465 (0.17-0.29) and some 3724
@@ -172,5 +185,6 @@ pairs only):
 - KP tree resolution is not available locally.
 
 ## Pending
-- The CRISPR-OT fit of the 3724 pooled L2/L3 case. Then rerun `30_compare_views.py` (that unit), `40_summarize.py`,
-  `75_common_support.py`, `78_amendment_summary.py` and `80_amendment_figures.py`.
+- Two decisions for the user, not taken because each is a new definition:
+  - merge the "(Met)" state variants for A3;
+  - extend A2 / A3 from the OT cells to every KP cell with a state.
