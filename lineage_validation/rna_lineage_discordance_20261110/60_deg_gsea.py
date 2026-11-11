@@ -30,7 +30,8 @@ REPO = Path(__file__).resolve().parents[2]
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--groups", type=Path, required=True)
-    p.add_argument("--worklist", type=Path, required=True)
+    p.add_argument("--worklist", type=Path, help="TACC mode: read the counts with the v3 worker Inputs")
+    p.add_argument("--counts", type=Path, help="local mode: the h5ad files of 58_export_counts.py")
     p.add_argument("--gmt-human", type=Path, required=True)
     p.add_argument("--gmt-mouse", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
@@ -41,16 +42,20 @@ def main() -> None:
     import anndata as ad
     import gseapy
     import scanpy as sc
-    sys.path.insert(0, str(REPO / "realdata_benchmark" / "v3_grid"))
-    spec = importlib.util.spec_from_file_location("v3worker", REPO / "realdata_benchmark" / "v3_grid" / "worker.py")
-    w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
-    wl = pd.read_csv(a.worklist, sep="\t", dtype=str)
     G = pd.read_csv(a.groups, sep="\t", dtype=str)
-    inputs = w.Inputs(); gsea = []
+    if a.counts is None:  # TACC mode
+        sys.path.insert(0, str(REPO / "realdata_benchmark" / "v3_grid"))
+        spec = importlib.util.spec_from_file_location("v3worker", REPO / "realdata_benchmark" / "v3_grid" / "worker.py")
+        w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)
+        wl = pd.read_csv(a.worklist, sep="\t", dtype=str); inputs = w.Inputs()
+    gsea = []
     for u, gu in G.groupby("unit_id", sort=False):
-        row = wl[(wl.unit_id == u) & (wl.key == "logcpm|none")].iloc[0]
-        v = inputs.get(row)
-        A = ad.concat([v["S"], v["T"]], join="inner", index_unique=None)
+        if a.counts is not None:  # local mode: 58_export_counts.py
+            A = ad.read_h5ad(a.counts / f"{u}.h5ad")
+        else:
+            row = wl[(wl.unit_id == u) & (wl.key == "logcpm|none")].iloc[0]
+            v = inputs.get(row)
+            A = ad.concat([v["S"], v["T"]], join="inner", index_unique=None)
         A.obs_names = A.obs_names.astype(str)
         sc.pp.normalize_total(A, target_sum=1e4); sc.pp.log1p(A)
         gmt = a.gmt_mouse if u.startswith("L1__") or "KPTracer" in u else a.gmt_human
