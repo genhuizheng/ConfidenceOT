@@ -112,14 +112,21 @@ def analyse(b, U, coords, rna_cc, rna_P, cr_gates, cr_P, obs, perm, rng):
         R = rna_sim(Z[sl], Z, cos); R[np.arange(R.shape[0]), np.arange(sl.start, sl.stop)] = -np.inf
         RN[sl] = np.argpartition(-R, K, axis=1)[:, :K]
 
+    gid = np.full(n, -1, dtype=np.int64); kpos = np.full(n, -1, dtype=np.int64); blist = []
+    for gi, (g, (cell_idx, S)) in enumerate(blocks.items()):
+        gid[cell_idx] = gi; kpos[cell_idx] = np.arange(len(cell_idx)); blist.append(S)
+
     def s_of(i, j):
         """s for index pairs (arrays); 0 for another clone (Quinn), NaN not evaluable or no lineage."""
+        i, j = np.asarray(i, dtype=np.int64), np.asarray(j, dtype=np.int64)
         out = np.full(len(i), np.nan)
-        for t, (a, c) in enumerate(zip(i, j)):
-            pa, pc = pos.get(a), pos.get(c)
-            if pa is None or pc is None:
-                continue
-            out[t] = blocks[pa[0]][1][pa[1], pc[1]] if pa[0] == pc[0] else 0.0
+        gi, gj = gid[i], gid[j]
+        both = (gi >= 0) & (gj >= 0)
+        out[both & (gi != gj)] = 0.0
+        same = both & (gi == gj)
+        for g in np.unique(gi[same]):
+            m = same & (gi == g)
+            out[m] = blist[g][kpos[i[m]], kpos[j[m]]]
         return out
 
     def r_of(i, j):
@@ -171,20 +178,27 @@ def analyse(b, U, coords, rna_cc, rna_P, cr_gates, cr_P, obs, perm, rng):
     sR = np.full(nt, np.nan); sC = np.full(nt, np.nan); rR = np.full(nt, np.nan); rC = np.full(nt, np.nan)
     quad = {k: np.full(nt, np.nan) for k in ("lcrf_rna", "lcrf_cr", "lcrf_ind_rna", "rclf_rna", "rclf_cr", "rclf_ind_rna")}
     piR = mR / mR.sum() if mR.sum() > 0 else mR
-    for j in np.flatnonzero(rtR | rtC):
-        tj = ns + j
-        s_col = s_of(np.full(ns, tj), np.arange(ns)); r_col = r_of(np.full(ns, tj), np.arange(ns))
-        lcrf = (s_col >= s75) & (r_col <= r25); rclf = (r_col >= r75) & ((s_col <= s25))
-        if rtR[j] and np.isfinite(qR[:, j]).all():
-            quad["lcrf_rna"][j] = qR[lcrf, j].sum(); quad["rclf_rna"][j] = qR[rclf, j].sum()
-            quad["lcrf_ind_rna"][j] = piR[lcrf].sum(); quad["rclf_ind_rna"][j] = piR[rclf].sum()
-        if rtC[j] and np.isfinite(qC[:, j]).all():
-            quad["lcrf_cr"][j] = qC[lcrf, j].sum(); quad["rclf_cr"][j] = qC[rclf, j].sum()
-        if both[j]:
-            tv[j] = 0.5 * np.abs(qR[:, j] - qC[:, j]).sum()
-            a_, c_ = np.argsort(-qR[:, j])[:K], np.argsort(-qC[:, j])[:K]
-            ov[j] = len(set(a_) & set(c_)) / K
-            sR[j], sC[j] = np.nanmean(s_col[a_]), np.nanmean(s_col[c_]); rR[j], rC[j] = r_col[a_].mean(), r_col[c_].mean()
+    # cross-side s and r, all source x target pairs (vectorised)
+    Scr = np.empty((ns, nt), dtype=np.float32)
+    for k0 in range(0, nt, 1000):
+        cols = np.arange(k0, min(nt, k0 + 1000))
+        ii_ = np.repeat(np.arange(ns), len(cols)); jj_ = np.tile(ns + cols, ns)
+        Scr[:, cols] = s_of(ii_, jj_).reshape(ns, len(cols))
+    Rcr = rna_sim(Z[:ns], Z[ns:], cos).astype(np.float32)
+    lcrf = (Scr >= s75) & (Rcr <= r25); rclf = (Rcr >= r75) & (Scr <= s25)
+    okR = rtR & np.isfinite(qR).all(0); okC = rtC & np.isfinite(qC).all(0)
+    qRz, qCz = np.nan_to_num(qR), np.nan_to_num(qC)
+    quad["lcrf_rna"] = np.where(okR, (qRz * lcrf).sum(0), np.nan); quad["rclf_rna"] = np.where(okR, (qRz * rclf).sum(0), np.nan)
+    quad["lcrf_ind_rna"] = np.where(okR, piR @ lcrf, np.nan); quad["rclf_ind_rna"] = np.where(okR, piR @ rclf, np.nan)
+    quad["lcrf_cr"] = np.where(okC, (qCz * lcrf).sum(0), np.nan); quad["rclf_cr"] = np.where(okC, (qCz * rclf).sum(0), np.nan)
+    tv = np.where(both, 0.5 * np.abs(qRz - qCz).sum(0), np.nan)
+    kk = min(K, ns)
+    topR = np.argpartition(-qRz, kk - 1, axis=0)[:kk]; topC = np.argpartition(-qCz, kk - 1, axis=0)[:kk]
+    for j in np.flatnonzero(both):
+        ov[j] = len(np.intersect1d(topR[:, j], topC[:, j])) / kk
+    colj = np.arange(nt)[None, :]
+    sR = np.where(both, np.nanmean(Scr[topR, colj], 0), np.nan); sC = np.where(both, np.nanmean(Scr[topC, colj], 0), np.nan)
+    rR = np.where(both, Rcr[topR, colj].mean(0), np.nan); rC = np.where(both, Rcr[topC, colj].mean(0), np.nan)
     t = cells.side == "target"
     for k, v in {"tv": tv, "top15_overlap": ov, "s_top_rnaot": sR, "s_top_crisprot": sC, "r_top_rnaot": rR, "r_top_crisprot": rC, **quad}.items():
         cells.loc[t, k] = v
