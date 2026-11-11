@@ -203,3 +203,78 @@ over mice.
   the tree priors, not the trees, are in the local inputs.
 - **70_ `--reuse-clades`:** re-reads the clades instead of recomputing them. The clade step is deterministic and
   draws no random numbers, so the outputs are unchanged; checked against the first run.
+
+## Extension 2026-11-11 (user), fixed before any of it was computed
+
+New, dated sensitivity / extension analyses. The frozen results (`state_lineage/`, A1-A4 above) are kept unchanged.
+New outputs go to `state_lineage_ext/<cellset>__<annotation>/` and `kp_all_audit/`.
+
+### E1. Harmonized state annotation
+- **Candidates:** an authors' label `X (Met)` whose parent `X` exists verbatim as another authors' label. No other
+  label is touched.
+- **Data:** every eligible KP cell (E2), logCPM (each cell scaled to 1e4, log1p).
+- **Checks, reported for every candidate:**
+  1. **Markers:** scanpy Wilcoxon, each label vs all other cells, top 50 genes per label. Report the overlap of the
+     candidate's top 50 with its parent's, against its overlap with every other label.
+  2. **Marker expression:** Spearman correlation of the label-mean logCPM over the union of all labels' top-50
+     genes. Report the candidate vs parent, against the candidate vs every other label.
+  3. **RNA distance:** in PCA-30 of the 2,000 highest-variance genes (`rb_common.pca_coordinates`, seed 20261111),
+     the cosine distance between label centroids. Report the candidate vs parent, against the candidate vs every
+     other label. Also per mouse wherever both labels have ≥ 20 cells.
+  4. **State composition:** mice, sites and the primary / metastasis split of each label.
+- **Merge rule (fixed now):** the candidate is merged into its parent only if the parent is its closest label on
+  check 2 **and** on check 3, pooled over mice. Otherwise it stays separate and the result is reported.
+- Original and harmonized annotations are both analysed.
+
+### E2. All eligible KP cells
+- **Eligible:** a cell of the authors' processed object (`adata_processed.combined.h5ad`) that has all of:
+  - `is_normal` False;
+  - a non-missing `Cluster-Name`;
+  - a tumour (`Tumor` set, not "Normal");
+  - a `MetFamily`;
+  - a record in the allele table, by the frozen rule (FINAL, plus unfiltered for cells FINAL lacks; `allele_source`
+    flagged per cell).
+- **Audit before any A2 / A3** (`kp_all_audit/`), per mouse:
+  - expression cells and allele-table cells, and the ID overlap (exact, else `map_ids`);
+  - normal vs malignant;
+  - annotated vs missing state;
+  - family coverage, informative events, missing intBC share;
+  - depth (total counts, detected genes);
+  - the share coming from the unfiltered table.
+  The authors' QC is taken as given; no new QC threshold is applied.
+- **Overlap with the OT units:** reported as the share of OT-unit cells inside the eligible set, and the share of
+  eligible cells that were in an OT unit.
+
+### E3. A2 / A3 rerun
+**Methods unchanged:**
+- clades: UPGMA on 1 − s within family, cut 0.5, minor < 20;
+- states ≥ 50 cells per mouse;
+- metrics and the within-site permutation null: 999 draws, seed 20261111;
+- primary vs metastasis at equal n: 200 draws;
+- tertile controls;
+- `permutable_share`.
+
+**Resolution:** the frozen rule (≥ 50 cells, median informative events ≥ 3, distinct event sets / cells ≥ 0.1,
+IQR s ≥ 0.05), recomputed per family on the cell set analysed. Primary scope = resolved families; sensitivity = all.
+
+**Runs:** cell set {OT units, all eligible} × annotation {original, harmonized}. The OT-units × original run must
+reproduce the frozen `state_lineage/` exactly (regression check).
+
+**Added outputs** (defined now):
+- **Site identifiability:** per site and mouse, the non-minor clades with ≥ 5 cells in the site and the analysed
+  states with ≥ 5 cells in the site. A site with fewer than 2 of either is "not identifiable". Primary vs metastasis
+  reports the share of each side's cells in identifiable sites. Not identifiable is never read as no association.
+- **Per state, primary vs metastasis:** for each state with ≥ 20 cells on both sides of a mouse, both sides are
+  subsampled to the same n (200 draws). Each draw computes on each side:
+  - the Hill diversity of its clade composition;
+  - its largest clade share;
+  - the same two after one within-site permutation of the states among that side's cells.
+  Reported: observed, null and excess per side, plus the share of the state's cells in identifiable sites.
+
+**Reporting:** per mouse and per state; pooled means over mice with and without 3724; the four runs compared side by
+side.
+
+### E4. Unchanged
+- A4 stays on the existing RNA-OT / CRISPR-OT cells (49 units, no new fits).
+- DEG / GSEA is kept and not extended.
+- No new solver, no RNA grid rerun, no parameter change after results.
