@@ -32,9 +32,14 @@ def main() -> None:
     p.add_argument("--groups", type=Path, required=True)
     p.add_argument("--worklist", type=Path, help="TACC mode: read the counts with the v3 worker Inputs")
     p.add_argument("--counts", type=Path, help="local mode: the h5ad files of 58_export_counts.py")
+    p.add_argument("--symbol-map", type=Path, help="gene_ids -> gene_symbol (TSV), for units whose genes are Ensembl ids "
+                                                    "(Quinn); unmapped genes are dropped, a repeated symbol keeps its first id")
     p.add_argument("--gmt-human", type=Path, required=True)
     p.add_argument("--gmt-mouse", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--downsample", action="store_true",
+                   help="sensitivity: per contrast, binomially thin every cell to the contrast's 10th-percentile total "
+                        "count (scanpy downsample_counts, seed 20261110) before normalising, so depth differs less")
     a = p.parse_args()
     if a.out.exists():
         sys.exit(f"{a.out} exists")
@@ -57,10 +62,21 @@ def main() -> None:
             v = inputs.get(row)
             A = ad.concat([v["S"], v["T"]], join="inner", index_unique=None)
         A.obs_names = A.obs_names.astype(str)
-        sc.pp.normalize_total(A, target_sum=1e4); sc.pp.log1p(A)
+        if str(A.var_names[0]).startswith("ENSG"):
+            if a.symbol_map is None:
+                sys.exit(f"{u}: Ensembl gene ids; pass --symbol-map")
+            mp = pd.read_csv(a.symbol_map, sep="\t").drop_duplicates("gene_ids").set_index("gene_ids").gene_symbol
+            sym = pd.Series(A.var_names.astype(str)).map(mp)
+            keep = (sym.notna() & ~sym.duplicated()).to_numpy()
+            print(f"{u}: {keep.mean():.3f} of {A.n_vars} Ensembl ids mapped to unique symbols", flush=True)
+            A = A[:, keep].copy(); A.var_names = sym[keep].to_numpy()
         gmt = a.gmt_mouse if u.startswith("L1__") or "KPTracer" in u else a.gmt_human
         for cid, g in gu.groupby("contrast_id", sort=False):
-            x = A[g.cell.to_numpy()].copy()
+            x = A[g.cell.to_numpy()].copy()          # raw counts; normalising per cell is the same per contrast
+            if a.downsample:
+                tot = np.asarray(x.X.sum(1)).ravel()
+                sc.pp.downsample_counts(x, counts_per_cell=int(np.percentile(tot, 10)), random_state=20261110)
+            sc.pp.normalize_total(x, target_sum=1e4); sc.pp.log1p(x)
             x.obs["group"] = g.set_index("cell").group.reindex(x.obs_names).to_numpy()
             x = x[:, np.asarray((x.X > 0).sum(0)).ravel() >= 10].copy()
             sc.tl.rank_genes_groups(x, "group", groups=["case"], reference="reference", method="wilcoxon")
