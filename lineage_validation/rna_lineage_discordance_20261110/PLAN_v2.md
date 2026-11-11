@@ -119,3 +119,77 @@ No program (EMT, proliferation, hypoxia, stress) is assumed in advance; whatever
 - Code: `lineage_validation/rna_lineage_discordance_20261110/`.
 - Outputs: `results/rna_lineage_discordance_20261110/`.
 - CRISPR-OT runs locally (49 units, one fit per unit per method).
+
+## Amendment 2026-11-11 (user), fixed before any of the analyses below was computed
+
+### A1. Lineage filtering
+- **Primary analysis:** resolved lineages only, by the step-1 rule fixed in PLAN.md section 1:
+  - ≥ 50 cells;
+  - median informative events per cell ≥ 3;
+  - distinct event sets / cells ≥ 0.1;
+  - IQR of s ≥ 0.05.
+- **Sensitivity:** every lineage, each flagged with its informative events, missingness (share of missing intBC
+  states), clone size, tree resolution (share of leaves in polytomies with > 50 children) and median depth.
+- The thresholds are not changed after results are seen.
+
+### A2. KP state–lineage association (focus)
+
+**Cells.** Per mouse, every OT cell of the mouse's units (both sides), with:
+- the authors' state (`cell_type`);
+- the site (tumour);
+- depth;
+- CRISPR events.
+
+**Lineage levels.** Both are reported. Clades nested in one family are never treated as independent replicates.
+- **Family:** the authors' MetFamily, a separate tumour-founding event, so families are independent.
+- **Clade:** within a family, average-linkage (UPGMA) clusters on 1 − s (raw edits; non-evaluable pairs get the
+  family median for the clustering only), cut at distance 0.5. Clusters of < 20 cells are pooled as "minor" and are
+  not counted as clades.
+
+**States analysed.** States with ≥ 50 cells in the mouse. Every state is listed.
+
+**Metrics** (mature, no new score):
+- per state:
+  - the number of families and of clades with ≥ 5 cells of the state;
+  - Shannon entropy and the Hill-number diversity (exp entropy) of its clade composition;
+  - the largest clade share (concentration);
+- per clade: Shannon entropy and Hill diversity of its state composition;
+- per mouse: Cramér's V of clade × state, with standardised residuals per cell of the table for the heatmap.
+
+**Null.** State labels permuted within site, within mouse, 999 draws, seed 20261111. This keeps clade size, state
+abundance per site and site composition. Each metric is reported as observed, null mean, z and empirical
+two-sided p.
+
+**Strata.** Per mouse; KP 3724 on its own, and every pooled summary also without 3724. Pooled summaries are the mean
+over mice.
+
+### A3. Primary vs metastasis
+- **Unit:** within one mouse.
+- **Cells:** primary cells and metastatic cells of states present in both (≥ 20 cells each).
+- **Metric:** Cramér's V of clade × state computed separately for primary and for metastatic cells, after
+  subsampling both to the same number of cells (the smaller; 200 draws, seed 20261111), against the within-site
+  permutation null of A2.
+- **Beside it:** the view-C divergence / convergence excess (observed − null) per side and state, from the
+  comparison tables.
+- **Controls:** the comparison is repeated within strata of informative events per cell (tertiles) and depth
+  (tertiles).
+- **Reporting:** every mouse separately, then the mean over mice, with and without 3724.
+
+### A4. RNA-OT vs CRISPR-OT on a common support
+- Gate disagreement is reported apart, as before.
+- **Conditional coupling disagreement:**
+  - both couplings restricted to sources retained by both and targets retained by both;
+  - every column renormalised to 1 on that common block;
+  - pairs restricted to evaluable cell pairs (s defined);
+  - then the per-target total-variation distance and top-15 overlap.
+
+### A5. GSEA
+- The existing DEG / GSEA (deg_gsea_v1, deg_gsea_v1_ds) is kept unchanged.
+- Programs are read only where they are consistent across mice in both the raw and the depth-thinned versions.
+
+### A6. Figures
+1. Lineage × state association heatmaps (standardised residuals, one per mouse).
+2. State-specific lineage concentration / diversity against the null.
+3. Primary vs metastasis Cramér's V per mouse.
+4. RNA-OT / CRISPR-OT gate and conditional disagreement.
+5. A representative lineage: RNA embedding coloured by state, clade and site, beside its informative-edit matrix.
