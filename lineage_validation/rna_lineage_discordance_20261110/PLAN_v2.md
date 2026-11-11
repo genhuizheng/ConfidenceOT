@@ -193,3 +193,13 @@ over mice.
 3. Primary vs metastasis Cramér's V per mouse.
 4. RNA-OT / CRISPR-OT gate and conditional disagreement.
 5. A representative lineage: RNA embedding coloured by state, clade and site, beside its informative-edit matrix.
+
+## Post hoc 2026-11-11 (after the A2-A4 results were seen; no metric, threshold or cell set changed)
+- **Diagnostic added to A2 / A3:** `permutable_share`, the share of cells in sites holding at least 2 states and at
+  least 2 clades. Only there can a within-site permutation change the clade x state table. A null equal to the
+  observed value with share 0 (3457 metastases, where each metastatic site holds one clade) means the null cannot
+  move. It is not evidence of no coupling. Reported beside every V.
+- **A1 tree resolution:** computed for Quinn (authors' hybrid trees, 116 of 148 lineages). NA for KP, because only
+  the tree priors, not the trees, are in the local inputs.
+- **70_ `--reuse-clades`:** re-reads the clades instead of recomputing them. The clade step is deterministic and
+  draws no random numbers, so the outputs are unchanged; checked against the first run.
