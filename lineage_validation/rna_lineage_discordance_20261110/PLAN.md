@@ -156,3 +156,26 @@ Each share is compared with the independent coupling (the same marginals).
 ## 9. Code
 
 `lineage_validation/rna_lineage_discordance_20261110/`. Outputs go to `results/rna_lineage_discordance_20261110/`.
+
+## Amendment 2026-11-10 (user, before any RNA quantity was computed): RNA similarity as the OT sees it, from raw counts
+
+**The change.** The primary RNA similarity becomes the one ConfidenceOT itself uses.
+- Raw counts.
+- Per unit, the exact joint coordinates of a v3 configuration, regenerated with `realdata_benchmark/v3_grid/
+  v3_common.representations`: the same encoding, PCA, seed and `mnncovlocal` correction as the fit.
+- r_ij = cosine similarity for `cos` configurations and −squared Euclidean distance for `sqeuc`, on those
+  coordinates.
+- Configurations:
+  - Splatter L5 best, `ranknm256-midrank|none|scale|cos|pca50`;
+  - logCPM + PCA, `logcpm|none|noscale|sqeuc|pca30`.
+
+**Consequences:**
+- The analysis unit becomes the OT unit (a primary → metastasis pair, or a pooled L2/L3 case), per lineage within the
+  unit, because coordinates of different units are not comparable.
+- Mantel tests and the kNN scores of sections 3-4 are computed per unit × lineage.
+- Depth enters as a covariate (section 5).
+- The section 2 depth-equalised similarity is kept as a sensitivity only.
+- The resolution rule of section 1 is applied per lineage as before.
+
+**Scope (user):** every lineage is analysed, resolved or not, with its resolution flag. The filter is decided after
+the results are seen and is reported as a post hoc choice.
