@@ -18,7 +18,19 @@ Per mouse:
   diagnostic permutable_share = share of cells in sites holding >= 2 states and >= 2 clades (what the within-site null
            can move); a
            null equal to the observed value with a low share is a null that cannot move, not an absence of coupling
-Writes ROOT/state_lineage/{cells, clades, states, clade_diversity, mouse_cramer, residuals, primary_vs_met}.tsv(.gz).
+Writes ROOT/<out-name>/{cells, clades, states, clade_diversity, mouse_cramer, residuals, primary_vs_met}.tsv(.gz).
+
+Extension 2026-11-11 (PLAN_v2.md E3), all optional and off by default so the frozen run is unchanged:
+  --out-name     output directory under ROOT (default state_lineage, the frozen A2 / A3 run)
+  --state-map    TSV original -> harmonized; the state column becomes the harmonized label, state_original keeps the
+                 authors' label
+  --resolution recompute: the frozen step-1 rule on the analysed cell set, per family, from the same s matrix as
+                 the clades (default frozen: lineages/resolution.tsv)
+  extra outputs  (any --out-name other than state_lineage) site_identifiability.tsv (per site: non-minor clades and
+                 analysed states with >= 5 cells there; < 2 of either = not identifiable), state_side.tsv (per state
+                 with >= 20 cells on both sides: clade Hill diversity and largest share per side at equal n, 200 draws,
+                 each with a within-site permutation), identifiable-share columns on primary_vs_met. They draw from
+                 their own generator (seed 20261111), so the main null stream is the frozen one
 """
 
 from __future__ import annotations
@@ -33,6 +45,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -42,6 +55,8 @@ import matrix_core as mc  # noqa: E402
 
 SEED, NPERM, NSUB = 20261111, 999, 200
 CUT, MIN_CLADE, MIN_STATE, MIN_SIDE = 0.5, 20, 50, 20
+MIN_IN_SITE = 5                                                   # extension: a clade / state counts in a site with >= 5 cells
+RES_CELLS, RES_EVENTS, RES_DISTINCT, RES_IQR = 50, 3, 0.1, 0.05   # the frozen step-1 rule (01_lineage_resolution.py)
 
 
 def load(name, path):
@@ -103,22 +118,31 @@ def main() -> None:
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--inputs", type=Path, required=True)
     p.add_argument("--cells", type=Path)
+    p.add_argument("--out-name", default="state_lineage")
+    p.add_argument("--state-map", type=Path)
+    p.add_argument("--resolution", choices=["frozen", "recompute"], default="frozen")
     p.add_argument("--reuse-clades", action="store_true",
                    help="read clades / events / missingness from an existing state_lineage/cells.tsv.gz instead of recomputing "
                         "them (deterministic; the null draws are unchanged because the clade step uses no random numbers)")
     a = p.parse_args()
-    out = a.root / "state_lineage"; out.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(SEED)
+    out = a.root / a.out_name; out.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(SEED); rng_e = np.random.default_rng(SEED)
+    ext = a.out_name != "state_lineage"
     cot = load("cot", HERE / "10_crispr_ot.py"); bb = cot.bundles_module()
     tabs = bb.load_tables(a.inputs); t, prior = tabs["KPTracer"]
     cells = pd.read_csv(a.cells, sep="\t", dtype={"cell": str, "mouse": str}) if a.cells else default_cells(a.root)
     lin = t.drop_duplicates("cell").set_index("cell").lineage
     cells["family"] = cells.cell.map(lin)
     cells = cells.dropna(subset=["family", "state"]).copy()
+    if a.state_map:
+        cells["state_original"] = cells.state
+        mp = pd.read_csv(a.state_map, sep="\t").set_index("original").harmonized
+        cells["state"] = cells.state.map(lambda x: mp.get(x, x))
+        print(f"state map: {int((cells.state != cells.state_original).sum())} cells relabelled", flush=True)
     res = pd.read_csv(a.root / "lineages" / "resolution.tsv", sep="\t", dtype={"mouse": str})
     resolved = res[res.dataset == "KPTracer"].set_index("lineage").resolved
     # clades, events, missingness per family
-    rows = []
+    rows, res_rows = [], []
     if a.reuse_clades:
         prev = pd.read_csv(out / "cells.tsv.gz", sep="	", dtype={"cell": str})[["cell", "clade", "events", "missing_share"]]
         rows.append(prev); print(f"reused clades of {len(prev)} cells", flush=True)
@@ -128,22 +152,35 @@ def main() -> None:
         ev = np.asarray(L.incidence.sum(1)).ravel()
         miss = 1 - np.asarray(L.observed.sum(1)).ravel() / max(len(L.intbcs), 1)
         clade = np.full(len(g), "minor", dtype=object)
+        rr = {"lineage": fam, "cells": len(g), "median_events_per_cell": float(np.median(ev)),
+              "distinct_sets_share": pd.Series([tuple(r.indices) for r in L.incidence.tocsr()]).nunique() / len(g), "s_iqr": np.nan}
         if len(g) >= 2 * MIN_CLADE:
             s, ok = L.agreement(np.arange(len(g)), np.arange(len(g)))
-            iu = np.triu_indices(len(g), 1)
-            d = (1 - s[iu]).astype(np.float64); okv = ok[iu]; del s, ok
+            d = squareform(1 - np.asarray(s, dtype=np.float64), checks=False); del s       # upper triangle, row order
+            okv = squareform(np.asarray(ok, dtype=np.uint8), checks=False).astype(bool); del ok
+            if okv.any():
+                rr["s_iqr"] = float(np.subtract(*np.percentile(1 - d[okv], [75, 25])))
             d[~okv] = np.median(d[okv]) if okv.any() else 1.0
             lab = fcluster(linkage(d, method="average"), t=CUT, criterion="distance"); del d
             vc = pd.Series(lab).value_counts()
             big = vc[vc >= MIN_CLADE].index
             clade = np.where(np.isin(lab, big), [f"{fam}|c{x}" for x in lab], "minor")
+        rr["resolved"] = bool(len(g) >= RES_CELLS and rr["median_events_per_cell"] >= RES_EVENTS
+                              and rr["distinct_sets_share"] >= RES_DISTINCT and rr["s_iqr"] >= RES_IQR)
+        res_rows.append(rr)
         rows.append(pd.DataFrame({"cell": g.cell.to_numpy(), "clade": clade, "events": ev, "missing_share": miss}))
         print(f"{fam}: {len(g)} cells, {len(set(clade) - {'minor'})} clades, minor {np.mean(clade == 'minor'):.2f}", flush=True)
     cells = cells.merge(pd.concat(rows), on="cell")
+    if a.resolution == "recompute":
+        if not res_rows:
+            sys.exit("--resolution recompute needs the clade step (not --reuse-clades)")
+        R_ = pd.DataFrame(res_rows); R_.to_csv(out / "resolution.tsv", sep="\t", index=False)
+        resolved = R_.set_index("lineage").resolved
     cells["resolved"] = cells.family.map(resolved)
     cells["primary"] = cells.site.map(is_primary)
     cells.to_csv(out / "cells.tsv.gz", sep="\t", index=False, compression="gzip")
     st_rows, cl_rows, mv_rows, rs_rows, pm_rows = [], [], [], [], []
+    id_rows, ss_rows = [], []
     for scope in ("primary_analysis", "sensitivity_all"):
         C = cells[cells.resolved.fillna(False)] if scope == "primary_analysis" else cells
         for mouse, g in C.groupby("mouse"):
@@ -194,6 +231,41 @@ def main() -> None:
             for j, x in enumerate(cl):
                 for k, y in enumerate(stx):
                     rs_rows.append({"scope": scope, "mouse": mouse, "clade": x, "state": y, "count": T[j, k], "residual": R[j, k]})
+            if ext:
+                # extension: site identifiability
+                ident = {}
+                for sname, hs in g.groupby("site"):
+                    ncl = int((hs.clade.value_counts() >= MIN_IN_SITE).sum()); nst = int((hs.state.value_counts() >= MIN_IN_SITE).sum())
+                    ident[sname] = ncl >= 2 and nst >= 2
+                    id_rows.append({"scope": scope, "mouse": mouse, "site": sname, "primary": bool(hs.primary.iloc[0]), "cells": len(hs),
+                                    "clades_ge5": ncl, "states_ge5": nst, "identifiable": ident[sname]})
+                g = g.assign(_ident=g.site.map(ident).astype(bool))
+                # extension: per state, primary vs metastasis at equal n
+                for x in stx:
+                    sp_, sm_ = g[(g.state == x) & g.primary], g[(g.state == x) & ~g.primary]
+                    if len(sp_) < MIN_SIDE or len(sm_) < MIN_SIDE:
+                        continue
+                    nmin = min(len(sp_), len(sm_))
+                    rec = {"scope": scope, "mouse": mouse, "state": x, "n_each": nmin, "primary_cells": len(sp_), "metastasis_cells": len(sm_)}
+                    for side, hh_side in (("primary", g[g.primary]), ("metastasis", g[~g.primary])):
+                        st_side = hh_side.state.to_numpy(); site_side = hh_side.site.to_numpy()
+                        cl_side = pd.Index(sorted(hh_side.clade.unique())); ci_s = cl_side.get_indexer(hh_side.clade)
+                        pos = np.flatnonzero(st_side == x)
+                        vals = []
+                        for _ in range(NSUB):
+                            pick = rng_e.choice(pos, nmin, replace=False)
+                            comp = np.bincount(ci_s[pick], minlength=len(cl_side)).astype(float)
+                            perm = permute_within(st_side, site_side, rng_e)
+                            pick_p = rng_e.choice(np.flatnonzero(perm == x), nmin, replace=False)
+                            comp_p = np.bincount(ci_s[pick_p], minlength=len(cl_side)).astype(float)
+                            vals.append((np.exp(entropy(comp)), comp.max() / nmin, np.exp(entropy(comp_p)), comp_p.max() / nmin))
+                        v = np.array(vals); hx = hh_side[hh_side.state == x]
+                        rec.update({f"{side}_hill": v[:, 0].mean(), f"{side}_hill_null": v[:, 2].mean(),
+                                    f"{side}_hill_excess": v[:, 0].mean() - v[:, 2].mean(),
+                                    f"{side}_max_share": v[:, 1].mean(), f"{side}_max_share_null": v[:, 3].mean(),
+                                    f"{side}_max_share_excess": v[:, 1].mean() - v[:, 3].mean(),
+                                    f"{side}_identifiable_share": float(hx._ident.mean()), f"{side}_sites": int(hx.site.nunique())})
+                    ss_rows.append(rec)
             # A3 primary vs metastasis
             pri, met = g[g.primary], g[~g.primary]
             both_states = [x for x in stx if (pri.state == x).sum() >= MIN_SIDE and (met.state == x).sum() >= MIN_SIDE]
@@ -223,8 +295,13 @@ def main() -> None:
                     rec["primary_permutable_share"] = permutable_share(hp.state.to_numpy(), hp.site.to_numpy(), hp.clade.to_numpy())
                     rec["metastasis_permutable_share"] = permutable_share(hm.state.to_numpy(), hm.site.to_numpy(), hm.clade.to_numpy())
                     rec["primary_sites"], rec["metastasis_sites"] = hp.site.nunique(), hm.site.nunique()
+                    if ext:
+                        rec["primary_identifiable_share"] = float(hp._ident.mean()); rec["metastasis_identifiable_share"] = float(hm._ident.mean())
                     pm_rows.append(rec)
-    for name, rows_ in (("states", st_rows), ("clade_diversity", cl_rows), ("mouse_cramer", mv_rows), ("residuals", rs_rows), ("primary_vs_met", pm_rows)):
+    tables = [("states", st_rows), ("clade_diversity", cl_rows), ("mouse_cramer", mv_rows), ("residuals", rs_rows), ("primary_vs_met", pm_rows)]
+    if ext:
+        tables += [("site_identifiability", id_rows), ("state_side", ss_rows)]
+    for name, rows_ in tables:
         pd.DataFrame(rows_).to_csv(out / f"{name}.tsv", sep="\t", index=False)
     print(pd.DataFrame(mv_rows).round(3).to_string(index=False))
     if pm_rows:
