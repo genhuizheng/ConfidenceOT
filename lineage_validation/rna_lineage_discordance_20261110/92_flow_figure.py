@@ -18,8 +18,10 @@ Every KP unit with both couplings (M4-E):
                    Because both F sum to 1, RNA-enriched total = CRISPR-enriched total, so bars 1 and 2 carry the
                    same split by construction
   gates            per side, cell fractions: both retained, RNA-only, CRISPR-only, both rejected
-  tree             UPGMA (average linkage) on the mean 1 - s between clades (up to 300 cells per clade, seed 20261111),
-                   a summary of the edit structure, not the authors' Cassiopeia tree
+  clades           --clades (default: the all-eligible-cell A2 clades, state_lineage_ext/all_cells__original), so clade
+                   ids match every other figure
+  tree             lineage_tree.py: one cached tree per family (average linkage on the mean 1 - s between clades), drawn
+                   pruned to the clades of the figure; a summary of the edits, not the authors' Cassiopeia tree
 Writes ROOT/flow/{units.tsv, gates.tsv, flows/<unit>.tsv, clades/<unit>.tsv} and, for --figures units (default:
 every 3457 and 3724 unit), ROOT/figures/flow/<unit>.{png,pdf,svg}.
 """
@@ -47,6 +49,8 @@ sys.path.insert(0, str(REPO / "realdata_benchmark" / "v3_grid" / "figures"))
 sys.path.insert(0, str(REPO / "lineage_validation" / "crispr_matrix_benchmark_20261108"))
 import matrix_core as mc  # noqa: E402
 import nbt_style as st  # noqa: E402
+sys.path.insert(0, str(HERE))
+import lineage_tree as LT  # noqa: E402
 
 CONFIGS = {"l5best": "ranknm256-midrank|none|scale|cos|pca50", "logcpm_pca": "logcpm|none|noscale|sqeuc|pca30"}
 OTHER_SHARE, TREE_CELLS, SEED, MIN_RIBBON = 0.02, 300, 20261111, 0.002
@@ -65,6 +69,20 @@ def load(name, path):
     return m
 
 
+def spread(y, gap, lo, hi):
+    """Label positions: same top-to-bottom order as y (descending), at least `gap` apart, kept within [lo, hi]."""
+    y = np.asarray(y, float); out = y.copy()
+    for _ in range(200):
+        moved = False
+        for i in range(1, len(out)):
+            if out[i - 1] - out[i] < gap:
+                d = (gap - (out[i - 1] - out[i])) / 2; out[i - 1] += d; out[i] -= d; moved = True
+        out = np.clip(out, lo, hi)
+        if not moved:
+            break
+    return out
+
+
 def ribbon(ax, x0, x1, y0a, y0b, y1a, y1b, color, alpha=0.75):
     """Band from [y0a, y0b] at x0 to [y1a, y1b] at x1 (cubic Bezier edges)."""
     xm = (x0 + x1) / 2
@@ -80,12 +98,15 @@ def main() -> None:
     p.add_argument("--bundles", type=Path, required=True)
     p.add_argument("--tag", default="l5best")
     p.add_argument("--figures", nargs="*")
+    p.add_argument("--clades", type=Path, help="cells.tsv.gz with cell, family, clade, state (default all_cells__original)")
     a = p.parse_args()
     out = a.root / "flow"; (out / "flows").mkdir(parents=True, exist_ok=True); (out / "clades").mkdir(exist_ok=True)
     fig_out = a.root / "figures" / "flow"; fig_out.mkdir(parents=True, exist_ok=True)
     st.apply()
     cot = load("cot", HERE / "10_crispr_ot.py"); bb = cot.bundles_module(); t, prior = bb.load_tables(a.inputs)["KPTracer"]
-    cl = pd.read_csv(a.root / "state_lineage" / "cells.tsv.gz", sep="\t", dtype={"cell": str, "mouse": str}).set_index("cell")
+    cl = pd.read_csv(a.clades or a.root / "state_lineage_ext" / "all_cells__original" / "cells.tsv.gz", sep="\t",
+                     dtype={"cell": str, "mouse": str}).set_index("cell")
+    cl_fam = cl.reset_index()[["cell", "family", "clade"]]
     A = a.root / "inputs_A"; cid = CONFIGS[a.tag]
     urows, grows = [], []
     for f in sorted(glob.glob(str(a.bundles / "*.pkl"))):
@@ -122,27 +143,12 @@ def main() -> None:
         small = [c for c in allc if fs.get(c, 0) < OTHER_SHARE and ft.get(c, 0) < OTHER_SHARE]
         mp = {c: ("Other" if c in small else c) for c in allc}
         lab_s = np.array([mp[c] for c in lab_s]); lab_t = np.array([mp[c] for c in lab_t])
-        # tree over the named clades
+        # the family's shared tree, pruned to the named clades of this unit
         named = sorted({c for c in set(lab_s) | set(lab_t) if c not in ("Other", "minor", "unassigned")})
-        order = named
-        Z = None
-        if len(named) >= 2:
-            rng = np.random.default_rng(SEED); fam = named[0].split("|")[0]
-            pick = []
-            for c in named:
-                ids_c = cl.index[cl.clade == c].to_numpy(); pick.append(rng.choice(ids_c, min(TREE_CELLS, len(ids_c)), replace=False))
-            cells_t = np.concatenate(pick); grp = np.repeat(np.arange(len(named)), [len(x) for x in pick])
-            sub = t[(t.lineage == fam) & t.cell.isin(set(cells_t))]
-            L = mc.Lineage(sub, cells_t, np.repeat("source", len(cells_t)), prior)
-            s, ok = L.agreement(np.arange(len(cells_t)), np.arange(len(cells_t)))
-            D = np.zeros((len(named), len(named)))
-            for i in range(len(named)):
-                for j in range(len(named)):
-                    m = ok[np.ix_(grp == i, grp == j)]; v = np.asarray(s)[np.ix_(grp == i, grp == j)][m]
-                    D[i, j] = 1 - v.mean() if v.size else 1.0
-            D = (D + D.T) / 2; np.fill_diagonal(D, 0)
-            Z = linkage(squareform(D, checks=False), "average")
-            order = [named[k] for k in dendrogram(Z, no_plot=True)["leaves"]]
+        fam = named[0].split("|")[0] if named else None
+        tree = LT.family_tree(fam, cl_fam[cl_fam.family == fam], t, prior, mc, a.root / "explore" / "trees") if fam else None
+        order, pr = LT.pruned_order(tree, named)
+        Z = (pr, tree["names"]) if tree is not None else None
         order = order + [c for c in ("minor", "Other", "unassigned") if c in set(lab_s) | set(lab_t)]
         k = len(order); ix = {c: i for i, c in enumerate(order)}
         bs, bt = np.array([ix[c] for c in lab_s]), np.array([ix[c] for c in lab_t])
@@ -224,24 +230,29 @@ def draw(fig_out, u, b, order, Z, F, sh_, re_, ce_, un, lab_s, lab_t, st_s, st_t
 
     def nice(c):
         return c.split("|")[-1] if "|" in c else c
-    for i, c in enumerate(order):
-        if hs[i] > 0:
-            ax.text(XS0 - 0.07, ys[i] - hs[i] / 2, f"{nice(c)}  ({int((lab_s == c).sum())})", ha="right", va="center", fontsize=st.FS_TICK)
-        if ht[i] > 0:
-            ax.text(XT1 + 0.07, yt[i] - ht[i] / 2, f"{nice(c)}  ({int((lab_t == c).sum())})", ha="left", va="center", fontsize=st.FS_TICK)
-    # simplified clade tree: leaves at the source segment centres, ending just left of the labels
-    if Z is not None:
-        named = [c for c in order if c not in ("minor", "Other", "unassigned")]
-        dn = dendrogram(Z, no_plot=True)
-        pos_y = {5 + 10 * r: ys[order.index(named[r])] - hs[order.index(named[r])] / 2 for r in range(len(named))}
-        hmax = max(max(d) for d in dn["dcoord"]) or 1
-        x_right, x_left = 1.30, 0.45
-        ks = sorted(pos_y)
-        for xs_, ds_ in zip(dn["icoord"], dn["dcoord"]):
-            px = [x_right - (d / hmax) * (x_right - x_left) for d in ds_]
-            py = [float(np.interp(v, ks, [pos_y[q] for q in ks])) for v in xs_]
-            ax.plot(px, py, color=st.INK, lw=0.6, solid_capstyle="butt")
-        ax.text(x_left, top + 0.012, "CRISPR clades (UPGMA on 1 - s)", fontsize=st.FS_MIN, color=st.SUBTLE, va="bottom")
+    TIP = 1.25                     # tree leaf tips; source labels start here, right before the bar
+    sp_ = lambda c: c in ("minor", "Other", "unassigned")  # noqa: E731
+    LG = 0.03                      # minimum label spacing (axes units)
+    src = [i for i in range(k) if hs[i] > 0]; tgt = [i for i in range(k) if ht[i] > 0]
+    ly_s = dict(zip(src, spread([ys[i] - hs[i] / 2 for i in src], LG, 0.06, top)))
+    ly_t = dict(zip(tgt, spread([yt[i] - ht[i] / 2 for i in tgt], LG, 0.06, top)))
+    for i in src:
+        c = order[i]; yc = ys[i] - hs[i] / 2; yl = ly_s[i]
+        ax.text(TIP + 0.05, yl, f"{nice(c)} ({int((lab_s == c).sum())})" + ("\nnot in tree" if sp_(c) else ""), ha="left", va="center",
+                fontsize=st.FS_TICK if not sp_(c) else st.FS_MIN, color=st.INK if not sp_(c) else st.SUBTLE)
+        ax.plot([XS0 - 0.32, XS0 - 0.06, XS0], [yl, yl, yc], color=st.GUIDE if abs(yl - yc) < 1e-6 else "#9AA0A6", lw=0.4)
+    for i in tgt:
+        c = order[i]; yc = yt[i] - ht[i] / 2; yl = ly_t[i]
+        ax.text(XT1 + 0.12, yl, f"{nice(c)} ({int((lab_t == c).sum())})", ha="left", va="center",
+                fontsize=st.FS_TICK if not sp_(c) else st.FS_MIN, color=st.INK if not sp_(c) else st.SUBTLE)
+        if abs(yl - yc) > 1e-6:
+            ax.plot([XT1, XT1 + 0.04, XT1 + 0.1], [yc, yl, yl], color="#9AA0A6", lw=0.4)
+    if Z is not None and Z[0] is not None and Z[0][0] != "leaf":
+        y_of = {order[i]: ly_s[i] for i in src if not sp_(order[i])}
+        for c in [c for c in order if not sp_(c) and c not in y_of]:      # a treed clade with no source mass: its target label row
+            y_of[c] = ly_t[order.index(c)]
+        LT.draw_pruned(ax, Z[0], Z[1], y_of, 0.1, TIP, y_bar=0.035, color=st.INK, fontsize=st.FS_MIN)
+        ax.text(0.1, top + 0.012, "CRISPR clade tree (family-wide, pruned)", fontsize=st.FS_MIN, color=st.SUBTLE, va="bottom")
     # headers: site, side, gate fractions (cells, not coupling mass)
     tsites = sorted(pd.Series(b["target_site"]).unique())
     tsite = tsites[0] if len(tsites) == 1 else f"{len(tsites)} sites ({', '.join(s_.split('_')[-1] for s_ in tsites)})"
