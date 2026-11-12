@@ -112,6 +112,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--inputs", type=Path, required=True)
+    p.add_argument("--parts", nargs="*", default=["ot", "baseline", "ba", "mice", "bd", "e"],
+                   help="subset of: ot (B / C / V per unit), baseline, ba (per family), mice (BB / BC), bd, e")
     a = p.parse_args()
     out = a.root / "figures" / "explore"; out.mkdir(parents=True, exist_ok=True)
     tab = a.root / "explore"; tab.mkdir(exist_ok=True)
@@ -121,7 +123,7 @@ def main() -> None:
     G["AC"] = rd(a.root / "state_lineage_ext" / "all_cells__original" / "cells.tsv.gz"); G["cache"] = a.root / "explore" / "trees"
     ot_cl = G["AC"].set_index("cell")         # every figure uses the all-eligible-cell clades
     flow_units = rd(a.root / "flow" / "units.tsv").set_index("unit_id")
-    OT_CASES = list(flow_units.index)
+    OT_CASES = list(flow_units.index) if "ot" in a.parts else []
 
     # ---------- OT difference: B heatmap, C bars, V levels ----------
     for u in OT_CASES:
@@ -259,7 +261,7 @@ def main() -> None:
 
     # ---------- V baseline: clade-level shared vs the independent coupling ----------
     brow = []
-    for u in flow_units.index:
+    for u in (flow_units.index if "baseline" in a.parts else []):
         fl = rd(a.root / "flow" / "flows" / f"{u}.tsv")
         Fr = fl.pivot(index="source_clade", columns="target_clade", values="F_rna").fillna(0)
         Fc = fl.pivot(index="source_clade", columns="target_clade", values="F_crispr").reindex_like(Fr).fillna(0)
@@ -269,7 +271,8 @@ def main() -> None:
         Fi = np.outer(ps, pt)
         brow.append({"unit_id": u, "shared_rna_crispr": np.minimum(Fr, Fc).to_numpy().sum(), "shared_rna_independent": np.minimum(Fr.to_numpy(), Fi).sum(),
                      "shared_crispr_independent": np.minimum(Fc.to_numpy(), Fi).sum(), "named_clades": int((~Fr.index.isin(SPECIAL)).sum())})
-    Bv = pd.DataFrame(brow); Bv.to_csv(tab / "baseline_independent.tsv", sep="\t", index=False)
+    Bv = pd.DataFrame(brow) if brow else rd(tab / "baseline_independent.tsv")
+    Bv.to_csv(tab / "baseline_independent.tsv", sep="\t", index=False)
     fig = plt.figure(figsize=(3.2, 2.6)); ax = fig.add_axes([0.18, 0.17, 0.75, 0.68]); st.tidy(ax)
     ax.scatter(Bv.shared_rna_independent, Bv.shared_rna_crispr, s=9, color=C_RNA, lw=0, label="x = Shared(RNA-OT, independent)")
     ax.scatter(Bv.shared_crispr_independent, Bv.shared_rna_crispr, s=9, color=C_CR, lw=0, label="x = Shared(CRISPR-OT, independent)")
@@ -286,7 +289,7 @@ def main() -> None:
     res = rd(a.root / "state_lineage_ext" / "all_cells__original" / "resolution.tsv").set_index("lineage")
     audit = []
     fam_named = AC[~AC.clade.isin(SPECIAL)].groupby("family").clade.nunique()
-    for fam in sorted(fam_named[fam_named >= 2].index):
+    for fam in (sorted(fam_named[fam_named >= 2].index) if "ba" in a.parts else []):
         g = AC[AC.family == fam]
         named = sorted(set(g.clade) - set(SPECIAL))
         cells_of = {c: g.cell[g.clade == c].to_numpy() for c in named}
@@ -333,8 +336,9 @@ def main() -> None:
                           "median_depth": h.depth.median(), "primary_share": h.primary.mean(), "sites": h.site.nunique(),
                           "top_state": h.state.value_counts().index[0], "top_state_share": h.state.value_counts(normalize=True).iloc[0],
                           "family_resolved": bool(rr.resolved)})
-    pd.DataFrame(audit).to_csv(tab / "case_audit.tsv", sep="\t", index=False)
-    for mouse in sorted(AC.mouse.unique()):
+    if audit:
+        pd.DataFrame(audit).to_csv(tab / "case_audit.tsv", sep="\t", index=False)
+    for mouse in (sorted(AC.mouse.unique()) if "mice" in a.parts else []):
         g = AC[(AC.mouse == mouse)]
         g = g[g.clade != "minor"]
         stv = g.state.value_counts(); states = list(stv[stv >= 50].index)
@@ -381,15 +385,14 @@ def main() -> None:
                 for st_, fr in comp.items():
                     ax.add_patch(Rectangle((x, y), w_, fr, facecolor=STATE_COL.get(st_, "#E3E6E8"), edgecolor="none")); y += fr
                 ax.add_patch(Rectangle((x, 0), w_, 1, facecolor="none", edgecolor="white", lw=0.8))
-                if w_ > 0.035:
-                    ax.text(x + w_ / 2, -0.04, nice(c_), ha="center", va="top", fontsize=st.FS_MIN, rotation=90)
+                if w_ > 0.045:
+                    ax.text(x + w_ / 2, -0.03, nice(c_), ha="center", va="top", fontsize=st.FS_MIN)
                 x += w_
             idf = bool(idt.identifiable.get(s_, False)) if s_ in idt.index else False
             kind = "primary" if h.primary.iloc[0] else "metastasis"
             ax.text(x0 + wsite / 2, 1.04, f"{s_.split('_')[-1]} ({kind[:3]}.)\nn={len(h)}", ha="center", va="bottom", fontsize=st.FS_MIN)
-            if not idf:
-                ax.text(x0 + wsite / 2, 0.5, "not\nidentifiable", ha="center", va="center", fontsize=st.FS_MIN, color=st.INK,
-                        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.8))
+            ax.text(x0 + wsite / 2, -0.13, "identifiable" if idf else "not identifiable", ha="center", va="top", fontsize=st.FS_MIN,
+                    color=st.INK if idf else st.SUBTLE, style="normal" if idf else "italic")
         ax.set_xlim(-0.01, 1.01); ax.set_ylim(-0.25, 1.25)
         fig.text(0.01, 0.985, f"KP {mouse}: within each site, clades (column width = cells) and their RNA states (fill)", fontsize=st.FS_TITLE, va="top")
         fig.text(0.01, 0.02, "not identifiable = fewer than 2 clades or 2 states (>= 5 cells) in the site: the null cannot test it; "
@@ -399,7 +402,7 @@ def main() -> None:
     # BD: discordant cells on the RNA UMAP of one family
     import umap
     bd = []
-    for mouse, gm in flow_units.reset_index().groupby("mouse"):
+    for mouse, gm in (flow_units.reset_index().groupby("mouse") if "bd" in a.parts else []):
         case = gm[gm.unit_id.str.startswith("L23")]
         pick = case if len(case) else gm
         pick = pick.assign(_n=np.minimum(pick.common_sources, pick.common_targets)).sort_values("_n", ascending=False)
@@ -431,11 +434,11 @@ def main() -> None:
         save(fig, out, f"BD_discordance_{u}")
     # E: across mice, state concentration beyond the within-site null (largest clade share, observed - null)
     S2 = S_all.copy(); S2["excess"] = S2.max_share - S2.max_share_null
-    for focus_only in (True, False):
+    for focus_only in ((True, False) if "e" in a.parts else ()):
         d = S2[S2.state.isin(FOCUS)] if focus_only else S2
         mice = sorted(d.mouse.unique()); sts = [x for x in (FOCUS if focus_only else sorted(d.state.unique())) if x in set(d.state)]
         fig = plt.figure(figsize=(7.2, 0.9 + 0.22 * len(sts))); H = 0.9 + 0.22 * len(sts)
-        ax = fig.add_axes([1.5 / 7.2, 0.55 / H, 5.2 / 7.2, 0.22 * len(sts) / H])
+        ax = fig.add_axes([1.5 / 7.2, 0.55 / H, 4.9 / 7.2, 0.22 * len(sts) / H])
         piv = d.pivot_table(index="state", columns="mouse", values="excess").reindex(index=sts, columns=mice)
         nn = d.pivot_table(index="state", columns="mouse", values="cells").reindex(index=sts, columns=mice)
         lim = float(np.nanmax(np.abs(piv.to_numpy()))) or 0.1
@@ -452,7 +455,7 @@ def main() -> None:
             s_.set_visible(False)
         ax.tick_params(length=0)
         sm = plt.cm.ScalarMappable(cmap=cmx, norm=plt.Normalize(-lim, lim))
-        cb = fig.colorbar(sm, cax=fig.add_axes([6.85 / 7.2, 0.55 / H, 0.08 / 7.2, min(0.9, 0.22 * len(sts)) / H])); cb.ax.tick_params(labelsize=st.FS_MIN)
+        cb = fig.colorbar(sm, cax=fig.add_axes([6.55 / 7.2, 0.55 / H, 0.08 / 7.2, min(0.9, 0.22 * len(sts)) / H])); cb.ax.tick_params(labelsize=st.FS_MIN)
         cb.set_label("largest clade share - null", fontsize=st.FS_MIN); cb.outline.set_visible(False)
         fig.text(0.01, 1 - 0.04 / H, "Per mouse and state (>= 50 cells, all eligible KP cells): how much more one clade dominates the state than the "
                  "within-site null expects (red = lineage-concentrated, blue = spread over clades; dot area = cells)", fontsize=st.FS_MIN, va="top")

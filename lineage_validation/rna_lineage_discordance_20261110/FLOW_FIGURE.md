@@ -1,5 +1,7 @@
 # Tree-annotated OT difference flow (2026-11-12)
 
+Script: `92_flow_figure.py`. **Update 2026-11-12:** clades are now the all-eligible-cell A2 clades, with one shared tree per family (`lineage_tree.py`); the numbers below are from that rerun. The OT-clade version is in `flow_v0_ot_clades/`.
+
 Script: `92_flow_figure.py`. It reuses the existing couplings and gates (Splatter L5 best RNA-OT, M4-E; CRISPR-OT,
 M4-E), the frozen A2 clades (`state_lineage/cells.tsv.gz`, original annotation) and the authors' states and sites.
 Nothing was refitted.
@@ -75,11 +77,11 @@ Nothing was refitted.
 
 ## What the 45 KP units show (`flow/units.tsv`, `flow/enriched_location.tsv`)
 
-**Overall overlap.** At clade level the two couplings mostly overlap: Shared has a median of 84% of the union
+**Overall overlap.** At clade level the two couplings mostly overlap: Shared has a median of 82% of the union
 (range 34-100%). The cell-level total-variation distance is 0.5-0.8, so most of the disagreement lies within clades.
 
 **Same-clade mass.** CRISPR-OT puts more mass on same-clade blocks than RNA-OT in **45 of 45** units:
-median 0.68 vs 0.41.
+median 0.675 vs 0.40.
 
 **Where the enriched mass sits:**
 - CRISPR-enriched mass is on same-clade blocks: median 87%.
