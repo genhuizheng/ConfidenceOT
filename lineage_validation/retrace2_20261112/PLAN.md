@@ -95,3 +95,17 @@ recursive traversal from the root. Cells outside such a subtree are "unclustered
 
 Observed associations, possible interpretation and unproven mechanism are kept apart. No threshold is changed after
 results.
+
+## Post hoc 2026-11-12: coverage control (added after the first association result; nothing above changed)
+
+- **Finding:** D_L correlates with the number of shared loci per pair (Spearman −0.68). Brain cells have about twice
+  the captured loci of kidney and liver cells (median 31.8k vs 15.0k / 13.0k), so brain-brain distances are smaller
+  for technical reasons.
+- **Coverage-residual distance:** D_L regressed on log(shared loci) over all pairs (one linear fit); the residual,
+  shifted to be positive, is D_L,res.
+- **Rerun on D_L,res:**
+  - average-linkage tree;
+  - the same 10-20-cell clade rule;
+  - association with the same nulls;
+  - the OT pairs as a sensitivity.
+- **Reporting:** the raw-D_L results are reported beside it and are not replaced.
