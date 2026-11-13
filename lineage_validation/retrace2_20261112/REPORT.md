@@ -50,7 +50,7 @@ not support general claims.
      - Methylation-OT also retains everything within organs, but rejects cells across organs: brain posterior →
        kidney right retains 0.64 / 0.87; brain anterior → liver left 0.89 / 1.00; liver left → kidney right
        0.94 / 0.93.
-   - **Calibration:** 13 of 24 fits are flagged `m4e_inference_valid` False (marked in r6). With 6-36 cells per side
+   - **Calibration:** 11 of 24 fits are flagged `m4e_inference_valid` False (marked in r6). With 6-36 cells per side
      the within-side split null is small.
    - **Coupling:**
      - Top-5 source overlap between homopolymer-OT and methylation-OT is at chance in every pair (e.g. brain
