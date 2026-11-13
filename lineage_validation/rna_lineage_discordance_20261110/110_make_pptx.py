@@ -329,7 +329,7 @@ def main() -> None:
     take(d, s, "No common direction: weaker in 3724 metastases, stronger in 3460 and 3467, untestable in 3457.")
 
     # 15 DEG/GSEA design (RNA-OT vs CRISPR-OT preference within a clade); results pending
-    s = d.slide("Next: do RNA-OT and CRISPR-OT prefer different cells?",
+    s = d.slide("Do RNA-OT and CRISPR-OT prefer different cells?",
                 "Plan fixed in PLAN_v3_deg.md before any result. Per clade, site and side, on cells kept by both gates: q_R(i) = share "
                 "of the clade's RNA-OT mass carried by source cell i, q_C(i) the same for CRISPR-OT; d = n x (q_R - q_C). RNA-OT-"
                 "preferred = top quartile of d, CRISPR-OT-preferred = bottom quartile, both supported = neither quartile and each "
@@ -348,7 +348,38 @@ def main() -> None:
                                         ["5 random splits", "how large differences are between random groups of the same cells"],
                                         ["Depth-thinned counts", "removes differences that only follow sequencing depth"],
                                         ["Immediate-early genes", "dissociation stress genes reported separately"]], size=13, rowh=0.38)
-    take(d, s, "Results pending: 257 contrasts in 10 KP mice are running; no pathway-level claim yet.")
+    take(d, s, "257 contrasts in 10 KP mice, raw and depth-thinned; results on the next three slides.")
+
+    # 16 DEG: depth and RNA proximity
+    s = d.slide("RNA-OT prefers RNA-closer, deeper cells",
+                "Left: median sequencing depth of the first group over the second, one dot per contrast (one clade, one site). Right: "
+                "Spearman of the contrast's 50 hallmark NES with those of its RNA-similarity control (source cells closest vs farthest "
+                "in RNA from the same targets). RNA-OT-preferred vs CRISPR-OT-preferred: depth x1.40 (86% of contrasts above 1), "
+                "agreement with the control 0.77 (thinned 0.81), top-100 genes 45% shared. Target side 0.91. CRISPR-OT-preferred "
+                "cells go the other way (-0.75, depth x0.78). Informative edits are equal between the groups (median 4).")
+    d.image(s, DF / "D7_preference_depth_and_rna.png", 0.5, Y, 12.3, H)
+    take(d, s, "Within a clade, RNA-OT's extra matches are mostly cells closer in RNA and deeper; CRISPR-OT's go the other way.")
+
+    # 17 DEG: all 50 hallmark sets
+    s = d.slide("No hallmark program passes all checks",
+                "All 50 hallmark sets. Colour: median over mice of the mouse-mean NES (raw counts top, depth-thinned bottom). Dot: same "
+                "sign in >= 75% of mice in both runs (17 sets for RNA-OT- vs CRISPR-OT-preferred, e.g. E2F, MYC, OXPHOS up). Reading "
+                "rule fixed before results: also outside the 5 random splits in >= 50% of contrasts and not explained by the RNA "
+                "control. No set meets it (best: MYC V1, 0.49); 14 of the 17 are explained by the RNA control. Without 3724: 7 "
+                "same-sign sets, 0 consistent. Removing immediate-early genes keeps 14 of the 17 (loses hypoxia, IL6-JAK-STAT3, "
+                "allograft). C1 (two clades within one state): only apical surface beyond the random splits.")
+    d.image(s, DF / "D8_hallmark_all_sets.png", 0.4, Y, 12.5, H)
+    take(d, s, "Directions repeat across mice, but none beats random splits of the same cells; no pathway-level claim.")
+
+    # 18 DEG: example genes
+    s = d.slide("Example: one clade in KP 3724",
+                "The contrast with the most cells among the focus mice (rule fixed before results): KP 3724 primary, clade c45 "
+                "(Mesenchymal-2), 2,816 cells. Mean z of log-normalised expression per group, top 10 genes each way (raw counts). "
+                "RNA-OT-preferred: Vim, Lgals1, S100a4, Hmga1, Eno1. CRISPR-OT-preferred: Malat1, Neat1, Junb, Btg2, Nr4a1 and lower "
+                "depth, which looks like cell quality / stress rather than a lineage program. 3724 is not resolved by the CRISPR rule. "
+                "One example, not a statistical result.")
+    d.image(s, DF / "D9_example_genes_3724_c45.png", 1.5, Y, 10.3, H)
+    take(d, s, "Here CRISPR-OT's extra cells look shallower and stressed; RNA-OT's look typical mesenchymal cells.")
 
     # 16 controls
     s = d.slide("Controls and limitations",
@@ -359,7 +390,8 @@ def main() -> None:
                                          ["Clade level vs cell level", "0.83 vs 0.04: clade overlap is not cell matching"],
                                          ["Without KP 3724", "state-lineage result holds (0.120); primary vs metastasis does not"],
                                          ["Merged (Met) labels", "no change"],
-                                         ["Sequencing depth", "discordance unrelated to depth (rho -0.01); depth-thinned GSEA"]], size=14, rowh=0.4)
+                                         ["Sequencing depth", "unit-level discordance unrelated to depth (rho -0.01); within-clade "
+                                          "preference is not (x1.40), so every DEG is also run on depth-thinned counts"]], size=14, rowh=0.4)
     d.table(s, 0.55, 4.0, [4.0, 8.1], [["Limitation", "Consequence"],
                                         ["One tumour per site", "no biological replicates; cell-level tests are exploratory"],
                                         ["KP 3724 unresolved, site-confounded", "reported separately, every pooled number also without it"],
@@ -374,10 +406,11 @@ def main() -> None:
                                     "2. CRISPR-OT adds same-clade matches; RNA-OT adds cross-clade matches (45 of 45 units).",
                                     "3. Clade-level overlap looks high but mostly reflects clade sizes.",
                                     "4. Some RNA states are tied to a few clades (Early EMT-1, Mesenchymal-2); others are shared by many (Pre-EMT, AT2-like).",
-                                    "5. Primary vs metastasis differs by mouse; no common rule."], size=15)
+                                    "5. Primary vs metastasis differs by mouse; no common rule.",
+                                    "6. Within a clade, RNA-OT prefers cells closer in RNA and deeper; no hallmark program passes the checks."], size=15)
     d.box(s, 7.0, 0.95, 5.8, 0.55, "Next questions", head_size=15)
-    d.text(s, 7.05, 1.6, 5.7, 4.8, ["Within a clade, which cells does each OT prefer, and do they differ in expression? (DEG v3, running)",
-                                     "Can RNA-OT recover true fates? Test on LARRY (clonal barcodes over days 2, 4, 6).",
+    d.text(s, 7.05, 1.6, 5.7, 4.8, ["Can RNA-OT recover true fates? Test on LARRY (clonal barcodes over days 2, 4, 6; running on TACC).",
+                                     "Does RNA-OT's depth preference matter for fate? Check it on LARRY, where fates are known.",
                                      "More resolved mice with metastases, to test primary vs metastasis without 3724."], size=15)
     take(d, s, "State and lineage agree for some states and diverge for others; the two OTs see different parts of that structure.")
 
