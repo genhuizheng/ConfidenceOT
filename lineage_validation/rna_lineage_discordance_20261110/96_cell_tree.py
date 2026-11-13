@@ -111,11 +111,18 @@ def draw_cell_tree(label, gfull, lineage, t, prior, flag, out, max_cells=1200, s
     for c in named + (["minor"] if (g.clade == "minor").any() else []):
         lg.add_patch(plt.Rectangle((0, y - 0.022), 0.08, 0.022, color=ccol[c]))
         lg.text(0.11, y - 0.011, f"{c.split('|')[-1]} ({(g.clade == c).sum()}/{full.get(c, 0)})", fontsize=st.FS_MIN, va="center"); y -= 0.03
-        if y < 0.5:
+        if y < 0.62:
+            lg.text(0.11, y - 0.011, f"... {len(named) - named.index(c) - 1} more clades", fontsize=st.FS_MIN, va="center", color=st.SUBTLE); y -= 0.03
             break
     y -= 0.02; lg.text(0, y, "RNA state", fontsize=st.FS_MIN, va="top"); y -= 0.035
-    for x in [x for x in state_col if x in set(g.state)]:
-        lg.add_patch(plt.Rectangle((0, y - 0.022), 0.08, 0.022, color=state_col[x])); lg.text(0.11, y - 0.011, x, fontsize=st.FS_MIN, va="center"); y -= 0.028
+    present = [x for x in state_col if x in set(g.state)]
+    ncol = 1 if len(present) <= 10 else 2
+    per = (len(present) + ncol - 1) // ncol
+    y0 = y
+    for k_, x in enumerate(present):
+        cx, cy = (k_ // per) * 0.5, y0 - (k_ % per) * 0.028
+        lg.add_patch(plt.Rectangle((cx, cy - 0.022), 0.08, 0.022, color=state_col[x])); lg.text(cx + 0.11, cy - 0.011, x, fontsize=st.FS_MIN, va="center")
+    y = y0 - per * 0.028
     y -= 0.015
     for lab, colr in site_leg + [("edit present", st.INK), ("intBC missing", "#E6E8EA")]:
         lg.add_patch(plt.Rectangle((0, y - 0.022), 0.08, 0.022, color=colr, ec=st.INK, lw=0.2)); lg.text(0.11, y - 0.011, lab, fontsize=st.FS_MIN, va="center"); y -= 0.028

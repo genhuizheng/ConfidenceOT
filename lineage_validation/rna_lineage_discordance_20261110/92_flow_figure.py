@@ -238,7 +238,7 @@ def draw(fig_out, u, b, order, Z, F, sh_, re_, ce_, un, lab_s, lab_t, st_s, st_t
     ly_t = dict(zip(tgt, spread([yt[i] - ht[i] / 2 for i in tgt], LG, 0.06, top)))
     for i in src:
         c = order[i]; yc = ys[i] - hs[i] / 2; yl = ly_s[i]
-        ax.text(TIP + 0.05, yl, f"{nice(c)} ({int((lab_s == c).sum())})" + ("\nnot in tree" if sp_(c) else ""), ha="left", va="center",
+        ax.text(TIP + 0.05, yl, f"{nice(c)} ({int((lab_s == c).sum())})" + ("\nnot in tree" if sp_(c) and Z is not None else ""), ha="left", va="center",
                 fontsize=st.FS_TICK if not sp_(c) else st.FS_MIN, color=st.INK if not sp_(c) else st.SUBTLE)
         ax.plot([XS0 - 0.32, XS0 - 0.06, XS0], [yl, yl, yc], color=st.GUIDE if abs(yl - yc) < 1e-6 else "#9AA0A6", lw=0.4)
     for i in tgt:
