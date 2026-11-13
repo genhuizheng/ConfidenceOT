@@ -167,3 +167,28 @@ export of every eligible cell of the KP mice in OT units, one h5ad per mouse.
 4. **Across-mouse consistency:** per pathway, NES per mouse (dots) for each contrast type, raw and thinned.
 
 Every figure labels whether its groups were chosen by OT difference, by CRISPR edits or by RNA state.
+
+## 2026-11-13 operational definitions (post hoc to the plan, before any summary was read)
+
+Written after the raw and thinned DEG / GSEA runs finished (962 contrasts each) and before any NES, DEG list or
+summary of this plan was looked at. They make the reading rules above computable; none is a threshold on results.
+
+- **Mouse-level NES:** the mean NES of a mouse's contrasts of one type and one hallmark set. A mouse is evaluable
+  for a type when it has ≥ 1 contrast of that type.
+- **Same sign in ≥ 75% of evaluable mice:** the majority sign of the mouse-level NES, held by ≥ 75% of the
+  evaluable mice; at least 2 evaluable mice. With and without 3724.
+- **Raw and thinned:** the rule holds in both runs, with the same majority sign.
+- **Outside the random-split range:** for a contrast with random draws (A1 RNA- vs CRISPR-preferred, A2, B1, C1),
+  the observed NES lies outside [min, max] of its 5 draws on the side of the majority sign. Required in ≥ 50% of
+  the set's contrasts of that type (raw run). Types without random draws (A1 RNA- or CRISPR-preferred vs both,
+  baselines) cannot meet this criterion; their directions are reported, never called consistent.
+- **Explained by the RNA-proximity baseline (A only):** a contrast's paired baseline is the baseline of the same
+  unit, clade, site and side. A set is explained when, in ≥ 50% of its A contrasts with a paired baseline, the
+  baseline NES has the same sign as the contrast and |baseline NES| ≥ 1.
+- **Top-100 DEG overlap with the baseline:** the 100 genes with the largest |Wilcoxon score| in each of the two
+  contrasts; overlap = shared genes with the same sign / 100.
+- **IEG sensitivity:** `103_ieg_sensitivity.py`; a consistent set is reported with its majority sign with the
+  immediate-early genes removed (raw and thinned).
+- **Figures show all 50 hallmark sets** (standing rule for GSEA figures), so no focus pathway list is chosen.
+- **Within-clade heatmap block:** the A1 RNA- vs CRISPR-preferred contrast with the most cells among the focus
+  mice 3457, 3460, 3724, 3451; top 20 genes up and 20 down in that contrast (raw run).
