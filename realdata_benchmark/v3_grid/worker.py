@@ -66,7 +66,7 @@ def fit_args(dataset: str, device: str, workers: int) -> list[str]:
     elif dataset == "ltl331":  # 05_ltl331_ot_pilot.FACTORIAL_ARGS; --cell-qc dropped (0 / 0 / 100 passes every cell, and it refuses negative values)
         pilot = load_module("ltl331_pilot_05", REPO / "realdata_benchmark" / "05_ltl331_ot_pilot.py")
         args = [x for x in pilot.FACTORIAL_ARGS if x != "--cell-qc"]
-    elif dataset == "kp":  # factorial_common.fit_command (the KP-Tracer runs) without the row's own arguments and --cell-qc
+    elif dataset in ("kp", "larry"):  # factorial_common.fit_command (the KP-Tracer runs) without the row's own arguments and --cell-qc
         cmd = v3.fc.fit_command("python", "02_run_pair.py", "M", "O", 0, "L", 50, workers, precomputed=False)[4:]
         args, skip = [], 0
         for x in cmd:
@@ -97,6 +97,12 @@ class Inputs:
                 raise SystemExit(f"manifest row {i} is {r.pair_id}, worklist says {row.pair_id}")
             S, T = ad.read_h5ad(r.source_h5ad), ad.read_h5ad(r.target_h5ad)
             v = {"S": S, "T": T, "manifest": man, "index": i, "seed": 20260925 + i, "truth": pd.read_csv(row.truth, sep="\t")}
+        elif row.dataset == "larry":  # lineage_validation/larry_20261112/02_prepare.py: manifest rows, recovered counts
+            man = pd.read_csv(row.manifest); i = int(row["index"]); r = man.iloc[i]
+            if str(r.pair_id) != str(row.pair_id):
+                raise SystemExit(f"manifest row {i} is {r.pair_id}, worklist says {row.pair_id}")
+            S, T = ad.read_h5ad(r.source_h5ad), ad.read_h5ad(r.target_h5ad)
+            v = {"S": S, "T": T, "manifest": man, "index": i, "seed": 20261112 + i}
         elif row.dataset == "ltl331":
             import rb_common as rb
             run_root = Path(row.run_root)

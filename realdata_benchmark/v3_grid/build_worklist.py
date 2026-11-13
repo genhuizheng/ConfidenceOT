@@ -59,6 +59,12 @@ def units(a) -> list[dict]:
         for i, r in m.iterrows():
             n = [ad.read_h5ad(rb.local(r[f"{s}_h5ad"], a.ltl331_run_root), backed="r").n_obs for s in ("source", "target")]
             out.append({"unit_id": str(r.pair_id), "size": n[0] * n[1], "index": i, "pair_id": r.pair_id, "run_root": str(a.ltl331_run_root)})
+    elif a.dataset == "larry":  # lineage_validation/larry_20261112/02_prepare.py manifest
+        import anndata as ad
+        m = pd.read_csv(a.larry_manifest)
+        for i, r in m.iterrows():
+            n = [ad.read_h5ad(r[f"{s}_h5ad"], backed="r").n_obs for s in ("source", "target")]
+            out.append({"unit_id": str(r.pair_id), "size": n[0] * n[1], "index": i, "pair_id": r.pair_id, "manifest": str(a.larry_manifest)})
     else:
         u = pd.read_csv(a.kp_units, sep="\t", dtype={"mouse": str})
         for _, r in u.iterrows():
@@ -69,7 +75,7 @@ def units(a) -> list[dict]:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dataset", choices=("splatter", "ltl331", "kp"), required=True)
+    p.add_argument("--dataset", choices=("splatter", "ltl331", "kp", "larry"), required=True)
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--splatter-root", type=Path)
     p.add_argument("--conditions-subdir", default="N5000", help="splatter: conditions/<this>/rep<r>/<level> (empty for the local N = 200 root)")
@@ -77,12 +83,18 @@ def main() -> None:
     p.add_argument("--levels", nargs="+", default=LEVELS)
     p.add_argument("--ltl331-run-root", type=Path)
     p.add_argument("--kp-units", type=Path)
+    p.add_argument("--larry-manifest", type=Path)
+    p.add_argument("--keys", nargs="*", help="only these encoding keys, e.g. 'ranknm256-midrank|none' 'logcpm|none' (default: all)")
     p.add_argument("--pilot", type=int, default=0)
     a = p.parse_args()
-    need = {"splatter": "splatter_root", "ltl331": "ltl331_run_root", "kp": "kp_units"}[a.dataset]
+    need = {"splatter": "splatter_root", "ltl331": "ltl331_run_root", "kp": "kp_units", "larry": "larry_manifest"}[a.dataset]
     if getattr(a, need) is None:
         sys.exit(f"--{need.replace('_', '-')} is required for --dataset {a.dataset}")
     keys = v3.grid_keys()
+    if a.keys:
+        keys = [s for s in keys if v3.key_name(s) in set(a.keys)]
+        if len(keys) != len(set(a.keys)):
+            sys.exit(f"unknown keys: {sorted(set(a.keys) - {v3.key_name(s) for s in keys})}")
     rows = []
     for u in units(a):
         for s in keys:
