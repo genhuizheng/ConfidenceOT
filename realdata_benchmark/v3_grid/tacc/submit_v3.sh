@@ -9,7 +9,9 @@
 #   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after ID] DATASET collect
 #   bash realdata_benchmark/v3_grid/tacc/submit_v3.sh DATASET status | reclaim
 #
-# DATASET  splatter | ltl331 | kp
+# DATASET  splatter | ltl331 | kp | larry
+# larry    lineage_validation/larry_20261112: 4 units x 2 encoding keys (L5-best, logCPM) = 8 rows; worklist then run
+#          (no pilot, no collect); root $V3_LARRY_ROOT (default .../larry_20261112/v3), manifest $V3_LARRY_MANIFEST
 # chain    worklist (short job) -> pilot (1 node, 2 h, PILOT_WORKLIST.tsv; afterok worklist) -> run (N nodes; afterany the
 #          pilot, so a failed pilot row does not hold the run) -> collect (afterany every run task)
 # worklist build_worklist.py: WORKLIST.tsv, PILOT_WORKLIST.tsv, FROZEN_CALIBRATION_V3.json (refuses a different one)
@@ -35,12 +37,12 @@ while (( $# )); do
         --hours) hours=$2; shift 2 ;;
         --procs) procs=$2; shift 2 ;;
         --fit-workers) fitw=$2; shift 2 ;;
-        splatter|ltl331|kp) dataset=$1; shift ;;
+        splatter|ltl331|kp|larry) dataset=$1; shift ;;
         chain|worklist|pilot|run|collect|status|reclaim) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-[[ -n "$dataset" && -n "$stage" ]] || { echo "usage: bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after ID] [--nodes N] [--hours H] [--procs P] [--fit-workers W] splatter|ltl331|kp chain|worklist|pilot|run|collect|status|reclaim" >&2; exit 2; }
+[[ -n "$dataset" && -n "$stage" ]] || { echo "usage: bash realdata_benchmark/v3_grid/tacc/submit_v3.sh [--dry-run] [--after ID] [--nodes N] [--hours H] [--procs P] [--fit-workers W] splatter|ltl331|kp|larry chain|worklist|pilot|run|collect|status|reclaim" >&2; exit 2; }
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 env_path=${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}
 base=${V3_ROOT:-/scratch/10119/ghzheng/OT_project/v3_grid_20261104}
@@ -55,6 +57,9 @@ case $dataset in
               wl_args="--ltl331-run-root $src --pilot 14"; d_nodes=4; d_hours=24; d_procs=12; d_fitw=8; max_large=6; large_size=2e7 ;;
     kp)       src=${V3_KP_UNITS:-/scratch/10119/ghzheng/OT_project/lineage_preprocessing_factorial_20261103/UNITS.tsv}
               wl_args="--kp-units $src --pilot 36"; d_nodes=10; d_hours=24; d_procs=36; d_fitw=4; max_large=4; large_size=2e7 ;;
+    larry)    src=${V3_LARRY_MANIFEST:-/scratch/10119/ghzheng/OT_project/larry_20261112/manifest.csv}
+              root=${V3_LARRY_ROOT:-/scratch/10119/ghzheng/OT_project/larry_20261112/v3}
+              wl_args="--larry-manifest $src --keys 'ranknm256-midrank|none' 'logcpm|none'"; d_nodes=1; d_hours=24; d_procs=8; d_fitw=16; max_large=4; large_size=5e7 ;;
 esac
 nodes=${nodes:-$d_nodes}; hours=${hours:-$d_hours}; procs=${procs:-$d_procs}; fitw=${fitw:-$d_fitw}
 activate="source /home1/10119/ghzheng/.bashrc; conda activate $env_path; cd $repo; export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo/realdata_benchmark:$repo"
