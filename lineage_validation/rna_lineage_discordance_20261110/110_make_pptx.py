@@ -158,7 +158,7 @@ def main() -> None:
     ap.add_argument("--figs", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
-    F = a.figs; d = Deck(a.template)
+    F = a.figs; d = Deck(a.template); DF = F / "deck_20261112"    # slide versions (111_, 92_ --deck)
     X, Y, W, H = 0.5, 0.78, 12.3, 5.75     # main figure box
 
     # 1 cover
@@ -167,7 +167,7 @@ def main() -> None:
                                    [("in the same tumour cells", {"size": 28})]])
     d.text(s, 0.6, 3.9, 5.6, 1.4, ["KP-Tracer (lung tumours and metastases, 32 mice)", "Quinn 2021 (A549 xenografts, 4 experiments)",
                                    [("ConfidenceOT  ·  2026-11-12", {"color": "595959"})]], size=16)
-    d.image(s, F / "cell_tree" / "3724_NT_T1.png", 6.4, 0.8, 6.5, 5.7)
+    d.image(s, DF / "3724_NT_T1.png", 6.4, 0.8, 6.5, 5.7)
 
     # 2 why
     s = d.slide("Why compare RNA and CRISPR?",
@@ -217,10 +217,11 @@ def main() -> None:
 
     # 4 top sources
     s = d.slide("RNA-OT vs CRISPR-OT",
-                "Per target cell, the top 15 sources of each coupling. Left: their average edit agreement s; right: their average RNA "
-                "similarity r. One dot per unit. RNA-OT top sources: s 0.10-0.34, r 0.45-0.62. CRISPR-OT top sources: s 0.47-0.86, "
-                "r 0.01-0.13 (KP). Overlap of the two top-15 lists: 0-2%. Per-target total variation between the couplings: 0.71-0.83.")
-    d.image(s, F / "l5best" / "f1_top_sources.png", X, Y, W, H)
+                "For every target cell we take the 15 source cells each OT matches it to most strongly. Left: how related those "
+                "partners are (CRISPR edit similarity s, 0-1). Right: how alike they look (RNA similarity r). One dot per unit, x = "
+                "RNA-OT partners, y = CRISPR-OT partners; dashed line = equal. KP RNA-OT partners: s 0.10-0.34, r 0.45-0.62; "
+                "CRISPR-OT partners: s 0.47-0.86, r 0.01-0.13. Overlap of the two top-15 lists: 0-2%.")
+    d.image(s, DF / "D1_what_each_OT_matches.png", X, Y, W, H)
     take(d, s, "RNA-OT picks sources that look alike but share few edits; CRISPR-OT picks close relatives that look different.")
 
     # 5 gates
@@ -228,36 +229,36 @@ def main() -> None:
                 "Cohen's kappa between the RNA-OT and CRISPR-OT keep / reject decisions, per unit and side. Near 0 almost everywhere: "
                 "the two gates reject different cells. The higher source-side values are the KP 3724 pair units, where the edit "
                 "distance separates cells weakly. Gate disagreement is reported apart from coupling disagreement.")
-    d.image(s, F / "l5best" / "f1_gate_kappa.png", 2.5, Y, 8.3, H)
+    d.image(s, DF / "D2_same_cells_kept.png", 1.3, Y, 10.7, H)
     take(d, s, "Agreement on which cells to keep is close to zero (kappa about 0), except a few KP 3724 units.")
 
     # 6 flow 3460
     s = d.slide("Where do their matches differ?",
                 "Same source (primary) and target (metastasis); only cells kept by both gates. Each coupling is normalised to 1 and "
-                "summed per source clade x target clade. Grey = mass both OTs place there; blue = extra mass from RNA-OT; orange = "
-                "extra mass from CRISPR-OT. Left tree: clade tree from the edits. Bars filled by RNA state. Across 45 KP units, "
-                "orange mass lies in the same clade (median 87%), blue mass almost never (median 0%); CRISPR-OT puts more mass on "
-                "same-clade pairs in 45 of 45 units (0.675 vs 0.40). This is clade-level mass, not cell-to-cell matching.")
-    d.image(s, F / "flow" / "L1__3460__3460_Lkb1_T1__3460_Lkb1_N6.png", 2.6, Y, 8.1, H)
-    take(d, s, "Orange (CRISPR-only) stays inside a clade; blue (RNA-only) crosses to other clades. Same in 45 of 45 KP units.")
+                "summed per source clade x target clade. Grey = matching both OTs agree on; blue = extra matching from RNA-OT; orange "
+                "= extra matching from CRISPR-OT. Left tree: clade tree from the edits. Bars coloured by RNA state. Across 45 KP "
+                "units, the orange part lies in the same clade (median 87%), the blue part almost never (median 0%); CRISPR-OT puts "
+                "more mass on same-clade pairs in 45 of 45 units (0.675 vs 0.40). This is clade-level mass, not cell-to-cell matching. "
+                "Full version with gate strips and overlap bars: figures/flow/.")
+    d.image(s, DF / "flow_L1__3460__3460_Lkb1_T1__3460_Lkb1_N6.png", 1.6, Y, 10.1, H)
+    take(d, s, "Extra CRISPR-OT matching (orange) stays inside a clade; extra RNA-OT matching (blue) crosses clades. 45 of 45 KP units.")
 
     # 7 flow 3724
     s = d.slide("Where do their matches differ? KP 3724",
                 "Pooled case: primary tumour to all four metastases. Two clades: c5 (Mesenchymal-1) and c45 (Mesenchymal-2). Most "
                 "mass is shared; RNA-OT adds some c5 <-> c45 mass. 3724 is not resolved by the frozen CRISPR rule (8% distinct edit "
                 "sets), clades and sites are confounded, and its depth is the highest of the OT mice.")
-    d.image(s, F / "flow" / "L23__KPTracer_3724__3724_NT_T1__family_metastases.png", 2.6, Y, 8.1, H)
+    d.image(s, DF / "flow_L23__KPTracer_3724__3724_NT_T1__family_metastases.png", 1.6, Y, 10.1, H)
     take(d, s, "Two clades carry two mesenchymal states; both OTs follow them, RNA-OT adds a little cross-clade mass.")
 
     # 8 clade vs cell level
     s = d.slide("Clade-level vs cell-level overlap",
-                "Left: clade-level Shared between RNA-OT and CRISPR-OT (y) against each one's Shared with the size-only coupling "
-                "(cells matched in proportion to clade sizes). RNA-OT vs size-only: median 0.98, closer than CRISPR-OT in 44 of 45 "
-                "units. Right, one unit: clade-level Shared (grey) vs the overlap of the two OTs' top-15 sources for the same target "
-                "cells (black). Over 97 target clades: median 0.83 vs 0.04.")
-    d.image(s, F / "explore" / "V_baseline.png", 0.6, Y, 6.2, H)
-    d.image(s, F / "explore" / "V_levels_L1__3460__3460_Lkb1_T1__3460_Lkb1_N6.png", 7.0, 1.4, 5.7, 4.6)
-    take(d, s, "High clade-level overlap mostly reflects clade sizes; the two OTs rarely match the same cells (0.83 vs 0.04).")
+                "Medians over KP units. Left: clade-level overlap of RNA-OT and CRISPR-OT (share of clade x clade mass they agree "
+                "on). Middle: the same overlap between RNA-OT and a coupling that matches cells only in proportion to clade sizes "
+                "(closer than CRISPR-OT in 44 of 45 units). Right: for the same target cells, the overlap of the two OTs' top-15 "
+                "partner lists.")
+    d.image(s, DF / "D3_clade_vs_cell_level.png", 1.3, Y, 10.7, H)
+    take(d, s, "High clade-level overlap mostly reflects clade sizes; the two OTs rarely pick the same partner cells (4%).")
 
     # 9 tree 3457
     s = d.slide("Same clade, different RNA states",
@@ -265,40 +266,41 @@ def main() -> None:
                 "= clade cut. Tracks: clade, authors' RNA state, primary / metastasis; right: informative edits (black present, grey "
                 "intBC missing). Clade c6 splits below the cut into an Apc Early branch and an Early EMT-1 / Mesenchymal-1 branch, "
                 "each with its own edits. c1 is mostly metastatic Pre-EMT cells.")
-    d.image(s, F / "cell_tree" / "3457_Apc_T1.png", 1.3, Y, 10.7, H)
+    d.image(s, DF / "3457_Apc_T1.png", 1.3, Y, 10.7, H)
     take(d, s, "Inside one clade, sub-branches with their own edits carry different RNA states (Apc Early vs Early EMT-1).")
 
     # 10 tree 3724
     s = d.slide("CRISPR edits and RNA states in KP 3724",
-                "1,244 of 20,992 cells drawn. c5 = Mesenchymal-1 and Mesenchymal-1 (Met); c45 = Mesenchymal-2. Inside c45, the "
-                "sub-branch with one extra edit (first edit column) is the metastatic Mesenchymal-2 (Met). Not resolved by the frozen "
-                "rule (distinct edit sets 8%).")
-    d.image(s, F / "cell_tree" / "3724_NT_T1.png", 1.3, Y, 10.7, H)
-    take(d, s, "Lineage branch, RNA state and metastatic site line up: one edit marks the metastatic Mesenchymal-2 cells.")
+                "948 of 20,992 cells drawn. c5 = Mesenchymal-1 and Mesenchymal-1 (Met); c45 = Mesenchymal-2. Inside c45, the "
+                "sub-branch with extra edits is the metastatic Mesenchymal-2 (Met). Not resolved by the frozen rule (7 edits per "
+                "cell, distinct edit sets 8%).")
+    d.image(s, DF / "3724_NT_T1.png", 1.3, Y, 10.7, H)
+    take(d, s, "Lineage branch, RNA state and site line up: a sub-branch with its own edits holds the metastatic Mesenchymal-2 cells.")
 
     # 11 shared states
     s = d.slide("Which RNA states are shared across clades?",
-                "All eligible KP cells (74,399, 32 mice). Per mouse and state (>= 50 cells): largest clade share minus the within-site "
-                "permutation null (999 draws). Red = one clade dominates the state; blue = spread over clades. Mice with Hill z <= -2: "
-                "Early EMT-1 8 of 11, Apc Early 5 of 6, Mesenchymal-2 4 of 6, Lung progenitor-like 3 of 3; Pre-EMT 4 of 15; AT2-like "
-                "5 of 12 above the null. Clade x state coupling beyond the null: 0.149 (18 mice, resolved lineages), 0.120 without "
-                "3724; unchanged with merged (Met) labels.")
-    d.image(s, F / "explore" / "E_state_concentration_focus.png", X, Y, W, H)
-    take(d, s, "Early EMT-1, Apc Early and Mesenchymal-2 sit in few clades; Pre-EMT, Endoderm-like and AT2-like in many.")
+                "All eligible KP cells (74,399, 32 mice). For each mouse and RNA state (>= 50 cells) we ask whether the state's cells "
+                "fall into fewer clades than chance, as many as chance, or more. Chance = cells shuffled among clades within each "
+                "site (999 draws); 'fewer' / 'more' = Hill-number z <= -2 / >= 2. Clade x state coupling beyond the null: 0.149 (18 "
+                "mice, resolved lineages), 0.120 without 3724; unchanged with merged (Met) labels.")
+    d.image(s, DF / "D4_states_tied_to_few_clades.png", 1.0, Y, 11.3, H)
+    take(d, s, "Early EMT-1, Apc Early, Mesenchymal-2 sit in fewer clades than chance; AT2-like often in more; Endoderm-like is mixed.")
 
     # 12 3513 families
     s = d.slide("Different clades, similar RNA states",
-                "KP 3513: each state's cells split by independent tumour family (colour) and clade (segments). Tick = largest clade "
-                "share expected under the within-site null. Gastric-like: 5 families, 22 clades; High plasticity: 5 families, 21 "
-                "clades; Endoderm-like: almost only family T1. Shared states are not evidence of convergence on their own.")
-    d.image(s, F / "explore" / "BB_state_families_3513.png", X, Y, W, H)
-    take(d, s, "The same RNA state can come from several independent tumours (Gastric-like) or from one (Endoderm-like).")
+                "KP 3513: for each RNA state (>= 50 cells), the share of its cells that come from each independent primary tumour "
+                "(each tumour is its own CRISPR family). Right: tumours with >= 5 cells of the state, and the largest share. "
+                "Gastric-like: 5 tumours, 22 clades; High plasticity: 5 tumours, 21 clades. Shared states are not evidence of "
+                "convergence on their own.")
+    d.image(s, DF / "D5_states_across_tumours_3513.png", 1.0, Y, 11.3, H)
+    take(d, s, "The same RNA state can come from several independent tumours (Gastric-like) or mostly from one (Endoderm-like).")
 
     # 13 primary vs met 3724
     s = d.slide("Primary vs metastasis",
-                "Per site: clades (column width = cells) and their RNA states (fill). A site with fewer than 2 clades or 2 states "
-                "(>= 5 cells) cannot test the association and is labelled not identifiable; that is not evidence of no association.")
-    d.image(s, F / "explore" / "BC_sites_3724.png", X, Y, W, H)
+                "KP 3724, all eligible cells. One block per site; within a site, one column per CRISPR clade (width = cells) coloured "
+                "by RNA state. A site with fewer than 2 clades or 2 states (>= 5 cells) cannot test the association; that is not "
+                "evidence of no association.")
+    d.image(s, DF / "D6_primary_vs_metastasis_3724.png", 0.6, Y, 12.1, H)
     take(d, s, "In 3724 each metastasis carries one clade and its state, so single-clade sites cannot test the association.")
 
     # 14 primary vs met table
@@ -326,18 +328,27 @@ def main() -> None:
     ch.category_axis.axis_title.text_frame.paragraphs[0].runs[0].font.size = Pt(12)
     take(d, s, "No common direction: weaker in 3724 metastases, stronger in 3460 and 3467, untestable in 3457.")
 
-    # 15 DEG/GSEA
-    s = d.slide("DEG / GSEA results",
-                "60 contrasts: discordant vs concordant cells of the same lineage, site and side (Wilcoxon on raw counts, hallmark "
-                "prerank GSEA, mouse mean, depth-thinned counts). Raw NES followed detected-gene differences (rho 0.64); thinning "
-                "reduced this to 0.34. Strict reading (all mice, both versions, |NES| >= 1): only KP convergent cells pass "
-                "(apoptosis, IFN-alpha, apical junction / surface, E2F lower; 2 mice, 5 contrasts). Partial trends only elsewhere. "
-                "Cells are pseudo-replicates within one tumour per site. A within-clade DEG round (RNA-preferred vs CRISPR-preferred "
-                "cells) is running.")
-    d.image(s, F / "l5best" / "f7_gsea_discordant.png", X, 0.9, W, 4.4)
-    d.text(s, 0.55, 5.45, 12.0, 1.1, ["Reliable so far: only the KP convergent set passes the strict reading (2 mice).",
-                                      "Everything else is a partial trend; no pathway-level claim yet."], size=15)
-    take(d, s, "Few hallmark programs are consistent across mice; we do not claim pathway-level biology yet.")
+    # 15 DEG/GSEA design (RNA-OT vs CRISPR-OT preference within a clade); results pending
+    s = d.slide("Next: do RNA-OT and CRISPR-OT prefer different cells?",
+                "Plan fixed in PLAN_v3_deg.md before any result. Per clade, site and side, on cells kept by both gates: q_R(i) = share "
+                "of the clade's RNA-OT mass carried by source cell i, q_C(i) the same for CRISPR-OT; d = n x (q_R - q_C). RNA-OT-"
+                "preferred = top quartile of d, CRISPR-OT-preferred = bottom quartile, both supported = neither quartile and each "
+                "OT gives the cell at least the uniform share. Wilcoxon on raw counts and on depth-thinned counts; hallmark prerank "
+                "GSEA (50 sets, both directions). Controls: RNA-similarity baseline (RNA-OT preference is built from RNA, so part of "
+                "the difference is expected), 5 random splits of the same cells, immediate-early-gene check. 257 contrasts, 10 mice.")
+    d.box(s, 0.6, 1.25, 2.9, 1.3, "One CRISPR clade", "same site, same side, cells kept by both OTs")
+    d.arrow(s, 3.62, 1.78)
+    d.box(s, 4.0, 0.95, 3.6, 0.8, "RNA-OT-preferred cells", "RNA-OT gives them more mass", hi=True, head_size=13, sub_size=11)
+    d.box(s, 4.0, 1.85, 3.6, 0.8, "both supported", "both OTs give them mass", head_size=13, sub_size=11)
+    d.box(s, 4.0, 2.75, 3.6, 0.8, "CRISPR-OT-preferred cells", "CRISPR-OT gives them more mass", hi=True, head_size=13, sub_size=11)
+    d.arrow(s, 7.75, 1.78)
+    d.box(s, 8.15, 1.25, 4.6, 1.3, "Compare expression", "DEG (Wilcoxon) and hallmark GSEA: RNA-OT-preferred vs CRISPR-OT-preferred")
+    d.table(s, 0.6, 3.95, [3.6, 8.5], [["Control", "Why"],
+                                        ["RNA-similarity baseline", "RNA-OT preference comes from RNA: only differences beyond it count"],
+                                        ["5 random splits", "how large differences are between random groups of the same cells"],
+                                        ["Depth-thinned counts", "removes differences that only follow sequencing depth"],
+                                        ["Immediate-early genes", "dissociation stress genes reported separately"]], size=13, rowh=0.38)
+    take(d, s, "Results pending: 257 contrasts in 10 KP mice are running; no pathway-level claim yet.")
 
     # 16 controls
     s = d.slide("Controls and limitations",

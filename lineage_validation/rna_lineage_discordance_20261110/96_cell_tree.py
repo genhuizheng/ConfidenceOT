@@ -98,34 +98,33 @@ def draw_cell_tree(label, gfull, lineage, t, prior, flag, out, max_cells=1200, s
         ax = fig.add_axes([0.335 + k_ * 0.03, 0.08, 0.026, 0.80]); ax.set_ylim(0, n * 10); ax.set_xlim(0, 1); ax.axis("off")
         ax.barh(yl, 1, height=10, color=cols, lw=0)
         ax.text(0.5, n * 10 + 4, name, rotation=60, fontsize=st.FS_MIN, ha="left", va="bottom")
-    ex = fig.add_axes([0.435, 0.08, 0.37, 0.80])
+    ex = fig.add_axes([0.435, 0.08, 0.345, 0.80])
     ex.imshow(M, aspect="auto", interpolation="nearest", cmap=ListedColormap(["#FFFFFF", "#E6E8EA", st.INK]), vmin=0, vmax=2,
               extent=(0, max(len(ev), 1), 0, n * 10), origin="lower")
     ex.set_yticks([]); ex.set_xticks([]); ex.set_xlabel(f"{len(ev)} informative edits (>= 5% of drawn cells)", fontsize=st.FS_AXLAB)
     for s_ in ex.spines.values():
         s_.set_visible(False)
-    lg = fig.add_axes([0.82, 0.08, 0.17, 0.80]); lg.axis("off"); lg.set_xlim(0, 1); lg.set_ylim(0, 1)
+    lg = fig.add_axes([0.795, 0.08, 0.20, 0.80]); lg.axis("off"); lg.set_xlim(0, 1); lg.set_ylim(0, 1)
     y = 1.0
     lg.text(0, y, f"{clade_title} (cells drawn / all)", fontsize=st.FS_MIN, va="top"); y -= 0.035
     full = gfull.clade.value_counts()
     for c in named + (["minor"] if (g.clade == "minor").any() else []):
         lg.add_patch(plt.Rectangle((0, y - 0.022), 0.08, 0.022, color=ccol[c]))
         lg.text(0.11, y - 0.011, f"{c.split('|')[-1]} ({(g.clade == c).sum()}/{full.get(c, 0)})", fontsize=st.FS_MIN, va="center"); y -= 0.03
-        if y < 0.62:
+        if y < 0.70:
             lg.text(0.11, y - 0.011, f"... {len(named) - named.index(c) - 1} more clades", fontsize=st.FS_MIN, va="center", color=st.SUBTLE); y -= 0.03
             break
     y -= 0.02; lg.text(0, y, "RNA state", fontsize=st.FS_MIN, va="top"); y -= 0.035
     present = [x for x in state_col if x in set(g.state)]
-    ncol = 1 if len(present) <= 10 else 2
-    per = (len(present) + ncol - 1) // ncol
+    per, step = len(present), 0.025  # one column: long state names never overlap a second column
     y0 = y
     for k_, x in enumerate(present):
-        cx, cy = (k_ // per) * 0.5, y0 - (k_ % per) * 0.028
+        cx, cy = 0.0, y0 - k_ * step
         lg.add_patch(plt.Rectangle((cx, cy - 0.022), 0.08, 0.022, color=state_col[x])); lg.text(cx + 0.11, cy - 0.011, x, fontsize=st.FS_MIN, va="center")
-    y = y0 - per * 0.028
+    y = y0 - per * step
     y -= 0.015
     for lab, colr in site_leg + [("edit present", st.INK), ("intBC missing", "#E6E8EA")]:
-        lg.add_patch(plt.Rectangle((0, y - 0.022), 0.08, 0.022, color=colr, ec=st.INK, lw=0.2)); lg.text(0.11, y - 0.011, lab, fontsize=st.FS_MIN, va="center"); y -= 0.028
+        lg.add_patch(plt.Rectangle((0, y - 0.022), 0.08, 0.022, color=colr, ec=st.INK, lw=0.2)); lg.text(0.11, y - 0.011, lab, fontsize=st.FS_MIN, va="center"); y -= step
     fig.text(0.01, 0.985, f"{label}: cell-level CRISPR tree with each cell's clade, RNA state and site\n{n} of {n_all} cells drawn; {flag}{note}",
              fontsize=st.FS_TITLE, va="top")
     for ext in ("png", "pdf", "svg"):

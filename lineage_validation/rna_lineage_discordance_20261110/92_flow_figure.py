@@ -55,6 +55,7 @@ import lineage_tree as LT  # noqa: E402
 CONFIGS = {"l5best": "ranknm256-midrank|none|scale|cos|pca50", "logcpm_pca": "logcpm|none|noscale|sqeuc|pca30"}
 OTHER_SHARE, TREE_CELLS, SEED, MIN_RIBBON = 0.02, 300, 20261111, 0.002
 C_SHARED, C_RNA, C_CR = "#A6A6A6", "#2C6E9B", "#D98C2B"
+DECK = False  # set by --deck
 GATE_COL = {"both retained": "#5F666B", "RNA-only retained": "#9DBAD3", "CRISPR-only retained": "#EBC28F", "both rejected": "#FFFFFF"}
 STATE_COL = {
     "Pre-EMT": "#8FB996", "Early EMT-1": "#C9A227", "Early EMT-2": "#E3D08A", "Mesenchymal-1": "#7D3C98",
@@ -99,10 +100,17 @@ def main() -> None:
     p.add_argument("--tag", default="l5best")
     p.add_argument("--figures", nargs="*")
     p.add_argument("--clades", type=Path, help="cells.tsv.gz with cell, family, clade, state (default all_cells__original)")
+    p.add_argument("--deck", action="store_true", help="slide version of the --figures units: plain labels, larger type, no gate "
+                   "strips or overlap bars; writes figures/deck_20261112/flow_<unit>.png only (no tables)")
     a = p.parse_args()
+    global DECK
+    DECK = a.deck
     out = a.root / "flow"; (out / "flows").mkdir(parents=True, exist_ok=True); (out / "clades").mkdir(exist_ok=True)
-    fig_out = a.root / "figures" / "flow"; fig_out.mkdir(parents=True, exist_ok=True)
+    fig_out = a.root / "figures" / ("deck_20261112" if DECK else "flow"); fig_out.mkdir(parents=True, exist_ok=True)
     st.apply()
+    if DECK:
+        for k_ in [k_ for k_ in dir(st) if k_.startswith("FS_")]:
+            setattr(st, k_, getattr(st, k_) * 1.45)
     cot = load("cot", HERE / "10_crispr_ot.py"); bb = cot.bundles_module(); t, prior = bb.load_tables(a.inputs)["KPTracer"]
     cl = pd.read_csv(a.clades or a.root / "state_lineage_ext" / "all_cells__original" / "cells.tsv.gz", sep="\t",
                      dtype={"cell": str, "mouse": str}).set_index("cell")
@@ -111,7 +119,7 @@ def main() -> None:
     urows, grows = [], []
     for f in sorted(glob.glob(str(a.bundles / "*.pkl"))):
         b = pickle.load(open(f, "rb")); u = b["unit_id"]
-        if b["dataset"] != "KPTracer":
+        if b["dataset"] != "KPTracer" or (DECK and u not in (a.figures or [])):
             continue
         crd = a.root / "crispr_ot" / u
         row = A / "v3_grid_20261104" / "kp" / "rows" / u / (cid.split("|")[0] + "__none") / cid.replace("|", "__")
@@ -160,12 +168,14 @@ def main() -> None:
         un = np.maximum(F["rna"], F["crispr"])
         fl = pd.DataFrame([{"source_clade": order[i], "target_clade": order[j], "F_rna": F["rna"][i, j], "F_crispr": F["crispr"][i, j],
                             "shared": sh_[i, j], "rna_enriched": re_[i, j], "crispr_enriched": ce_[i, j]} for i in range(k) for j in range(k)])
-        fl.to_csv(out / "flows" / f"{u}.tsv", sep="\t", index=False)
+        if not DECK:
+            fl.to_csv(out / "flows" / f"{u}.tsv", sep="\t", index=False)
         crow = []
         for c in order:
             crow.append({"clade": c, "source_cells": int((lab_s == c).sum()), "target_cells": int((lab_t == c).sum()),
                          "merged_into_other": ", ".join(x.split("|")[-1] for x in small) if c == "Other" else ""})
-        pd.DataFrame(crow).to_csv(out / "clades" / f"{u}.tsv", sep="\t", index=False)
+        if not DECK:
+            pd.DataFrame(crow).to_csv(out / "clades" / f"{u}.tsv", sep="\t", index=False)
         rec = {"unit_id": u, "mouse": b["mouse"], "common_sources": len(S), "common_targets": len(T), "clades": k,
                "shared": sh_.sum(), "rna_enriched": re_.sum(), "crispr_enriched": ce_.sum(), "union": un.sum(),
                "bar1_shared": sh_.sum() / F["rna"].sum(), "bar1_rna_enriched": re_.sum() / F["rna"].sum(),
@@ -179,6 +189,8 @@ def main() -> None:
         if (want is None and b["mouse"] in ("3457", "3724")) or (want and u in want):
             draw(fig_out, u, b, order, Z, F, sh_, re_, ce_, un, lab_s, lab_t, st_s, st_t, gate, rec, sid, tid)
         print(f"{u}: {len(S)} x {len(T)}, {k} clades, shared {rec['bar3_shared']:.2f} / RNA {rec['bar3_rna_enriched']:.2f} / CRISPR {rec['bar3_crispr_enriched']:.2f}", flush=True)
+    if DECK:
+        return
     pd.DataFrame(urows).to_csv(out / "units.tsv", sep="\t", index=False)
     pd.DataFrame(grows).to_csv(out / "gates.tsv", sep="\t", index=False)
 
@@ -186,8 +198,9 @@ def main() -> None:
 
 def draw(fig_out, u, b, order, Z, F, sh_, re_, ce_, un, lab_s, lab_t, st_s, st_t, gate, rec, sid, tid):
     k = len(order)
-    fig = plt.figure(figsize=(7.2, 5.1))
-    ax = fig.add_axes([0.0, 0.29, 1.0, 0.71]); ax.set_xlim(0, 10); ax.set_ylim(0, 1); ax.axis("off")
+    fig = plt.figure(figsize=(7.2, 4.3) if DECK else (7.2, 5.1))
+    ax = fig.add_axes([0.0, 0.13, 1.0, 0.87] if DECK else [0.0, 0.29, 1.0, 0.71]); ax.set_xlim(0, 10); ax.set_ylim(0, 1); ax.axis("off")
+    KEY = (("both OTs", "extra in RNA-OT", "extra in CRISPR-OT") if DECK else ("Shared", "RNA-enriched", "CRISPR-enriched"))
     XS0, XS1, XT0, XT1 = 2.25, 2.5, 7.5, 7.75
     gap = 0.012; top = 0.79; Htot = 0.71 - gap * (k - 1)
     tot = un.sum(); scale = Htot / tot
@@ -259,6 +272,8 @@ def draw(fig_out, u, b, order, Z, F, sh_, re_, ce_, un, lab_s, lab_t, st_s, st_t
     for xc, title, side in ((1.9, f"Source: {u.split('__')[2]} (primary)", "source"),
                             (8.1, f"Target: {tsite} (metastasis)", "target")):
         ax.text(xc, 0.985, title, ha="center", va="top", fontsize=st.FS_TITLE)
+        if DECK:
+            continue
         r, c = gate[side]
         vals = [("both retained", np.mean(r & c)), ("RNA-only retained", np.mean(r & ~c)), ("CRISPR-only retained", np.mean(~r & c)),
                 ("both rejected", np.mean(~r & ~c))]
@@ -268,30 +283,37 @@ def draw(fig_out, u, b, order, Z, F, sh_, re_, ce_, un, lab_s, lab_t, st_s, st_t
         ax.text(xc, 0.905, f"gates (cells): both {vals[0][1]:.0%} | RNA-only {vals[1][1]:.0%} | CRISPR-only {vals[2][1]:.0%} | neither {vals[3][1]:.0%}",
                 ha="center", va="top", fontsize=st.FS_MIN, color=st.SUBTLE)
     # flow key, centre top
-    x = 3.55
-    for nm, colr in (("Shared", C_SHARED), ("RNA-enriched", C_RNA), ("CRISPR-enriched", C_CR)):
-        ax.add_patch(Rectangle((x, 0.852), 0.2, 0.024, facecolor=colr, edgecolor="none", alpha=0.85))
-        ax.text(x + 0.26, 0.864, nm, fontsize=st.FS_TICK, va="center")
-        x += 0.42 + 0.075 * len(nm)
-    ax.text(5.0, 0.83, "flow width = clade-to-clade coupling mass on cells retained by both gates", ha="center", va="center",
+    x = 3.0 if DECK else 3.55
+    for nm, colr in zip(KEY, (C_SHARED, C_RNA, C_CR)):
+        ax.add_patch(Rectangle((x, 0.852 if not DECK else 0.90), 0.2, 0.024, facecolor=colr, edgecolor="none", alpha=0.85))
+        ax.text(x + 0.26, 0.864 if not DECK else 0.912, nm, fontsize=st.FS_TICK, va="center")
+        x += 0.42 + (0.105 if DECK else 0.075) * len(nm)
+    ax.text(5.0, 0.83 if not DECK else 0.865, "ribbon width = matching between a source clade and a target clade (cells kept by both OTs)"
+            if DECK else "flow width = clade-to-clade coupling mass on cells retained by both gates", ha="center", va="center",
             fontsize=st.FS_MIN, color=st.SUBTLE)
-    note = (f"Common support: {rec['common_sources']} sources x {rec['common_targets']} targets; each coupling normalised to 1 there. "
-            "Clade-level mass, not cell-to-cell matches.")
-    if undrawn > 0:
-        note += f" Ribbons < {MIN_RIBBON:.1%} not drawn ({undrawn / tot:.1%}; kept in the bars)."
-    ax.text(5.0, 0.03, note, ha="center", fontsize=st.FS_MIN, color=st.SUBTLE)
+    if not DECK:
+        note = (f"Common support: {rec['common_sources']} sources x {rec['common_targets']} targets; each coupling normalised to 1 there. "
+                "Clade-level mass, not cell-to-cell matches.")
+        if undrawn > 0:
+            note += f" Ribbons < {MIN_RIBBON:.1%} not drawn ({undrawn / tot:.1%}; kept in the bars)."
+        ax.text(5.0, 0.03, note, ha="center", fontsize=st.FS_MIN, color=st.SUBTLE)
     # state legend (bar fill = authors' RNA state of the clade's cells)
     present = [s_ for s_ in STATE_COL if s_ in set(st_s) | set(st_t)]
-    lx = fig.add_axes([0.0, 0.215, 1.0, 0.065]); lx.axis("off"); lx.set_xlim(0, 10); lx.set_ylim(0, 2)
-    lx.text(0.15, 1.5, "Bar fill = RNA state:", fontsize=st.FS_MIN, va="center")
-    x, row = 1.35, 1.5
+    lx = fig.add_axes([0.0, 0.0, 1.0, 0.11] if DECK else [0.0, 0.215, 1.0, 0.065]); lx.axis("off"); lx.set_xlim(0, 10); lx.set_ylim(0, 2)
+    lx.text(0.15, 1.5, "Bar colour = RNA state:" if DECK else "Bar fill = RNA state:", fontsize=st.FS_MIN, va="center")
+    x, row = (1.85 if DECK else 1.35), 1.5
     for s_ in present:
-        w_ = 0.32 + 0.058 * len(s_)
+        w_ = (0.42 + 0.085 * len(s_)) if DECK else (0.32 + 0.058 * len(s_))
         if x + w_ > 9.9:
             x, row = 1.35, row - 1
         lx.add_patch(Rectangle((x, row - 0.3), 0.14, 0.6, facecolor=STATE_COL[s_], edgecolor="none"))
         lx.text(x + 0.18, row, s_, fontsize=st.FS_MIN, va="center")
         x += w_
+    if DECK:
+        for ext in ("png", "pdf"):
+            fig.savefig(fig_out / f"flow_{u}.{ext}", dpi=300 if ext == "png" else None)
+        plt.close(fig)
+        return
     # three bars
     bx = fig.add_axes([0.30, 0.025, 0.50, 0.18]); bx.set_xlim(0, 1); bx.set_ylim(-0.5, 2.9); bx.axis("off")
     bx.text(0, 2.75, "Clade-level overlap of the two couplings (blocks = source clade x target clade)", fontsize=st.FS_TITLE, va="center")
