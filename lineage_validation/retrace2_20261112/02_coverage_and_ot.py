@@ -7,7 +7,8 @@ to be positive = D_L,res; average-linkage tree, the authors' 10-20-cell clade ru
 OT per pair and cost (D_L, D_L,res, D_M): ConfidenceOT M4-E as 10_crispr_ot.py (cost = D / median cross D, within-side
 split null 5 + 5, grid 5, acceptance 0.99, eps 0.1, lambda 1, tol 1e-4). Compared per pair: gate kappa, common-support
 TV and top-5 overlap (chance k / common sources), clade-level Shared, same-clade mass (raw-D_L clades).
-Writes OUT/analysis/{association_residual.tsv, cells_residual_clades.tsv} and OUT/ot/{fits.tsv, compare.tsv, gates.tsv}.
+Writes OUT/analysis/{association_residual.tsv, cells_residual_clades.tsv} and OUT/ot/{fits.tsv, compare.tsv, gates.tsv,
+couplings/<source>__<target>__<cost>.npz}.
 """
 
 from __future__ import annotations
@@ -128,6 +129,10 @@ def main() -> None:
             except Exception as e:  # noqa: BLE001
                 fits.append({"pair": f"{s} -> {t}", "cost": cname, "error": str(e)[:200]}); continue
             res_[cname] = fit
+            (oto / "couplings").mkdir(exist_ok=True)
+            np.savez_compressed(oto / "couplings" / f"{s}__{t}__{cname}.npz", coupling=fit.coupling.astype(np.float32),
+                                source=C.cell.to_numpy()[si].astype(str), target=C.cell.to_numpy()[ti].astype(str),
+                                source_gate=np.asarray(fit.source_gate, bool), target_gate=np.asarray(fit.target_gate, bool))
             fits.append({"pair": f"{s} -> {t}", "cost": cname, "source_cells": len(si), "target_cells": len(ti), "rejection_cost": float(cal.rejection_cost),
                          "m4e_inference_valid": bool(cal.m4e_inference_valid), "feasible_cost_found": bool(cal.feasible_cost_found),
                          "retained_source": float(np.mean(fit.source_gate)), "retained_target": float(np.mean(fit.target_gate)),
