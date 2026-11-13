@@ -192,3 +192,10 @@ summary of this plan was looked at. They make the reading rules above computable
 - **Figures show all 50 hallmark sets** (standing rule for GSEA figures), so no focus pathway list is chosen.
 - **Within-clade heatmap block:** the A1 RNA- vs CRISPR-preferred contrast with the most cells among the focus
   mice 3457, 3460, 3724, 3451; top 20 genes up and 20 down in that contrast (raw run).
+- **B1 and C1 have no common orientation:** their case and reference are the two largest states (B1) or clades
+  (C1) of each block, which differ between contrasts, so an NES sign means nothing across mice and the sign rule
+  above does not apply. For B1 and C1 the reported quantity is the share of contrasts whose |NES| lies outside the
+  random-split |NES| range (raw and thinned), per set; B1 is also listed per recurring state pair, oriented
+  alphabetically, with the sign rule applied within the pair when it occurs in ≥ 2 mice.
+- **Baseline pairing:** the baseline of the same unit, clade, site and side (for A1, the block of the RNA- vs
+  CRISPR-preferred contrast; both-supported contrasts share it).
