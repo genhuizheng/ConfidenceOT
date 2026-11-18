@@ -155,7 +155,8 @@ Script `compare_bot_uot.py`; tables and figures in `results/ot_depth_benchmark_2
 | Global | C1 / C2 / C3 / C4 | 0.74-0.91 | 0.36-0.67 | 0.35-0.67 | 0.76-0.97 |
 
 - **UOT fails only on C2.** On every cosine cost (C1, C3, C4) UOT and entropic balanced OT differ by at most 0.10 in any
-  level x arm cell (`conflict_f0.1_uot_minus_balanced_by_cost`); on C2 UOT is 0.20-0.78 below balanced. C4 is a log
+  level x arm cell at f = 0.1 (`*_f0.1_uot_minus_balanced_by_cost`); on C2 UOT is 0.20-0.78 below balanced in the
+  conflict arm and 0.04-0.47 below in the aligned arm, and equal to it in the global arm. C4 is a log
   representation too, so the failure comes from squared Euclidean distance on scaled log1p PCA (cell magnitude kept),
   not from the log transform: cosine drops the magnitude that carries depth.
 - **C3 is the most depth-robust representation here**: the lowest coupling-depth correlation (0.03), the highest
