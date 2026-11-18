@@ -90,8 +90,9 @@ def heat(M, title, name, fmt="{:.2f}", vmin=None, vmax=None, cmap="viridis", cla
         for j in range(M.shape[1]):
             v = M.values[i, j]
             if np.isfinite(v):
+                r_, g_, b_, _ = im.cmap(im.norm(v))
                 ax.text(j, i, fmt.format(v), ha="center", va="center", fontsize=ns.FS_ANNOT,
-                        color="white" if (vmax is not None and v < (vmin + vmax) / 2) else ns.INK)
+                        color="white" if 0.299 * r_ + 0.587 * g_ + 0.114 * b_ < 0.5 else ns.INK)
     cb = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02); cb.set_label(clabel); cb.outline.set_linewidth(ns.LW_AXIS)
     ax.set_title(title)
     save(fig, name)

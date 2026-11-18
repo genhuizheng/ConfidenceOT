@@ -35,7 +35,7 @@ def shares(root: Path) -> pd.DataFrame:
                         np.where(x.target_group.isin(THIN), "wrong_dissimilar_depth", "wrong_similar_depth"))
     s = x.groupby(k + ["cat"]).mass.sum().unstack(fill_value=0.0)
     tot = s.sum(1)
-    marg = g[(g.side == "source") & (g.cost == "C1")].groupby(["level", "replicate", "arm", "f"]).group.apply(lambda v: v.isin(THIN).mean())
+    marg = g[(g.side == "source") & (g.cost == g.cost.iloc[0])].groupby(["level", "replicate", "arm", "f"]).group.apply(lambda v: v.isin(THIN).mean())
     s = s.div(tot, axis=0)
     s["transported_fraction"] = tot.values / marg.reindex(pd.MultiIndex.from_frame(tot.reset_index()[["level", "replicate", "arm", "f"]])).values
     return s.reset_index()

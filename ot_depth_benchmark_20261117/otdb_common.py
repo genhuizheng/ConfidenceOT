@@ -40,6 +40,39 @@ SOLVERS = ("independent", "emd", "sinkhorn", "uot", "partial", "confidenceot")
 
 
 # ----------------------------------------------------------------------------------------------------------- costs
+# cost families on the v3 grid path (encoding -> 2,000 top-variance genes -> [scaling] -> PCA -> unit rows -> mnncovlocal)
+GRID_COSTS = {
+    "C1": ({"encoding": "ranknm", "K": 256, "tie": "midrank"}, True, 50),    # ranknm256-midrank|none|scale|cos|pca50 (main, L5 best)
+    "C3": ({"encoding": "ranknm", "K": 512, "tie": "expected"}, False, 30),  # ranknm512-expected|none|noscale|cos|pca30 (local v3 grid best)
+    "C4": ({"encoding": "logcpm"}, False, 30),                                # logcpm|none|noscale|cos|pca30 (local v3 grid second)
+}
+
+
+def grid_coordinates(S, T, pca_seed: int, cost: str):
+    """A v3-grid cost family: corrected coordinates (before the final unit-row step) and the correction diagnostics."""
+    import factorial_common as fc
+    import rb_common as rb
+    import run_local_benchmark as lb
+    from confidenceot.preprocessing import unit_rows
+    want, scale, n_pcs = GRID_COSTS[cost]
+    spec = next(s for s in fc.grid() if s["ds"] == "none" and all(s.get(k) == v for k, v in want.items()))
+    se, te, _, _ = fc.encode_sides(spec, S, T)
+    joint = sp.vstack([sp.csr_matrix(se.X), sp.csr_matrix(te.X)], format="csr"); n = se.n_obs
+    P, _ = rb.pca_coordinates(joint, fc.N_HVG, n_pcs, scale, False, pca_seed)
+    C = unit_rows(P)
+    lb._LAST.clear()
+    X, Y = lb.correct(C[:n], C[n:], "mnncovlocal")
+    diag = {k: v for k, v in lb._LAST.items() if not k.startswith("_")}
+    return np.asarray(X, np.float32), np.asarray(Y, np.float32), diag
+
+
+def coordinates(S, T, pca_seed: int, cost: str):
+    """(X, Y, diagnostics, cosine?) for a cost family name."""
+    if cost == "C2":
+        return (*c2_coordinates(S, T, pca_seed), False)
+    return (*grid_coordinates(S, T, pca_seed, cost), True)
+
+
 def c1_coordinates(S, T, pca_seed: int):
     """C1 main configuration: corrected coordinates (before the final unit-row step) and the correction diagnostics."""
     import factorial_common as fc

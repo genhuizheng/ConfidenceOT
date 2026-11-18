@@ -126,3 +126,45 @@ level and cost):
 **ConfidenceOT readout.** Its full coupling contains uniform mass on rejected rows, so its correct-group share must be
 read on the retained x retained block (false_asserted_share) together with the rejected fractions, as in the table
 above for the global arm; the per-solver tables keep the full-coupling value for comparability and flag this here.
+
+## 4 Balanced vs unbalanced OT under the best preprocessing configurations (post-hoc, 2026-11-18)
+
+Cost families C3 `ranknm512-expected|none|noscale|cos|pca30` and C4 `logcpm|none|noscale|cos|pca30` (local v3 grid
+best and second) added to C1 (main, L5 best) and C2 (community default). S1 + S2 + S2b, 1,024 jobs, 0 failures.
+Script `compare_bot_uot.py`; tables and figures in `results/ot_depth_benchmark_20261117/bot_uot/`.
+
+**Native (S1, all shared, mean over 8 levels)**
+
+| Cost | Entropic balanced: correct / depth corr. | UOT: correct / depth corr. | Exact: correct / depth corr. |
+|---|---|---|---|
+| C1 | 0.692 / 0.050 | 0.712 / 0.051 | 0.838 / 0.099 |
+| C2 | 0.574 / 0.095 | 0.579 / 0.075 | 0.833 / 0.216 |
+| C3 | 0.822 / 0.029 | 0.867 / 0.030 | 0.871 / 0.070 |
+| C4 | 0.798 / 0.114 | 0.834 / 0.116 | 0.869 / 0.230 |
+
+**Depth stress at f = 0.1** (correct-group share of the transported Group1/2 mass; mean over L1-L5, A4, A5; L0 in brackets)
+
+| Arm | Cost | Exact | Entropic balanced | UOT | Partial |
+|---|---|---|---|---|---|
+| Conflict | C1 | 0.83 (0.89) | 0.63 (0.74) | 0.59 (0.75) | 0.83 (0.95) |
+| Conflict | C2 | 0.64 (0.89) | 0.51 (0.86) | **0.11 (0.08)** | 0.64 (0.87) |
+| Conflict | C3 | 0.90 (0.93) | 0.80 (0.87) | 0.81 (0.91) | 0.96 (1.00) |
+| Conflict | C4 | 0.89 (0.91) | 0.70 (0.84) | 0.66 (0.85) | 0.90 (0.96) |
+| Aligned | C2 | 0.72 (0.76) | 0.64 (0.69) | **0.29 (0.65)** | 0.76 (0.81) |
+| Aligned | C1 / C3 / C4 | 0.79-0.86 | 0.72-0.76 | 0.73-0.77 | 0.85-0.94 |
+| Global | C1 / C2 / C3 / C4 | 0.74-0.91 | 0.36-0.67 | 0.35-0.67 | 0.76-0.97 |
+
+- **UOT fails only on C2.** On every cosine cost (C1, C3, C4) UOT and entropic balanced OT differ by at most 0.10 in any
+  level x arm cell (`conflict_f0.1_uot_minus_balanced_by_cost`); on C2 UOT is 0.20-0.78 below balanced. C4 is a log
+  representation too, so the failure comes from squared Euclidean distance on scaled log1p PCA (cell magnitude kept),
+  not from the log transform: cosine drops the magnitude that carries depth.
+- **C3 is the most depth-robust representation here**: the lowest coupling-depth correlation (0.03), the highest
+  correct share for every solver and arm, and on S1 the strongest gate (rejects 0.98 of a lost and 0.80 of an emerged
+  population, 0.7-1.9% of shared cells, false asserted share 0.08-0.12). C1 was selected on L5 Case 2 F1 at N = 5,000;
+  this N = 200 comparison does not reselect it.
+- **A global 20-fold depth gap** (S2b global arm) hurts both entropic solvers equally on every cost; exact and partial
+  OT keep 0.74-0.97. The ConfidenceOT gate then rejects 0.93-1.00 of the source on C1, C3, C4 (asserted mass ≤ 0.02)
+  although every population is shared, while on C2 it rejects ≤ 0.02 and asserts mass that is 0.70 false. Under a
+  conflict on L1-L5 it rejects 0.07-0.34 of shared cells on cosine costs (none on C2).
+- C4 matches identity well but keeps the highest depth correlation (0.11-0.23): depth association without identity
+  loss, the S2 aligned lesson again.

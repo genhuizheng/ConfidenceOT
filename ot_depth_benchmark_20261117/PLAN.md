@@ -239,3 +239,15 @@ CINEMA-OT and CellOT (comparison B) on the local Splatter N = 200 data, fixed be
   (`splatter_s2b/discarded_pairid_collision/`) and rerun with the level in every name. S1 metrics, gates and
   transitions are unaffected (rows carry the level; computed in process), but the S1 coupling files of L2-L5 / A4 / A5
   overwrote each other and are marked invalid (`couplings_s1_INVALID_pairid_collision/`); no reported number uses them.
+
+## Post-hoc extension: the other best preprocessing configurations, 2026-11-18 (user request)
+
+The user asked for balanced vs unbalanced OT under the project's best preprocessing. C1 is the L5-best configuration.
+Two more cost families from the local v3 grid (`results/splatter_local_20261103/GRID_SUMMARY_v3.md`), on the same v3
+path (encoding, 2,000 top-variance genes, PCA with seed, unit rows, `mnncovlocal`), are added:
+- **C3** `ranknm512-expected|none|noscale|cos|pca30` (local v3 grid best overall);
+- **C4** `logcpm|none|noscale|cos|pca30` (local v3 grid second; a log representation with cosine, which separates
+  "log1p" from "squared Euclidean + gene scaling" as the cause of the C2 failure).
+They run S1, S2 and S2b with every solver, outputs in `results/ot_depth_benchmark_20261117/splatter_best/`. Depth
+equalisation (DS) is not run: removed from the grid by the user on 2026-11-04. No configuration is selected from these
+results; C1 stays the main configuration.

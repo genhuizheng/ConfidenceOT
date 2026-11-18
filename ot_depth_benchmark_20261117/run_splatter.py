@@ -83,10 +83,10 @@ def fit_one(job: dict) -> dict:
         data_info = {"eta2_depth_group_source": eta2(np.log10(sc_), gs), "eta2_depth_group_target": eta2(np.log10(tc_), gt),
                      "median_ncount_source": float(np.median(sc_)), "median_ncount_target": float(np.median(tc_)),
                      "median_nfeature_source": float(np.median(sf_)), "median_nfeature_target": float(np.median(tf_))}
-        for cost in ("C1", "C2"):
+        for cost in job.get("costs", ("C1", "C2")):
             idx = job["index"]
-            X, Y, diag = (oc.c1_coordinates if cost == "C1" else oc.c2_coordinates)(S, T, 20260925 + idx)
-            C, Xc, Yc, scale, rng = oc.cost_matrix(X, Y, cost == "C1", idx)
+            X, Y, diag, cos = oc.coordinates(S, T, 20260925 + idx, cost)
+            C, Xc, Yc, scale, rng = oc.cost_matrix(X, Y, cos, idx)
             res = oc.solve_all(C, Xc, Yc, scale, rng, idx)
             for solver, r in res.items():
                 key = {k: job[k] for k in job["keys"]} | {"cost": cost, "solver": solver}
@@ -174,6 +174,7 @@ def main():
     p.add_argument("--conditions-subdir", default="", help="e.g. N5000 when the root keeps conditions/N5000/rep*/")
     p.add_argument("--out", type=Path, default=OUT)
     p.add_argument("--levels", nargs="+", default=None)
+    p.add_argument("--costs", nargs="+", default=["C1", "C2"], help="cost families (otdb_common: C1, C2, C3, C4)")
     p.add_argument("--resumable", action="store_true", help="per-pair parts under <out>/parts_<stage>/ (TACC), merged by --collect")
     p.add_argument("--collect", action="store_true")
     p.add_argument("--shard", type=int, default=0)
@@ -184,7 +185,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     if a.collect:
         oc.collect_parts(OUT / f"parts_{a.stage}", OUT, "", a.stage); return
-    jobs = jobs_for(a.stage, a.replicates, not a.no_save_couplings, a.data_root, a.out, a.levels, a.conditions_subdir)
+    jobs = [j | {"costs": a.costs} for j in jobs_for(a.stage, a.replicates, not a.no_save_couplings, a.data_root, a.out, a.levels, a.conditions_subdir)]
     if a.resumable:
         oc.run_resumable(jobs, fit_one, OUT / f"parts_{a.stage}", lambda j: j["fit_name"], a.jobs, a.shard, a.nshards)
         return
