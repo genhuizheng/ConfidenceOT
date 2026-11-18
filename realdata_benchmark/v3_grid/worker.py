@@ -78,7 +78,11 @@ def fit_args(dataset: str, device: str, workers: int) -> list[str]:
                 args.append(x)
     else:
         raise ValueError(dataset)
-    return set_arg(set_arg(args, "--device", device), "--workers", str(workers))
+    args = set_arg(set_arg(args, "--device", device), "--workers", str(workers))
+    # V3_BACKBONE=balanced: the balanced-backbone ConfidenceOT (02_run_pair --backbone, 2026-11-18); unset or 'uot'
+    # leaves the production command exactly as it was
+    backbone = os.environ.get("V3_BACKBONE", "uot")
+    return args if backbone == "uot" else set_arg(args, "--backbone", backbone)
 
 
 class Inputs:

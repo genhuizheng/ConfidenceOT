@@ -81,5 +81,32 @@ def main():
     print("->", OUT)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and "--gates" not in sys.argv:
     main()
+
+
+# ------------------------------------------------------------------------------- ConfidenceOT: UOT vs balanced backbone
+def gate_compare():
+    """confidenceot (UOT backbone) vs confidenceot_bot (balanced backbone), C1-C4: gate rejections and the retained x
+    retained block, S1 by case and S2 / S2b by arm at f 0.1. Writes bot_uot/tables/GATE_*.tsv."""
+    t = OUT / "tables"; t.mkdir(parents=True, exist_ok=True)
+    s1 = pd.concat([pd.read_csv(RES / "splatter" / "METRICS_s1.tsv", sep="\t"), pd.read_csv(RES / "splatter_best" / "s1" / "METRICS_s1.tsv", sep="\t"),
+                    pd.read_csv(RES / "splatter_cotbot" / "s1" / "METRICS_s1.tsv", sep="\t")], ignore_index=True)
+    s1 = s1[s1.solver.isin(["confidenceot", "confidenceot_bot"])]
+    cols = ["rejected_fraction_unmatched_source", "rejected_fraction_unmatched_target", "rejected_fraction_shared_source",
+            "rejected_fraction_shared_target", "false_asserted_share", "asserted_mass"]
+    G1 = s1.groupby(["cost", "case", "solver"])[cols].mean().round(3)
+    G1.to_csv(t / "GATE_S1_uot_vs_balanced_backbone.tsv", sep="\t")
+    roots = [RES / "splatter", RES / "splatter_s2b", RES / "splatter_best" / "s2", RES / "splatter_best" / "s2b",
+             RES / "splatter_cotbot" / "s2", RES / "splatter_cotbot" / "s2b"]
+    s2 = pd.concat([pd.read_csv(r / "METRICS_s2.tsv", sep="\t") for r in roots], ignore_index=True)
+    s2 = s2[s2.solver.isin(["confidenceot", "confidenceot_bot"]) & (s2.f == 0.1)].copy()
+    s2["levelset"] = np.where(s2.level == "L0_matched", "L0", "L1-L5,A4,A5")
+    G2 = s2.groupby(["arm", "levelset", "cost", "solver"])[["rejected_fraction_shared_source", "rejected_fraction_shared_target",
+                                                            "asserted_mass", "false_asserted_share"]].mean().round(3)
+    G2.to_csv(t / "GATE_S2_f0.1_uot_vs_balanced_backbone.tsv", sep="\t")
+    print(G1.to_string()); print(G2.to_string())
+
+
+if __name__ == "__main__" and "--gates" in sys.argv:
+    gate_compare()

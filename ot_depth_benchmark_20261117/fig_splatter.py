@@ -24,9 +24,10 @@ R = REPO / "results" / "ot_depth_benchmark_20261117" / "splatter"
 FIG, TAB = R / "figures", R / "tables"
 SOLVERS = ["independent", "emd", "sinkhorn", "uot", "partial", "confidenceot"]
 LABEL = {"independent": "Independent a×b", "emd": "Exact balanced OT", "sinkhorn": "Entropic balanced OT",
-         "uot": "Entropic UOT", "partial": "Partial OT (m 0.8)", "confidenceot": "ConfidenceOT M4-E"}
+         "uot": "Entropic UOT", "partial": "Partial OT (m 0.8)", "confidenceot": "ConfidenceOT M4-E",
+         "confidenceot_bot": "ConfidenceOT M4-E (balanced)"}
 COL = {"independent": ns.NEUTRAL, "emd": "#37536B", "sinkhorn": "#6E8E7D", "uot": "#B4702A", "partial": "#7D3C98",
-       "confidenceot": "#C0392B"}
+       "confidenceot": "#C0392B", "confidenceot_bot": "#E8968A"}
 COSTNAME = {"C1": "C1 rank-cosine (main)", "C2": "C2 log1p-PCA (standard)"}
 THIN = ("Group1", "Group2")
 

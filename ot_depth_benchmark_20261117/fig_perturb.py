@@ -33,12 +33,17 @@ def save(fig, out, name):
     plt.close(fig)
 
 
-def strip(d, q, ylab, title, out, name, ref=None, solvers=SOLVERS, hline=None):
-    """Per-perturbation values of one quantity, one column per cost x solver; the negative control as a short bar."""
-    fig, ax = plt.subplots(figsize=(3.4, 1.9))
+ALL_SOLVERS = SOLVERS + ["confidenceot_bot"]
+
+
+def strip(d, q, ylab, title, out, name, ref=None, solvers=None, hline=None):
+    """Per-perturbation values of one quantity, one column per cost x solver; the negative control as a dashed bar."""
+    solvers = [s_ for s_ in (solvers or ALL_SOLVERS) if s_ in set(d.solver)]
+    costs = [c for c in ("C1", "C2", "C3", "C4") if c in set(d.cost)]
+    fig, ax = plt.subplots(figsize=(0.32 * len(costs) * len(solvers) + 1.2, 2.0))
     rng = np.random.default_rng(0)
-    pos, labels = 0, []
-    for cost in ("C1", "C2"):
+    pos, ticks, labels = 0.0, [], []
+    for cost in costs:
         for s in solvers:
             v = d[(d.cost == cost) & (d.solver == s) & (d.kind == "perturbation")][q].dropna().to_numpy()
             if len(v):
@@ -48,10 +53,9 @@ def strip(d, q, ylab, title, out, name, ref=None, solvers=SOLVERS, hline=None):
                 r = ref[(ref.cost == cost) & (ref.solver == s)][q].dropna()
                 if len(r):
                     ax.plot([pos - 0.3, pos + 0.3], [r.mean()] * 2, color=ns.RULE, lw=0.9, ls=ns.DASH)
-            labels.append(f"{cost} {LABEL[s].replace('Independent a×b', 'Indep.')}")
+            ticks.append(pos); labels.append(f"{cost} {LABEL[s].replace('Independent a×b', 'Indep.')}")
             pos += 1
         pos += 0.6
-    ticks = [i + (0.6 if i >= len(solvers) else 0) for i in range(2 * len(solvers))]
     ax.set_xticks(ticks); ax.set_xticklabels(labels, rotation=60, ha="right")
     if hline is not None:
         ax.axhline(hline, **ns.REF_KW)
@@ -109,7 +113,7 @@ def main():
     save(fig, out, "B_data_effect_vs_depth_shift")
     # 3 technical leakage into per-cell treatment effects
     strip(ref_a, "ite_depth_r2", "R² of ITE explained by\nnCount / nFeature terms", f"{name}: technical leakage into ITE", out, "B_ite_depth_r2",
-          ref=neg, solvers=[s for s in SOLVERS])
+          ref=neg)
     # 4 held-out distribution metrics relative to the mean-shift baseline (lower is better; 1 = mean shift)
     bl = ref_a[ref_a.cost == "none"].pivot_table(index="unit", columns="solver", values="heldout_energy")
     rel = ref_a[ref_a.cost != "none"].merge(bl["baseline_mean_shift"].rename("ms"), left_on="unit", right_index=True)
@@ -121,11 +125,11 @@ def main():
     bls = ref_a[ref_a.cost == "none"].groupby("solver")[["heldout_energy", "heldout_de_corr"]].median().round(4)
     bls.to_csv(tab / "HELDOUT_BASELINES_median.tsv", sep="\t")
     # 5 gate behaviour (ConfidenceOT only), one quantity per panel
-    g = ref_a[ref_a.solver == "confidenceot"]
+    g = ref_a[ref_a.solver.isin(["confidenceot", "confidenceot_bot"])]
     for q, yl in (("rejected_fraction_target", "Rejected fraction of\nperturbed cells"), ("rejected_fraction_source", "Rejected fraction of\ncontrol cells"),
                   ("rejection_score_corr_target", "Spearman: rejection vs\nperturbation score"), ("rejection_depth_corr_target", "Spearman: rejection vs\nlog nCount (perturbed)")):
         if q in g:
-            strip(g, q, yl, f"{name}: ConfidenceOT gate", out, f"B_gate_{q}", ref=neg, solvers=["confidenceot"], hline=0 if "corr" in q else None)
+            strip(g, q, yl, f"{name}: ConfidenceOT gate", out, f"B_gate_{q}", ref=neg, solvers=["confidenceot", "confidenceot_bot"], hline=0 if "corr" in q else None)
     # does the gate reject strong perturbations (no comparable control state) or shallow cells?
     if "rejection_score_corr_target" in g:
         fig, ax = plt.subplots(figsize=(2.2, 1.9))
@@ -149,17 +153,19 @@ def main():
         G = pd.read_csv(gf, sep="\t")
         G = G[(G.side == "target") & (G.unit != "control_vs_control")]
         jr = []
-        for (unit, cost), d in G.groupby(["unit", "cost"]):
+        if "solver" not in G:
+            G["solver"] = "confidenceot"
+        for (unit, cost, solver), d in G.groupby(["unit", "cost", "solver"]):
             w = d.pivot_table(index="cell_index", columns="control_ref", values="rejected", aggfunc="first")
             if {"A", "B"} <= set(w.columns):
                 A_, B_ = w.A.astype(bool), w.B.astype(bool)
                 un = (A_ | B_).sum()
-                jr.append({"unit": unit, "cost": cost, "rejected_A": int(A_.sum()), "rejected_B": int(B_.sum()),
+                jr.append({"unit": unit, "cost": cost, "solver": solver, "rejected_A": int(A_.sum()), "rejected_B": int(B_.sum()),
                            "jaccard": float((A_ & B_).sum() / un) if un else np.nan})
         J = pd.DataFrame(jr); J.to_csv(tab / "REPLICATE_CONSISTENCY_gate_jaccard.tsv", sep="\t", index=False)
     # 7 association vs harm across perturbations: depth corr vs held-out DE corr (C1 / C2, every solver)
     fig, ax = plt.subplots(figsize=(2.4, 2.0))
-    for s in SOLVERS[1:]:
+    for s in ALL_SOLVERS[1:]:
         d = ref_a[(ref_a.solver == s)]
         ax.scatter(d.depth_corr_count, d.heldout_de_corr, s=2.5, color=COL[s], lw=0, alpha=0.5)
     ax.set_xlabel("Coupling-weighted corr. of log nCount"); ax.set_ylabel("Held-out DE-shift corr.")

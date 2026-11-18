@@ -84,7 +84,7 @@ do_array() {  # $1 dependency (type:ids or empty), $2 worklist file, $3 tasks, $
     (( dry_run || queued + $3 <= cap )) || { echo "$queued queued; $3 more would pass the cap of $cap" >&2; return 3; }
     local id; id=$(submit ${1:+--dependency=$1} -p gg -c 144 -t "$(printf '%02d:00:00' "$4")" -A MCB26031 -J "$5" --array=0-$(( $3 - 1 )) \
         -o "$root/logs/$5_%A_%a.out" \
-        --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",V3_WORKLIST="$root/$2",V3_PROCS="$procs",V3_FIT_WORKERS="$fitw",V3_LOGS="$root/logs/workers",V3_MAX_LARGE="$max_large",V3_LARGE_SIZE="$large_size" \
+        --export=ALL,CONFIDENCEOT_REPO="$repo",CONFIDENCEOT_ENV="$env_path",V3_WORKLIST="$root/$2",V3_PROCS="$procs",V3_FIT_WORKERS="$fitw",V3_LOGS="$root/logs/workers",V3_MAX_LARGE="$max_large",V3_LARGE_SIZE="$large_size",V3_BACKBONE="${V3_BACKBONE:-uot}" \
         "$repo/$here/tacc/v3_workers.slurm") || return 1
     echo "$5 array $id: $3 node(s) x $4 h, $procs workers x $fitw fit workers, on $2${1:+ after $1}" >&2; echo "$id"
 }

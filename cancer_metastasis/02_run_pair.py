@@ -439,6 +439,11 @@ def main() -> None:
     parser.add_argument("--input-gate-budget-tag", default="budget_source_0.85_target_0.95")
     parser.add_argument("--input-gate-method", default="M4-E")
     parser.add_argument("--input-gate-state", choices=("retained", "rejected"))
+    parser.add_argument(
+        "--backbone", choices=("uot", "balanced"), default="uot",
+        help="OT backbone of the calibration and of both gates (M4-E, M4-R). 'uot' (default) is the production "
+             "setting; 'balanced' is the balanced-backbone ConfidenceOT (ot_depth_benchmark_20261117, 2026-11-18).",
+    )
     parser.add_argument("--epsilon", type=float, default=0.1)
     parser.add_argument("--lambda-a", type=float, default=1.0)
     parser.add_argument("--lambda-b", type=float, default=1.0)
@@ -752,7 +757,7 @@ def main() -> None:
         calibration_started = time.perf_counter()
         calibration = calibrate_confidence_cost(
             source_nulls[:split] + target_nulls[:split], source_nulls[split:] + target_nulls[split:],
-            backbone="uot", epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
+            backbone=args.backbone, epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
             null_semantics=args.calibration_null,
             within_side_acceptance_minimum=args.within_side_acceptance_minimum,
             source_rejection_budget=source_budget, target_rejection_budget=target_budget,
@@ -799,7 +804,7 @@ def main() -> None:
     metric_rows = []
     for method, variant in (("M4-E", "exact"), ("M4-R", "reversible")):
         model = ConfidenceOT(
-            backbone="uot", variant=variant, rejection_cost=rejection_cost,
+            backbone=args.backbone, variant=variant, rejection_cost=rejection_cost,
             epsilon=args.epsilon, lambda_a=args.lambda_a, lambda_b=args.lambda_b,
             source_rejection_budget=source_budget,
             target_rejection_budget=target_budget,
@@ -837,7 +842,7 @@ def main() -> None:
         metric_rows.append({
             "pair_id": pair_id, "dataset_id": row["dataset_id"],
             "patient_id": row["patient_id"], "source_sample": row["source_sample"],
-            "target_sample": row["target_sample"], "method": method, "variant": variant,
+            "target_sample": row["target_sample"], "method": method, "variant": variant, "backbone": args.backbone,
             "source_exact_n": source_exact_n, "target_exact_n": target_exact_n,
             "analysis_scope": args.analysis_scope,
             "included_annotations": "|".join(args.include_annotation),
@@ -867,6 +872,7 @@ def main() -> None:
             "target_rejection_budget_cap": target_budget,
             "rejection_cost": rejection_cost,
             "rejection_cost_mode": rejection_cost_mode,
+        "backbone": args.backbone,
             "calibration_null": calibration_null,
             "calibration_valid_for_m4r": calibration_valid,
             "calibration_m4e_inference_valid": m4e_inference_valid,
@@ -955,6 +961,7 @@ def main() -> None:
         "target_rejection_budget_cap": target_budget,
         "rejection_cost": rejection_cost,
         "rejection_cost_mode": rejection_cost_mode,
+        "backbone": args.backbone,
         "calibration_null": calibration_null,
         "within_side_acceptance_minimum": (
             args.within_side_acceptance_minimum
