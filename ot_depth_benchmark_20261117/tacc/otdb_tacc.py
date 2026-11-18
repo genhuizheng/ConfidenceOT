@@ -58,7 +58,24 @@ def safe(x: str) -> str:
 # --------------------------------------------------------------------------------------------------------- worklist
 def worklist(a) -> None:
     rows = []
-    if a.dataset == "splatter":
+    if a.dataset == "splatter_ext":
+        # the 60 v3 grid units (L1-L5 x every pair of the manifest x replicates), one row per unit x external method
+        envs = json.loads(Path(a.envs).read_text())
+        for rep in a.replicates:
+            for lv in ("L1_depth", "L2_depth_dropout", "L3_batch", "L4_batch_perturb", "L5_batch_perturb_imbalance"):
+                cond = a.splatter_root / "conditions" / a.conditions_subdir / f"rep{rep}" / lv
+                if not (cond / "manifest.csv").exists():
+                    sys.exit(f"no conditions for {lv} rep{rep}: {cond}")
+                for r in pd.read_csv(cond / "manifest.csv").itertuples():
+                    unit = f"{lv}__rep{rep}__{r.pair_id}"
+                    for method, env in envs["methods"].items():
+                        job = {"method": method, "python": envs["envs"][env], "source": r.source_h5ad, "target": r.target_h5ad,
+                               "truth": str(cond / str(r.pair_id) / "truth" / "population_truth.tsv"),
+                               "meta": {"level": lv, "replicate": rep, "pair_id": r.pair_id, "case": r.case, "unit": unit},
+                               "extra": envs.get("extra", {}).get(method, [])}
+                        rows.append({"dataset": "splatter_ext", "row_id": safe(f"{unit}__{method}"), "stage": method, "cost": "own",
+                                     "size": a.cells_per_side ** 2, "job": json.dumps(job)})
+    elif a.dataset == "splatter":
         import run_splatter as rs
         n = a.cells_per_side
         for stage, levels in (("s1", None), ("s2", ["L0_matched"]), ("s2", S2B_LEVELS)):
@@ -97,6 +114,17 @@ def worklist(a) -> None:
 
 
 # ------------------------------------------------------------------------------------------------------------- rows
+def run_external_row(row, out: Path) -> int:
+    import subprocess
+    job = json.loads(row.job)
+    cmd = [job["python"], "-I", str(BENCH / "run_external.py"), "--method", job["method"], "--source", job["source"],
+           "--target", job["target"], "--truth", job["truth"], "--out", str(out), "--meta", json.dumps(job["meta"]), *job["extra"]]
+    env = {**os.environ, "CELLOT_REPO": os.environ.get("CELLOT_REPO", ""), "PYTHONNOUSERSITE": "1"}
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    (out / "run.log").write_text((r.stdout + r.stderr)[-20000:])
+    return r.returncode
+
+
 def run_row(row) -> dict:
     job = json.loads(row.job) | {"costs": [row.cost], "solvers": None}
     job["solvers"] = None
@@ -148,7 +176,7 @@ def work(a) -> None:
             (out / "FAILED").unlink(missing_ok=True); tried.add(out)
             started = time.time()
             try:
-                code = write_row(out, run_row(row))
+                code = run_external_row(row, out) if row.dataset == "splatter_ext" else write_row(out, run_row(row))
             except Exception:
                 code = -1; (out / "error.txt").write_text(traceback.format_exc())
             if slot is not None:
@@ -200,7 +228,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("worklist")
-    w.add_argument("--dataset", choices=("splatter", "norman", "vcc"), required=True)
+    w.add_argument("--dataset", choices=("splatter", "splatter_ext", "norman", "vcc"), required=True)
+    w.add_argument("--envs", default=str(HERE / "external_envs.json"), help="splatter_ext: method -> environment python map")
     w.add_argument("--root", type=Path, required=True)
     w.add_argument("--splatter-root", type=Path)
     w.add_argument("--conditions-subdir", default="N5000")

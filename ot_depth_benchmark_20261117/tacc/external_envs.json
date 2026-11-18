@@ -1,0 +1,21 @@
+{
+  "envs": {
+    "moscot": "/scratch/10119/ghzheng/OT_project/envs/otdb_moscot/bin/python",
+    "wot": "/scratch/10119/ghzheng/OT_project/envs/otdb_wot/bin/python",
+    "cfm": "/scratch/10119/ghzheng/OT_project/envs/otdb_cfm/bin/python",
+    "otbench": "/scratch/10119/ghzheng/OT_project/envs/otdb_otbench/bin/python"
+  },
+  "methods": {
+    "wot": "wot",
+    "moscot_bal": "moscot",
+    "moscot_unbal": "moscot",
+    "moscot_temporal": "moscot",
+    "cinemaot_tutorial": "otbench",
+    "cinemaot_default": "otbench",
+    "cinemaotw": "otbench",
+    "otcfm": "cfm",
+    "sbcfm": "cfm",
+    "cellot": "otbench"
+  },
+  "extra": {}
+}
