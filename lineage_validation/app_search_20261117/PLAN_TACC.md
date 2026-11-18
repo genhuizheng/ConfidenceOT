@@ -1,8 +1,13 @@
-# Application search on TACC: real datasets, units and scoring (DRAFT 2026-11-18, not frozen)
+# Application search on TACC: real datasets, units and scoring (FROZEN 2026-11-18)
 
 Written after the format audit (`05_audit_tacc_data.py`, `$SCRATCH/OT_project/app_search_20261117/audit/`) and before any
 OT run on these data. Real data only: no simulation and no constructed one-sided units (the local Kang K1 / K2 removals
-are not repeated). Once the user approves, this file is frozen; later changes go in dated post-hoc sections.
+are not repeated). Approved by the user on 2026-11-18, with these decisions:
+- LARRY in vivo: mature = every type except "Undifferentiated" and "Prog";
+- C. elegans: the expression-estimated time bins are accepted as a stated limitation;
+- SPLINTR and zebrafish: look for the authors' barcode / scar data.
+
+Later changes go in dated post-hoc sections.
 
 ## Fixed for every dataset
 
