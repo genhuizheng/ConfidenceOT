@@ -78,7 +78,7 @@ def leakage(ite, lc_own, lf_own, lc_partner, lf_partner):
     return out
 
 
-def run_cinemaot(X, s_tr, t_tr, nc, nf):
+def run_cinemaot(X, s_tr, t_tr, nc, nf, return_coupling: bool = False):
     """CINEMA-OT (package defaults) on the train cells; returns metrics."""
     import anndata as ad
     import scanpy as sc
@@ -126,10 +126,10 @@ def run_cinemaot(X, s_tr, t_tr, nc, nf):
     rs = P.sum(1); ok = rs > 0
     bary = (P[ok] @ Et) / rs[ok, None]
     row |= leakage((bary - Es[ok]) @ u, lcs[ok], np.log10(nf[s_tr])[ok], (P[ok] @ lct) / rs[ok], (P[ok] @ np.log10(nf[t_tr])) / rs[ok])
-    return row
+    return (row, P) if return_coupling else row
 
 
-def run_cellot(X, s_tr, s_te, t_tr, t_te, nc, nf, repo: Path, iters: int, work: Path, ae_iters: int = 250000):
+def cellot_train(X, src_idx, tgt_idx, repo: Path, iters: int, work: Path, ae_iters: int = 250000) -> dict:
     """CellOT scRNA route with the authors' own entry point (scripts/train.py) and model configs: scGen autoencoder
     (configs/models/scgen.yaml), then CellOT (configs/models/cellot.yaml) on its latent (--config.data.ae_emb.path).
     The unit's split column is ours (no datasplit in the task config, so read_single_anndata keeps it)."""
@@ -146,8 +146,8 @@ def run_cellot(X, s_tr, s_te, t_tr, t_te, nc, nf, repo: Path, iters: int, work: 
     from cellot.data.cell import split_cell_data
     # all cells of the unit; CellOT's own split (train_test, grouped by condition, test 0.2, random_state 0), recomputed
     # here with its split_cell_data on the same obs so that the evaluation uses exactly CellOT's held-out cells
-    idx = np.concatenate([s_tr, s_te, t_tr, t_te])
-    cond = np.array(["control"] * (len(s_tr) + len(s_te)) + ["perturbed"] * (len(t_tr) + len(t_te)))
+    idx = np.concatenate([src_idx, tgt_idx])
+    cond = np.array(["control"] * len(src_idx) + ["perturbed"] * len(tgt_idx))
     obs = pd.DataFrame({"condition": pd.Categorical(cond)}, index=[f"c{i}" for i in idx])
     split = split_cell_data(ad.AnnData(obs=obs), name="train_test", groupby="condition", test_size=0.2, random_state=0).to_numpy()
     L = lognorm(X[idx])
@@ -180,6 +180,24 @@ def run_cellot(X, s_tr, s_te, t_tr, t_te, nc, nf, repo: Path, iters: int, work: 
     def push(M):
         z = enc(M).clone().requires_grad_(True)
         return dec(g.transport(z).detach())
+    diag = {}
+    for nm, d_ in (("ae", ae_dir), ("cellot", ot_dir)):
+        try:   # training trace written by CellOT's Logger (cache/scalars, HDF): first and last evaluation
+            ev = pd.read_hdf(d_ / "cache" / "scalars", "eval")
+            col = "mmd" if "mmd" in ev else "loss"
+            diag |= {f"{nm}_eval_{col}_first": float(ev[col].iloc[0]), f"{nm}_eval_{col}_last": float(ev[col].iloc[-1]),
+                     f"{nm}_eval_{col}_min": float(ev[col].min()), f"{nm}_eval_n": int(len(ev))}
+        except Exception as e:  # recorded, not fatal
+            diag[f"{nm}_trace_error"] = f"{type(e).__name__}: {e}"[:200]
+    return {"push": push, "enc": enc, "F": F, "cond": cond, "split": split, "idx": idx, "work": work, "diag": diag}
+
+
+def run_cellot(X, s_tr, s_te, t_tr, t_te, nc, nf, repo: Path, iters: int, work: Path, ae_iters: int = 250000):
+    """CellOT on one perturbation unit (cellot_train), held-out distribution metrics and depth leakage."""
+    from scipy.spatial.distance import cdist
+    from scipy.stats import spearmanr
+    m_ = cellot_train(X, np.concatenate([s_tr, s_te]), np.concatenate([t_tr, t_te]), repo, iters, work, ae_iters)
+    push, F, cond, split, idx = m_["push"], m_["F"], m_["cond"], m_["split"], m_["idx"]
     isc, tr = cond == "control", split == "train"
     Fs_tr, Fs_te, Ft_tr, Ft_te = F[isc & tr], F[isc & ~tr], F[~isc & tr], F[~isc & ~tr]
     s_tr = idx[isc & tr]                                      # control train cells (depth leakage below)
@@ -210,7 +228,7 @@ def run_cellot(X, s_tr, s_te, t_tr, t_te, nc, nf, repo: Path, iters: int, work: 
     beta, *_ = np.linalg.lstsq(F2, ite, rcond=None)
     rows[0] |= {"ite_owndepth_corr": float(spearmanr(lcs, ite).statistic),
                 "ite_depth_r2_own": float(1 - ((ite - F2 @ beta) ** 2).sum() / ((ite - ite.mean()) ** 2).sum()),
-                "pred_depth_proxy_corr": float(spearmanr(lcs, push(Fs_tr).sum(1)).statistic)}
+                "pred_depth_proxy_corr": float(spearmanr(lcs, push(Fs_tr).sum(1)).statistic)} | m_["diag"]
     shutil.rmtree(work, ignore_errors=True)
     return rows
 
@@ -253,7 +271,14 @@ def main():
     p.add_argument("--cellot-repo", default=os.environ.get("CELLOT_REPO", "D:/Xia_lab/CellOT_tools/cellot"))
     p.add_argument("--jobs", type=int, default=8)
     p.add_argument("--tag", default="")
+    p.add_argument("--shard", type=int, default=0)
+    p.add_argument("--nshards", type=int, default=1)
+    p.add_argument("--collect", action="store_true", help="merge the parts into LEARNED_METRICS<tag>.tsv and stop")
     a = p.parse_args()
+    import otdb_common as oc
+    parts = a.perturb_root / f"learned_parts{('_' + a.tag) if a.tag else ''}"
+    if a.collect:
+        oc.collect_parts(parts, a.perturb_root, "LEARNED_", a.tag); return
     units = pd.read_csv(a.perturb_root / "UNITS.tsv", sep="\t")
     units = units[units.control_ref.isin(a.control_ref)]
     if a.units:
@@ -261,17 +286,8 @@ def main():
     jobs = [{"root": str(a.perturb_root), "unit": r.unit, "control_ref": r.control_ref, "kind": r.kind, "methods": a.methods,
              "cellot_repo": a.cellot_repo, "cellot_iters": a.cellot_iters, "ae_iters": a.ae_iters, "work": str(a.perturb_root / "learned_work")} for r in units.itertuples()]
     print(f"{len(jobs)} units, methods {a.methods}", flush=True)
-    rows, errs = [], []
-    t0 = time.time()
-    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
-        for k, fu in enumerate(as_completed([ex.submit(fit_unit, j) for j in jobs]), 1):
-            r = fu.result(); rows += r["rows"]; errs += r["err"]
-            if k % 10 == 0 or k == len(jobs):
-                print(f"{k}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
-    tag = f"_{a.tag}" if a.tag else ""
-    pd.DataFrame(rows).to_csv(a.perturb_root / f"LEARNED_METRICS{tag}.tsv", sep="\t", index=False)
-    (a.perturb_root / f"LEARNED_ERRORS{tag}.txt").write_text("\n\n".join(errs))
-    print(f"{len(rows)} rows, {len(errs)} errors")
+    oc.run_resumable(jobs, fit_unit, parts, lambda j: f"{j['unit']}__{j['control_ref']}", a.jobs, a.shard, a.nshards)
+    print(f"-> {parts}; merge with --collect")
 
 
 if __name__ == "__main__":

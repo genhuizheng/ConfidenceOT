@@ -133,7 +133,7 @@ def fit_one(job: dict) -> dict:
                     np.savez_compressed(Path(job["save_dir"]) / f"{job['fit_name']}__{cost}__{solver}.npz", coupling=P.astype(np.float32))
     except Exception:
         err.append(traceback.format_exc()[-1500:])
-    return {"rows": rows, "trans": trans, "gates": gates, "err": err, "name": job["fit_name"]}
+    return {"rows": rows, "trans": trans, "gates": gates, "err": err, "name": job["fit_name"], "tables": {"TRANSITIONS": trans}}
 
 
 def jobs_for(stage: str, reps: list[int], save: bool, data: Path = DATA, out: Path = OUT, levels_s1=None, cond_sub: str = "") -> list[dict]:
@@ -142,21 +142,24 @@ def jobs_for(stage: str, reps: list[int], save: bool, data: Path = DATA, out: Pa
     if save:
         sd.mkdir(parents=True, exist_ok=True)
     for rep in reps:
-        levels = (levels_s1 or LEVELS) if stage == "s1" else ["L0_matched"]
+        levels = (levels_s1 or LEVELS) if stage == "s1" else (levels_s1 or ["L0_matched"])
         for lv in levels:
             cond = data / "conditions" / cond_sub / f"rep{rep}" / lv if cond_sub else data / "conditions" / f"rep{rep}" / lv
+            if not (cond / "manifest.csv").exists():
+                print(f"MISSING conditions: {cond} (not run; listed here so the gap is visible)", flush=True)
+                continue
             man = pd.read_csv(cond / "manifest.csv")
             for i, r in man.iterrows():
                 base = {"stage": stage, "replicate": rep, "level": lv, "case": r.biological_case, "pair_id": r.pair_id, "index": i,
                         "source": str(oc.REPO / r.source_h5ad), "target": str(oc.REPO / r.target_h5ad),
                         "truth": str(cond / r.pair_id / "truth" / "population_truth.tsv"), "save_dir": str(sd) if save else ""}
                 if stage == "s1":
-                    jobs.append(base | {"keys": ["stage", "replicate", "level", "case", "pair_id"], "fit_name": r.pair_id})
+                    jobs.append(base | {"keys": ["stage", "replicate", "level", "case", "pair_id"], "fit_name": f"{lv}__{r.pair_id}"})
                 elif r.biological_case == "all_shared":
                     for arm in S2_ARMS:
                         for f in THIN_FACTORS:
                             jobs.append(base | {"arm": arm, "f": f, "keys": ["stage", "replicate", "level", "case", "pair_id", "arm", "f"],
-                                                "fit_name": f"{r.pair_id}__{arm}__f{f}"})
+                                                "fit_name": f"{lv}__{r.pair_id}__{arm}__f{f}"})
     return jobs
 
 
@@ -171,11 +174,20 @@ def main():
     p.add_argument("--conditions-subdir", default="", help="e.g. N5000 when the root keeps conditions/N5000/rep*/")
     p.add_argument("--out", type=Path, default=OUT)
     p.add_argument("--levels", nargs="+", default=None)
+    p.add_argument("--resumable", action="store_true", help="per-pair parts under <out>/parts_<stage>/ (TACC), merged by --collect")
+    p.add_argument("--collect", action="store_true")
+    p.add_argument("--shard", type=int, default=0)
+    p.add_argument("--nshards", type=int, default=1)
     a = p.parse_args()
 
     globals()["OUT"] = a.out
     OUT.mkdir(parents=True, exist_ok=True)
+    if a.collect:
+        oc.collect_parts(OUT / f"parts_{a.stage}", OUT, "", a.stage); return
     jobs = jobs_for(a.stage, a.replicates, not a.no_save_couplings, a.data_root, a.out, a.levels, a.conditions_subdir)
+    if a.resumable:
+        oc.run_resumable(jobs, fit_one, OUT / f"parts_{a.stage}", lambda j: j["fit_name"], a.jobs, a.shard, a.nshards)
+        return
     if a.max_jobs:
         jobs = jobs[: a.max_jobs]
     print(f"{len(jobs)} jobs", flush=True)

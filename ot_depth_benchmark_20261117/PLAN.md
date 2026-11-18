@@ -208,3 +208,34 @@ original methods, `CONTROLS_AND_LIMITATIONS.md`, a short English deck, `SUMMARY_
     `cellot.yaml` (100k, on the scGen latent); its loader requires a `datasplit`, so CellOT uses its own split
     (`train_test`, grouped by condition, test 0.2, random_state 0), recomputed with its `split_cell_data` for
     evaluation. Python 3.10 compatibility needs only a `collections` alias shim (`cellot_shim/`), no CellOT code change.
+
+## Post-hoc extension S2b, 2026-11-18 (user request after reading S1 / S2)
+
+The user asked to compare balanced and unbalanced OT across L1-L5. S1 (native) is read as it is. S2 was built on
+L0_matched only; S2b applies the same three arms (conflict, aligned, global), the same thinning factors, groups and
+seeds to the all_shared pair of L1_depth, L2_depth_dropout, L3_batch, L4_batch_perturb, L5_batch_perturb_imbalance,
+A4_perturb_only and A5_imbalance_only, replicates 1-8, every cost and solver. Output in a new directory
+(`results/ot_depth_benchmark_20261117/splatter_s2b/`); S2 is not changed. The fair balanced-vs-unbalanced comparison
+is entropic balanced OT vs entropic UOT at the same ε = 0.1; exact OT (ε = 0) is reported but not used as the
+balanced counterpart.
+
+## Post-hoc extension S3, 2026-11-18 (user request: small-data check of the original methods)
+
+CINEMA-OT and CellOT (comparison B) on the local Splatter N = 200 data, fixed before running:
+- Pairs: S2 conflict arm on L0_matched all_shared at f ∈ {1, 0.25, 0.1}, and native all_shared at L1_depth,
+  L2_depth_dropout, L5_batch_perturb_imbalance, plus population_lost at L1_depth; replicates 1-3 (21 pairs). Source =
+  "control", target = "perturbed".
+- CINEMA-OT: as in run_learned.py (package confounder step, log-domain matching), scored like comparison A on its
+  coupling (correct-group share, Group1/2 shares in S2, coupling-depth correlation). Equivalence check first: at a
+  smoothness where the package's linear-domain Sinkhorn-Knopp does not underflow, our matching must equal the
+  package's matrix.
+- CellOT: the authors' route and settings (scGen 250k + CellOT 100k iterations, its own 80/20 split). A map is not a
+  coupling: each held-out source cell x is mapped to T(x) in CellOT's feature space (1,000 HVG log1p CP10k) and read by
+  its nearest target cell: same group, Group1/2 categories in S2, and the correlation of log nCount between x and that
+  target cell. Baselines in the same space: no transport (x itself) and mean shift. Training traces (first / last
+  evaluation) are recorded to check convergence and collapse.
+- 2026-11-18, bug fix: the manifests of L3-L5, A4 and A5 reuse L2's pair_id, so resumable part files and saved coupling
+  files named by pair_id collided across levels. The first S2b run (192 of 672 fits collected) is discarded
+  (`splatter_s2b/discarded_pairid_collision/`) and rerun with the level in every name. S1 metrics, gates and
+  transitions are unaffected (rows carry the level; computed in process), but the S1 coupling files of L2-L5 / A4 / A5
+  overwrote each other and are marked invalid (`couplings_s1_INVALID_pairid_collision/`); no reported number uses them.

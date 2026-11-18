@@ -197,3 +197,55 @@ def group_metrics(P, gs, gt, s_count, t_count):
         ct = lc_t - pd.Series(lc_t).groupby(gt).transform("mean").to_numpy()
         out["depth_corr_count_within"] = wcorr(cs, ct, P * same)
     return out
+
+
+# ------------------------------------------------------------------------------------------------- resumable runs
+def run_resumable(jobs: list[dict], fn, parts: Path, name_of, workers: int, shard: int = 0, nshards: int = 1) -> None:
+    """Run fn(job) -> {"rows", "gates"?, "err"} over the jobs of this shard (index mod nshards), each finished job written
+    at once to parts/<name>.metrics.tsv (+ .gates.tsv.gz, .err.txt; written to a temporary name, then renamed).
+    Jobs whose metrics file exists are skipped, so a resubmission continues where a job stopped (walltime, node loss)."""
+    import time
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    parts.mkdir(parents=True, exist_ok=True)
+    todo = [j for i, j in enumerate(jobs) if i % nshards == shard and not (parts / f"{name_of(j)}.metrics.tsv").exists()]
+    print(f"shard {shard}/{nshards}: {len(todo)} jobs to run ({len(jobs)} in total)", flush=True)
+    t0 = time.time()
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(fn, j): j for j in todo}
+        for k, fu in enumerate(as_completed(futs), 1):
+            j = futs[fu]; nm = name_of(j)
+            try:
+                r = fu.result()
+            except Exception as e:  # a crashed worker is recorded, not dropped
+                r = {"rows": [], "gates": [], "err": [f"{nm}: worker crashed: {type(e).__name__}: {e}"]}
+            if r.get("gates"):
+                pd.concat(r["gates"]).to_csv(parts / f"{nm}.gates.tmp.gz", sep="\t", index=False, compression="gzip")
+                os.replace(parts / f"{nm}.gates.tmp.gz", parts / f"{nm}.gates.tsv.gz")
+            for tname, trows in (r.get("tables") or {}).items():
+                if trows:
+                    pd.DataFrame(trows).to_csv(parts / f"{nm}.{tname}.tsv", sep="\t", index=False)
+            if r.get("err"):
+                (parts / f"{nm}.err.txt").write_text("\n\n".join(r["err"]))
+            if r["rows"]:   # no metrics file -> the job runs again next time
+                pd.DataFrame(r["rows"]).to_csv(parts / f"{nm}.metrics.tmp", sep="\t", index=False)
+                os.replace(parts / f"{nm}.metrics.tmp", parts / f"{nm}.metrics.tsv")
+            if k % 10 == 0 or k == len(todo):
+                print(f"{k}/{len(todo)} {time.time() - t0:.0f}s", flush=True)
+
+
+def collect_parts(parts: Path, out: Path, prefix: str, tag: str = "") -> None:
+    """Concatenate parts into <out>/<prefix>METRICS<tag>.tsv, GATES<tag>.tsv.gz and ERRORS<tag>.txt."""
+    t = f"_{tag}" if tag else ""
+    m = [pd.read_csv(f, sep="\t") for f in sorted(parts.glob("*.metrics.tsv"))]
+    g = [pd.read_csv(f, sep="\t") for f in sorted(parts.glob("*.gates.tsv.gz"))]
+    e = [f.read_text() for f in sorted(parts.glob("*.err.txt"))]
+    if m:
+        pd.concat(m, ignore_index=True).to_csv(out / f"{prefix}METRICS{t}.tsv", sep="\t", index=False)
+    if g:
+        pd.concat(g, ignore_index=True).to_csv(out / f"{prefix}GATES{t}.tsv.gz", sep="\t", index=False)
+    (out / f"{prefix}ERRORS{t}.txt").write_text("\n\n".join(e))
+    extra = sorted({f.name.split(".")[-2] for f in parts.glob("*.*.tsv") if not f.name.endswith(".metrics.tsv")})
+    for tname in extra:
+        x = [pd.read_csv(f, sep="\t") for f in sorted(parts.glob(f"*.{tname}.tsv"))]
+        pd.concat(x, ignore_index=True).to_csv(out / f"{prefix}{tname}{t}.tsv", sep="\t", index=False)
+    print(f"collected {len(m)} jobs with metrics, {len(e)} with errors -> {out}")

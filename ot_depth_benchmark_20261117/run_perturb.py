@@ -282,7 +282,9 @@ def fit_unit(job: dict) -> dict:
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", choices=tuple(DATASETS), required=True)
-    p.add_argument("--stage", choices=("prepare", "fit"), required=True)
+    p.add_argument("--stage", choices=("prepare", "fit", "collect"), required=True)
+    p.add_argument("--shard", type=int, default=0, help="this job's shard (units with index mod --nshards == shard)")
+    p.add_argument("--nshards", type=int, default=1)
     p.add_argument("--h5ad", default=None)
     p.add_argument("--out", default=None)
     p.add_argument("--units", nargs="*", default=None)
@@ -295,26 +297,16 @@ def main():
     out = Path(a.out or cfg["out"])
     if a.stage == "prepare":
         prepare(cfg, out); return
+    parts = out / f"parts{('_' + a.tag) if a.tag else ''}"
+    if a.stage == "collect":
+        oc.collect_parts(parts, out, "", a.tag); return
     units = pd.read_csv(out / "UNITS.tsv", sep="\t")
     if a.units:
         units = units[units.unit.isin(a.units)]
     jobs = [{"out": str(out), "unit": r.unit, "control_ref": r.control_ref, "kind": r.kind, "target_sep": cfg["target_sep"]}
             for r in units.itertuples()]
-    print(f"{len(jobs)} units", flush=True)
-    rows, gates, errs = [], [], []
-    t0 = time.time()
-    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
-        futs = [ex.submit(fit_unit, j) for j in jobs]
-        for k, fu in enumerate(as_completed(futs), 1):
-            r = fu.result(); rows += r["rows"]; gates += r["gates"]; errs += r["err"]
-            if k % 10 == 0 or k == len(jobs):
-                print(f"{k}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
-    tag = f"_{a.tag}" if a.tag else ""
-    pd.DataFrame(rows).to_csv(out / f"METRICS{tag}.tsv", sep="\t", index=False)
-    if gates:
-        pd.concat(gates).to_csv(out / f"GATES{tag}.tsv.gz", sep="\t", index=False)
-    (out / f"ERRORS{tag}.txt").write_text("\n\n".join(errs))
-    print(f"{len(rows)} rows, {len(errs)} errors -> {out}")
+    oc.run_resumable(jobs, fit_unit, parts, lambda j: f"{j['unit']}__{j['control_ref']}", a.jobs, a.shard, a.nshards)
+    print(f"-> {parts}; merge with --stage collect")
 
 
 if __name__ == "__main__":

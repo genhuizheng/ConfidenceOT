@@ -90,3 +90,39 @@ Figures: `S2_conflict_C2_correct_share`, `S2_conflict_C1_correct_share`, `S2_con
 `S2_conflict_C2_transported_fraction`, `S2_aligned_*`, `S2_global_*`, `S2_association_vs_harm`,
 `S1_allshared_{C1,C2}_{depth_corr_count,depth_corr_count_within,correct_mass}`,
 `S1_{population_lost,population_emerged}_*_transported_share_unmatched`, `S1_gate_*_rejected_fraction`, `legend_solvers`.
+
+## 3 S2b: the conflict on L1-L5, A4, A5 (post-hoc extension 2026-11-18, PLAN.md)
+
+672 fits (7 levels x 3 arms x 4 f x 8 replicates; x 2 costs x 6 solvers), 0 failures, balanced marginal error < 3e-6.
+Read for Group1/2 source cells. The fair balanced-vs-unbalanced contrast is entropic balanced OT (Sinkhorn) vs entropic
+UOT at the same ε = 0.1. Table: `splatter_s2b/tables/S2_S2b_group12_mass_shares.tsv`; figures `splatter_s2b/figures/`.
+
+Correct-group share of the transported Group1/2 mass at f = 0.1 (f = 1 in brackets: the two are within 0.01 at every
+level and cost):
+
+| Level | C1 balanced | C1 UOT | C2 balanced | C2 UOT | C2 UOT share on wrong, depth-similar groups |
+|---|---|---|---|---|---|
+| L0 | 0.74 (0.78) | 0.75 (0.79) | 0.86 (0.80) | 0.08 (0.81) | 0.92 |
+| L1 | 0.58 (0.69) | 0.52 (0.70) | 0.53 (0.67) | 0.01 (0.67) | 0.99 |
+| L2 | 0.61 (0.73) | 0.54 (0.74) | 0.52 (0.56) | 0.04 (0.56) | 0.96 |
+| L3 | 0.59 (0.72) | 0.61 (0.73) | 0.52 (0.53) | 0.05 (0.53) | 0.94 |
+| L4 | 0.60 (0.70) | 0.62 (0.71) | 0.51 (0.52) | 0.05 (0.52) | 0.94 |
+| L5 | 0.66 (0.84) | 0.65 (0.84) | 0.48 (0.68) | 0.28 (0.67) | 0.59 |
+| A4 | 0.61 (0.72) | 0.54 (0.72) | 0.50 (0.55) | 0.04 (0.55) | 0.96 |
+| A5 | 0.74 (0.87) | 0.66 (0.87) | 0.50 (0.73) | 0.29 (0.72) | 0.59 |
+
+- Without a within-side depth conflict (f = 1) balanced and unbalanced entropic OT give the same matching at every level.
+- On C1 neither collapses under the conflict: UOT is 0.06-0.08 below balanced at L1, L2, A4, A5 and 0.02 above at L3, L4.
+- On C2 UOT collapses at every level (0.01-0.29) and sends 0.59-0.99 of the mass to wrong, depth-similar groups;
+  balanced OT on C2 also degrades from L1 on (0.48-0.53, 0.30-0.42 on depth-similar groups) but does not collapse.
+- **Aligned arm** (depth tracks biology on both sides): C2 UOT still falls to 0.18-0.22 at L1-L4 (balanced 0.63-0.66),
+  so C2 + UOT fails whenever cells within a side differ strongly in depth, even when depth is biologically
+  informative. C1 UOT stays at 0.68-0.85.
+- **Global arm** (whole target thinned to about 1/20 of the source depth at L1-L5): balanced and UOT degrade equally
+  (C1 0.34-0.62, C2 0.29-0.49); exact OT and partial OT keep 0.68-0.94. ConfidenceOT on C1 rejects 0.97-1.00 of the
+  source (asserted mass ≈ 0): with every population shared, a 20-fold depth gap between sides closes the gate, a
+  depth-driven reject-all. On C2 it rejects ≤ 0.02 and asserts mass with a false share of 0.69-0.71.
+
+**ConfidenceOT readout.** Its full coupling contains uniform mass on rejected rows, so its correct-group share must be
+read on the retained x retained block (false_asserted_share) together with the rejected fractions, as in the table
+above for the global arm; the per-solver tables keep the full-coupling value for comparability and flag this here.
