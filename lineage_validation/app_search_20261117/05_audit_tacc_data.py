@@ -88,7 +88,7 @@ def main() -> None:
                     with tarfile.open(f) as t:
                         for m in t.getmembers():
                             w(f"  {m.name}  {human(m.size)}")
-                elif f.suffix == ".h5ad":
+                elif f.name.endswith((".h5ad", ".h5ad.h5")):  # GSE132188 ships its AnnData as .h5ad.h5
                     audit_h5ad(f, w)
                 elif any(f.name.endswith(s) for s in (".csv", ".csv.gz", ".tsv", ".tsv.gz", ".txt.gz")) and f.name != "filelist.txt":
                     audit_table(f, w)
