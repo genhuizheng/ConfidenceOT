@@ -185,3 +185,17 @@ train-perturbed sample (a distribution reference that ignores control state).
 
 `LITERATURE.md`, `METHODS.md`, Splatter tables + figures, Norman tables + figures, TACC scripts for VCC and for the
 original methods, `CONTROLS_AND_LIMITATIONS.md`, a short English deck, `SUMMARY_zh.md`.
+
+## Post-hoc implementation note, 2026-11-17 (before any result was read)
+
+- Smoke test (rep 1, L0, 4 pairs): POT `sinkhorn_unbalanced(method="sinkhorn_stabilized")` did not converge on the C2
+  cost (final error 0.997, transported mass 0.12). POT `method="sinkhorn"` gives 0.6548, equal to ConfidenceOT's own
+  UOT backbone with an unreachable rejection cost (0.6548) on the same cost. The UOT solver is therefore POT
+  `method="sinkhorn"`; ε and λ are unchanged. Balanced solvers record their largest relative marginal error.
+- `check_against_02.py`: the direct ConfidenceOT call equals the production path (v3_common.fit -> 02_run_pair.py) on
+  three pairs: identical gates on both sides, coupling max |difference| about 1e-9 (float32 storage).
+- 2026-11-17, after the first S1/S2 run (its numbers are discarded, not reported): POT `method="sinkhorn"` (not log
+  domain) underflowed in S2 conflict f = 0.1 on C2 (transported mass about 0 for every group, while ConfidenceOT's own
+  log-domain UOT backbone on the same cost transports about 0.5-0.66). The UOT solver is replaced by the repository's
+  log-domain KL-UOT (`confidenceot._cpu_uot.solve_fixed_bidirectional_uot` with every cell open, threshold 1e-4), i.e.
+  exactly the ConfidenceOT backbone without the gate; ε, λ unchanged. S1 and S2 are rerun in full.
