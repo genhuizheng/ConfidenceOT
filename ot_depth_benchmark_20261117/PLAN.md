@@ -251,3 +251,18 @@ path (encoding, 2,000 top-variance genes, PCA with seed, unit rows, `mnncovlocal
 They run S1, S2 and S2b with every solver, outputs in `results/ot_depth_benchmark_20261117/splatter_best/`. Depth
 equalisation (DS) is not run: removed from the grid by the user on 2026-11-04. No configuration is selected from these
 results; C1 stays the main configuration.
+
+## Post-hoc additions, 2026-11-18 (user request after the C1-C4 comparison)
+
+**ConfidenceOT with a balanced backbone (`confidenceot_bot`).** The repository's `ConfidenceOT(backbone="balanced")`
+with `calibrate_confidence_cost(backbone="balanced")`: the same within-side split null, acceptance 0.99, ε 0.1, M4-E,
+the same calibration subsample and nulls (the generator state is copied, so both backbones see identical draws). The
+UOT version (`confidenceot`) is unchanged (checked: identical metrics on L1 rep 1, every case, C1 / C2). It is run on
+S1, S2 and S2b for C1-C4 (outputs `results/ot_depth_benchmark_20261117/splatter_cotbot/`). Its coupling carries all
+mass (rejected cells at the rejection cost), so it is read on the retained x retained block with its rejected
+fractions, as the UOT version.
+
+**Norman local sample.** Rule fixed before running: every 12th perturbation in sorted order (indices 0, 12, 24, ...;
+20 perturbations), control references A and B, plus the control-vs-control unit; cost families C1-C4 (C2 = the
+train-fitted evaluation space); every solver including both ConfidenceOT backbones. The full Norman and VCC runs go to
+TACC. Outputs `results/ot_depth_benchmark_20261117/norman/parts_local12/`.

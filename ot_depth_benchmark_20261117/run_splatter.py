@@ -87,7 +87,7 @@ def fit_one(job: dict) -> dict:
             idx = job["index"]
             X, Y, diag, cos = oc.coordinates(S, T, 20260925 + idx, cost)
             C, Xc, Yc, scale, rng = oc.cost_matrix(X, Y, cos, idx)
-            res = oc.solve_all(C, Xc, Yc, scale, rng, idx)
+            res = oc.solve_all(C, Xc, Yc, scale, rng, idx, solvers=tuple(job.get("solvers", oc.SOLVERS)))
             for solver, r in res.items():
                 key = {k: job[k] for k in job["keys"]} | {"cost": cost, "solver": solver}
                 if "error" in r:
@@ -121,7 +121,7 @@ def fit_one(job: dict) -> dict:
                         row["false_asserted_share"] = float((A * (gs[:, None] != gt[None, :])).sum() / A.sum())
                         row |= {f"asserted_{k}": v for k, v in oc.depth_metrics(A, sc_, tc_, sf_, tf_).items()}
                     for side, ids, g, cnt, fea, grp, msk in (("source", S.obs_names, sg, sc_, sf_, gs, rs), ("target", T.obs_names, tg, tc_, tf_, gt, rt)):
-                        gates.append(pd.DataFrame({**{k: job[k] for k in job["keys"]}, "cost": cost, "side": side, "cell": ids,
+                        gates.append(pd.DataFrame({**{k: job[k] for k in job["keys"]}, "cost": cost, "solver": solver, "side": side, "cell": ids,
                                                    "group": grp, "should_reject": msk, "rejected": ~g, "ncount": cnt, "nfeature": fea}))
                 rows.append(row)
                 M = pd.DataFrame(P, index=gs, columns=gt).groupby(level=0).sum().T.groupby(level=0).sum().T
@@ -175,6 +175,7 @@ def main():
     p.add_argument("--out", type=Path, default=OUT)
     p.add_argument("--levels", nargs="+", default=None)
     p.add_argument("--costs", nargs="+", default=["C1", "C2"], help="cost families (otdb_common: C1, C2, C3, C4)")
+    p.add_argument("--solvers", nargs="+", default=None, help="subset of otdb_common.SOLVERS (default all)")
     p.add_argument("--resumable", action="store_true", help="per-pair parts under <out>/parts_<stage>/ (TACC), merged by --collect")
     p.add_argument("--collect", action="store_true")
     p.add_argument("--shard", type=int, default=0)
@@ -185,7 +186,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     if a.collect:
         oc.collect_parts(OUT / f"parts_{a.stage}", OUT, "", a.stage); return
-    jobs = [j | {"costs": a.costs} for j in jobs_for(a.stage, a.replicates, not a.no_save_couplings, a.data_root, a.out, a.levels, a.conditions_subdir)]
+    jobs = [j | {"costs": a.costs, "solvers": a.solvers or list(oc.SOLVERS)} for j in jobs_for(a.stage, a.replicates, not a.no_save_couplings, a.data_root, a.out, a.levels, a.conditions_subdir)]
     if a.resumable:
         oc.run_resumable(jobs, fit_one, OUT / f"parts_{a.stage}", lambda j: j["fit_name"], a.jobs, a.shard, a.nshards)
         return

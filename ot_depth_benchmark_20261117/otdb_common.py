@@ -36,7 +36,7 @@ sys.path[:0] = [str(REPO / "realdata_benchmark"), str(REPO / "realdata_benchmark
 FIT_SEED = 20260925          # run_local_benchmark.FIT_ARGS --seed
 EPSILON, LAMBDA, ACCEPT, TOL = 0.1, 1.0, 0.99, 1e-4
 PARTIAL_MASS = 0.8
-SOLVERS = ("independent", "emd", "sinkhorn", "uot", "partial", "confidenceot")
+SOLVERS = ("independent", "emd", "sinkhorn", "uot", "partial", "confidenceot", "confidenceot_bot")
 
 
 # ----------------------------------------------------------------------------------------------------------- costs
@@ -122,7 +122,7 @@ def cost_matrix(X, Y, cosine: bool, index: int):
 
 
 # --------------------------------------------------------------------------------------------------------- solvers
-def confidenceot_fit(Xc, Yc, C, scale, rng, index: int, device: str = "cpu"):
+def confidenceot_fit(Xc, Yc, C, scale, rng, index: int, device: str = "cpu", backbone: str = "uot"):
     """02_run_pair.py lines 723-818 for M4-E with the within-side split null; Xc / Yc are the coordinates the cost was
     built from, rng the generator after the median scale."""
     from confidenceot import ConfidenceOT, calibrate_confidence_cost, within_side_null_costs
@@ -130,11 +130,11 @@ def confidenceot_fit(Xc, Yc, C, scale, rng, index: int, device: str = "cpu"):
     si = np.sort(rng.choice(len(Xc), limit, replace=False)); ti = np.sort(rng.choice(len(Yc), limit, replace=False))
     sn = within_side_null_costs(Xc[si], observed_scale=scale, seed=FIT_SEED + index, n_replicates=10)
     tn = within_side_null_costs(Yc[ti], observed_scale=scale, seed=FIT_SEED + index + 7, n_replicates=10)
-    cal = calibrate_confidence_cost(sn[:5] + tn[:5], sn[5:] + tn[5:], backbone="uot", epsilon=EPSILON, lambda_a=LAMBDA,
+    cal = calibrate_confidence_cost(sn[:5] + tn[:5], sn[5:] + tn[5:], backbone=backbone, epsilon=EPSILON, lambda_a=LAMBDA,
                                     lambda_b=LAMBDA, null_semantics="within_side_split", within_side_acceptance_minimum=ACCEPT,
                                     source_rejection_budget=0.95, target_rejection_budget=0.95, tolerance=TOL, grid_size=5,
                                     device=device, workers=1, fallback_to_cpu=False)
-    model = ConfidenceOT(backbone="uot", variant="exact", rejection_cost=float(cal.rejection_cost), epsilon=EPSILON,
+    model = ConfidenceOT(backbone=backbone, variant="exact", rejection_cost=float(cal.rejection_cost), epsilon=EPSILON,
                          lambda_a=LAMBDA, lambda_b=LAMBDA, source_rejection_budget=0.95, target_rejection_budget=0.95,
                          enforce_rejection_budget=False, tolerance=TOL, device=device)
     res = model.fit(C)
@@ -165,8 +165,11 @@ def solve_all(C, Xc=None, Yc=None, scale=None, rng=None, index: int = 0, solvers
                                                       lambda_a=LAMBDA, lambda_b=LAMBDA, threshold=TOL, max_iterations=100_000).coupling
                 elif s == "partial":
                     P = ot.partial.partial_wasserstein(a, b, C, m=PARTIAL_MASS)
-                elif s == "confidenceot":
-                    P, sg, tg, rc = confidenceot_fit(Xc, Yc, C, scale, rng, index, device)
+                elif s in ("confidenceot", "confidenceot_bot"):
+                    # the generator state is copied so both backbones draw the same calibration subsample and nulls
+                    import copy
+                    P, sg, tg, rc = confidenceot_fit(Xc, Yc, C, scale, copy.deepcopy(rng), index, device,
+                                                     backbone="balanced" if s == "confidenceot_bot" else "uot")
                     out[s] = {"coupling": P, "source_gate": sg, "target_gate": tg, "rejection_cost": rc}
                     continue
             P = np.asarray(P, np.float64)

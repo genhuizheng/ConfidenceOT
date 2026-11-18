@@ -223,13 +223,13 @@ def fit_unit(job: dict) -> dict:
                       "random_target": np.asarray(L_t[:, de].mean(0)).ravel() - np.asarray(L_s[:, de].mean(0)).ravel()}[name]
             r["heldout_de_corr"] = float(np.corrcoef(pshift, obs_shift)[0, 1]) if pshift.std() > 0 else np.nan
             rows.append(r)
-        for cost in ("C1", "C2"):
-            if cost == "C1":
-                Xc0, Yc0, diag = oc.c1_coordinates(S, T, SEED)
+        for cost in job.get("costs", ("C1", "C2")):
+            if cost == "C2":   # C2 = the evaluation space (scanpy-default path fitted on the train cells)
+                Xc0, Yc0, diag, cos = Es, Et, {}, False
             else:
-                Xc0, Yc0, diag = Es, Et, {}
-            C, Xc, Yc, scale, crng = oc.cost_matrix(Xc0, Yc0, cost == "C1", 0)
-            res = oc.solve_all(C, Xc, Yc, scale, crng, 0, device=job.get("device", "cpu"))
+                Xc0, Yc0, diag, cos = oc.coordinates(S, T, SEED, cost)
+            C, Xc, Yc, scale, crng = oc.cost_matrix(Xc0, Yc0, cos, 0)
+            res = oc.solve_all(C, Xc, Yc, scale, crng, 0, solvers=tuple(job.get("solvers", oc.SOLVERS)), device=job.get("device", "cpu"))
             for solver, r_ in res.items():
                 key = base | {"cost": cost, "solver": solver, "mnncov_weight": diag.get("mnncred_weight", np.nan)}
                 if "error" in r_:
@@ -270,7 +270,7 @@ def fit_unit(job: dict) -> dict:
                         if 0 < rej.sum() < len(rej):
                             row[f"rejection_depth_corr_{side}"] = float(spearmanr(lc, rej).statistic)
                             row[f"rejection_score_corr_{side}"] = float(spearmanr(sc_, rej).statistic)
-                    gates.append(pd.DataFrame({"unit": job["unit"], "control_ref": ref, "cost": cost, "side": ["source"] * n + ["target"] * m,
+                    gates.append(pd.DataFrame({"unit": job["unit"], "control_ref": ref, "cost": cost, "solver": solver, "side": ["source"] * n + ["target"] * m,
                                                "cell_index": np.concatenate([s_tr, t_tr]), "rejected": np.concatenate([~sg, ~tg_]),
                                                "score": np.concatenate([Es @ u, score_t]), "log10_ncount": np.concatenate([lcs, lct])}))
                 rows.append(row)
@@ -285,6 +285,9 @@ def main():
     p.add_argument("--stage", choices=("prepare", "fit", "collect"), required=True)
     p.add_argument("--shard", type=int, default=0, help="this job's shard (units with index mod --nshards == shard)")
     p.add_argument("--nshards", type=int, default=1)
+    p.add_argument("--costs", nargs="+", default=["C1", "C2", "C3", "C4"])
+    p.add_argument("--solvers", nargs="+", default=None)
+    p.add_argument("--every", type=int, default=0, help="local sample: every k-th perturbation in sorted order (+ the negative control)")
     p.add_argument("--h5ad", default=None)
     p.add_argument("--out", default=None)
     p.add_argument("--units", nargs="*", default=None)
@@ -303,8 +306,12 @@ def main():
     units = pd.read_csv(out / "UNITS.tsv", sep="\t")
     if a.units:
         units = units[units.unit.isin(a.units)]
-    jobs = [{"out": str(out), "unit": r.unit, "control_ref": r.control_ref, "kind": r.kind, "target_sep": cfg["target_sep"]}
-            for r in units.itertuples()]
+    if a.every:
+        perts = sorted(units[units.kind == "perturbation"].unit.unique())[:: a.every]
+        units = units[units.unit.isin(perts) | (units.kind == "negative_control")]
+        print(f"local sample: every {a.every}th perturbation -> {len(perts)} perturbations", flush=True)
+    jobs = [{"out": str(out), "unit": r.unit, "control_ref": r.control_ref, "kind": r.kind, "target_sep": cfg["target_sep"],
+             "costs": a.costs, "solvers": a.solvers or list(oc.SOLVERS)} for r in units.itertuples()]
     oc.run_resumable(jobs, fit_unit, parts, lambda j: f"{j['unit']}__{j['control_ref']}", a.jobs, a.shard, a.nshards)
     print(f"-> {parts}; merge with --stage collect")
 
