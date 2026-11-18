@@ -266,3 +266,42 @@ fractions, as the UOT version.
 20 perturbations), control references A and B, plus the control-vs-control unit; cost families C1-C4 (C2 = the
 train-fitted evaluation space); every solver including both ConfidenceOT backbones. The full Norman and VCC runs go to
 TACC. Outputs `results/ot_depth_benchmark_20261117/norman/parts_local12/`.
+
+## External OT methods on the v3 Splatter units, fixed 2026-11-18 before any run (user request)
+
+User decisions (2026-11-18): Splatter only; ConfidenceOT with the UOT backbone (v3 grid, complete on TACC: 2,220 rows,
+17,760 configurations, couplings kept) and with the balanced backbone (v3 grid rerun with `V3_BACKBONE=balanced`, root
+`v3_grid_bot_20261118`, jobs 1152224-1152227); external OT methods each with its own authors' preprocessing
+(`METHOD_PREPROCESSING.md`), never the v3 grid's.
+
+**Units.** The 60 v3 Splatter N = 5,000 units (L1-L5 x 4 pairs x replicates 1-3, paired splatter_default root). Local
+tests use the N = 200 root (L1 rep 1, every case).
+
+**Tier 1 methods and settings** (exact calls in METHOD_PREPROCESSING.md section E):
+
+| Arm | Package | Preprocessing (authors') | Settings | Output |
+|---|---|---|---|---|
+| `wot` | wot 1.0.8.post2 | thin cells above 15,000 UMI to 15,000; CP10k; log1p; seurat HVG (min_disp 1); local PCA 30 | ε 0.05, λ1 1, λ2 50, growth_iters 3, uniform growth | coupling + row growth |
+| `moscot_bal` | moscot 0.4.3 SinkhornProblem | CP10k, log1p, PCA 50 | ε 1e-3, τ 1, scale_cost mean | coupling |
+| `moscot_unbal` | same | same | ε 1e-2, τa = τb = 0.95 (tutorial 700) | coupling + row / column mass |
+| `moscot_temporal` | moscot TemporalProblem, 2 time points | CP10k, log1p, local PCA 30 (joint_attr None) | ε 1e-3, τ 1, uniform marginals | coupling |
+| `cinemaot_tutorial` | cinemaot 0.0.5 | normalize_total, log1p, HVG (0.0125 / 3 / 0.5), scale, PCA 50 | dim 20, thres 0.5, smoothness 1e-5 | matching |
+| `cinemaot_default` | same | same | thres 0.15, smoothness 1e-4 | matching |
+| `cinemaotw` | same, weighted | same | thres 0.75, smoothness 1e-4, k 10, resolution 1 | matching + dropped cells |
+| `otcfm` / `sbcfm` | torchcfm 1.0.7 | normalize_total, sqrt, PCA 5, whitened | σ 0.1 exact OT / σ 1.0 SB; MLP 3x64; AdamW 1e-3, wd 1e-5; batch 128 | map |
+| `cellot` | bunnech/cellot | train-only top-1k HVG of log1p CP10k; scGen latent 50 | scgen.yaml 250k + cellot.yaml 100k iterations; its own 80/20 split | map |
+
+Where a package's linear-domain Sinkhorn underflows (as CINEMA-OT 0.0.5 did on Norman), the same objective is solved in
+the log domain and the substitution is recorded per row; nothing else about a method is changed.
+
+**Scoring** (truth = Splatter groups and should_reject; nothing is tuned):
+- couplings: correct-group share, coupling-depth correlation (log nCount, log nFeature), within-group correlation,
+  transported share of unmatched vs shared populations, and a threshold-free unmatched signal: AUROC of (1 - row or
+  column mass relative to the marginal) for should_reject cells, per side, where the method's marginals can deviate;
+- maps: each source cell's mapped point read by its nearest target cell in the method's own space: same-group share and
+  log nCount correlation; baselines no transport and mean shift (as S3);
+- ConfidenceOT (UOT / balanced backbone): the v3 grid's own readout (Rejection F1, Case 1 FRR, Case 3) plus the same
+  coupling metrics from its saved couplings.
+
+**Tier 2** (uniPort, Pamona, SCOT v2, GENOT, CellFlow) run only if their environments install; any deviation (e.g.
+CellFlow iterations) is recorded before running.
