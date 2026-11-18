@@ -121,7 +121,12 @@ def larry_invivo(d: Path, W: Writer):
     with gzip.open(f"{pre}normed_counts.mtx.gz", "rt") as fh:
         X = read_mtx(fh)
     print("counts", X.shape, X.nnz, "clones", clones.shape, "metadata", meta.shape, flush=True)
+    if clones.shape[0] != X.shape[0] and clones.shape[1] == X.shape[0]:
+        clones = clones.T.tocsr()  # the in vivo clone matrix ships as clones x cells
     assert X.shape[0] == len(meta) == clones.shape[0]
+    per_cell = np.diff((clones > 0).astype(np.int8).tocsr().indptr)
+    print("clones per cell:", pd.Series(per_cell).value_counts().sort_index().to_dict(), flush=True)
+    assert per_cell.max() <= 1, "a cell carries more than one clone"
     X.sort_indices()
     mins = np.array([X.data[X.indptr[i]:X.indptr[i + 1]].min() if X.indptr[i + 1] > X.indptr[i] else np.nan for i in range(X.shape[0])])
     R = X.data.astype(np.float64) * np.repeat(1 / mins, np.diff(X.indptr))
@@ -268,7 +273,7 @@ def pancreas(d: Path, W: Writer):
             pos = raw_key.get_indexer(pd.Index(want).str.rsplit("-", n=1).str[0])
             rep.append({"day": day, "obs_cells": len(want), "raw_barcodes": len(bc), "matched": int((pos >= 0).sum())})
             assert (pos >= 0).all(), f"E{day}: {(pos < 0).sum()} h5ad cells not in the raw barcodes"
-            parts.append(ad.AnnData(X[pos], obs=ho.loc[want], var=pd.DataFrame(index=ad.utils.make_index_unique(pd.Index(g[1].astype(str))))))
+            parts.append(ad.AnnData(X[pos], obs=ho.loc[want], var=pd.DataFrame(index=ad.utils.make_index_unique(pd.Index(g[1].astype(str).to_numpy(), name=None)))))
     pd.DataFrame(rep).to_csv(W.root / "prep" / "barcode_match.tsv", sep="\t", index=False); print(rep, flush=True)
     A = ad.concat(parts); A.var_names = parts[0].var_names
     tot = np.asarray(A.X.sum(1)).ravel()
