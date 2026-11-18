@@ -199,3 +199,12 @@ original methods, `CONTROLS_AND_LIMITATIONS.md`, a short English deck, `SUMMARY_
   log-domain UOT backbone on the same cost transports about 0.5-0.66). The UOT solver is replaced by the repository's
   log-domain KL-UOT (`confidenceot._cpu_uot.solve_fixed_bidirectional_uot` with every cell open, threshold 1e-4), i.e.
   exactly the ConfidenceOT backbone without the gate; ε, λ unchanged. S1 and S2 are rerun in full.
+- 2026-11-18, comparison B implementation (smoke tests only, no result read):
+  - CINEMA-OT 0.0.5 `cinemaot_unweighted` with package defaults returns NaN on Norman: its linear-domain Sinkhorn-Knopp
+    scales exp(-d² / e) with e = 1e-4 x 11 confounder components, which underflows. The confounder step is kept
+    exactly (FastICA, random_state 0, Chatterjee xi < 0.15); the same matching objective (entropic OT, cost d²,
+    regularisation e, uniform marginals) is solved with POT `sinkhorn_log`.
+  - CellOT runs through the authors' `scripts/train.py` with `configs/models/scgen.yaml` (250k iterations) then
+    `cellot.yaml` (100k, on the scGen latent); its loader requires a `datasplit`, so CellOT uses its own split
+    (`train_test`, grouped by condition, test 0.2, random_state 0), recomputed with its `split_cell_data` for
+    evaluation. Python 3.10 compatibility needs only a `collections` alias shim (`cellot_shim/`), no CellOT code change.
