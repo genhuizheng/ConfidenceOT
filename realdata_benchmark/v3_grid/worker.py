@@ -183,7 +183,7 @@ def run_row(row: pd.Series, inputs: Inputs, args: list[str], out: Path, work: Pa
     t0 = time.perf_counter()
     for cid, X, Y, cos, diag in v3.representations(spec, v["S"], v["T"], v["seed"]):
         d = out / cid.replace("|", "__")
-        if (d / "DONE").exists():
+        if (d / "DONE").exists() or (ONLY and cid not in ONLY):
             continue
         started = time.perf_counter()
         code, log, run = v3.fit(X, Y, cos, obs, v["manifest"], v["index"], args, work)
@@ -229,6 +229,7 @@ def max_large(a) -> int:
 
 
 _FINISHED: set[str] = set()
+ONLY: set[str] | None = None  # --configs
 
 
 def claim(out: Path, owner: str) -> bool:
@@ -277,7 +278,11 @@ def main() -> None:
     p.add_argument("--large-size", type=float, default=2e7, help="source x target cells above which a row takes a large slot")
     p.add_argument("--retry-failed", action="store_true")
     p.add_argument("--max-rows", type=int, default=0, help="stop after this many rows (0: until none is left)")
+    p.add_argument("--configs", nargs="*", default=None,
+                   help="fit only these configuration ids of each row's key (pilots; selection only, fits unchanged)")
     a = p.parse_args()
+    global ONLY
+    ONLY = set(a.configs) if a.configs else None
     work = pd.read_csv(a.worklist, sep="\t", dtype={"mouse": str, "pair_id": str})
     inputs = Inputs(); args = {}
     owner = f"{socket.gethostname()} pid {os.getpid()} job {os.environ.get('SLURM_JOB_ID', '-')}"
