@@ -18,6 +18,7 @@ from matplotlib.patches import Ellipse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import figstyle as fs  # noqa: E402
+import glyphs as g  # noqa: E402
 
 OUT = fs.OUT / "Figure1"
 EX = OUT / "data" / "example"
@@ -30,118 +31,120 @@ def cloud(ax, cx, cy, n, sx, sy, color, rng, s=5, marker="o"):
     return x, y
 
 
+# ------------------------------------------------------------------ schematic axes in inches
+def sax(sh, x, y, w, h):
+    ax = sh.ax(x, y, w, h); ax.set_xlim(0, w); ax.set_ylim(0, h); fs.blank(ax)
+    return ax
+
+
 # ------------------------------------------------------------------ a
 def panel_a(sh):
-    sh.panel("a", 0.0, 3.50, 2.55, 5.40, "Why do we need rejection?")
-    ax = sh.ax(0.08, 3.62, 2.42, 1.48); ax.set_xlim(0, 10); ax.set_ylim(0, 6.2); fs.blank(ax)
-    fs.schematic_tag(ax, 1.0, 0.13)
-    rng = np.random.default_rng(4)
-    for cx, lab, col in ((2.1, "Source", fs.SRC), (7.9, "Target", fs.TGT)):
-        ax.add_patch(Ellipse((cx, 3.35), 3.9, 4.6, fc="none", ec=col, lw=0.8))
-        ax.text(cx, 5.85, lab, color=col, ha="center", fontsize=fs.FS_TITLE)
-    # source: A, B shared; C source-only. target: A, B shared; D target-only
-    cloud(ax, 1.55, 4.75, 20, 0.33, 0.25, POPC["A"], rng); cloud(ax, 1.55, 2.05, 20, 0.33, 0.25, POPC["B"], rng)
-    cloud(ax, 3.05, 3.5, 14, 0.25, 0.25, POPC["C"], rng)
-    cloud(ax, 8.45, 4.75, 20, 0.33, 0.25, POPC["A"], rng); cloud(ax, 8.45, 2.05, 20, 0.33, 0.25, POPC["B"], rng)
-    cloud(ax, 6.95, 3.5, 14, 0.25, 0.25, POPC["D"], rng)
-    for y in (4.75, 2.05):
-        fs.arrow(ax, 2.25, y, 7.75, y, color=fs.RETAIN, lw=0.8, ms=5)
-    ax.text(5.0, 4.9, "shared: match", ha="center", va="bottom", fontsize=fs.FS_SMALL, color=fs.RETAIN)
-    ax.text(3.05, 3.0, "source-\nonly", ha="center", va="top", fontsize=fs.FS_SMALL, color=fs.INK, linespacing=1.0)
-    ax.text(6.95, 3.0, "target-\nonly", ha="center", va="top", fontsize=fs.FS_SMALL, color=fs.INK, linespacing=1.0)
-    ax.text(5.0, 3.5, "no counterpart:\nreject", ha="center", va="center", fontsize=fs.FS_SMALL, color=fs.REJECT, linespacing=1.05)
-    ax.text(5.0, 0.05, "A population can be lost, gained or changed between two samples", ha="center", va="bottom",
-            fontsize=fs.FS_SMALL, color=fs.SUBTLE)
+    sh.panel("a", 0.0, 3.50, 3.30, 5.40, "Why do we need rejection?")
+    ax = sax(sh, 0.05, 3.55, 3.22, 1.58)
+    for x0, lab, col in ((0.05, "Source sample", fs.SRC), (2.02, "Target sample", fs.TGT)):
+        g.frame(ax, x0, 0.22, 1.15, 1.18, color=col, lw=0.7)
+        g.label(ax, x0 + 0.575, 1.48, lab, color=col, size=fs.FS_ANNOT)
+    rows = [(1.12, "A", fs.POP[0]), (0.78, "B", fs.POP[1]), (0.42, None, None)]
+    for y, name, col in rows[:2]:
+        g.cell_cluster(ax, 0.42, y, col, n=4, r=0.055, spread=0.11, seed=int(y * 10))
+        g.cell_cluster(ax, 2.39, y, col, n=4, r=0.055, spread=0.11, seed=int(y * 10) + 1)
+        g.label(ax, 0.72, y, f"population {name}", color=col, ha="left")
+        g.label(ax, 2.69, y, f"population {name}", color=col, ha="left")
+        g.arrow(ax, 1.22, y, 1.98, y, color=fs.RETAIN, lw=0.8)
+    g.label(ax, 1.60, 1.25, "shared: match", color=fs.RETAIN)
+    g.cell_cluster(ax, 0.42, 0.42, fs.POP[2], n=4, r=0.055, spread=0.11, seed=7)
+    g.label(ax, 0.72, 0.42, "source-only", color=fs.POP[2], ha="left")
+    g.cell_cluster(ax, 2.39, 0.42, fs.POP[3], n=4, r=0.055, spread=0.11, seed=8)
+    g.label(ax, 2.69, 0.42, "target-only", color=fs.POP[3], ha="left")
+    for x in (1.30, 1.90):
+        ax.scatter(x, 0.42, marker="x", s=16, color=fs.REJECT, lw=1.0, zorder=5)
+    g.label(ax, 1.60, 0.56, "no counterpart:", color=fs.REJECT)
+    g.label(ax, 1.60, 0.42, "reject", color=fs.REJECT)
+    g.label(ax, 1.61, 0.06, "a population can be lost, gained or changed between two samples", color=fs.SUBTLE)
+    fs.schematic_tag(ax, 1.0, 1.06)
 
 
 # ------------------------------------------------------------------ b
-def mini_plan(ax, kind):
-    ax.set_xlim(0, 10); ax.set_ylim(-1.6, 10); fs.blank(ax)
-    ys = {"A": [8.6, 7.8, 7.0], "B": [5.4, 4.6, 3.8], "C": [2.2, 1.4], "D": [2.2, 1.4]}
-    src = [("A", y) for y in ys["A"]] + [("B", y) for y in ys["B"]] + [("C", y) for y in ys["C"]]
-    tgt = [("A", y) for y in ys["A"]] + [("B", y) for y in ys["B"]] + [("D", y) for y in ys["D"]]
-    xs, xt = 1.6, 8.4
-
-    def line(y0, y1, w, col, ls="-"):
-        ax.plot([xs, xt], [y0, y1], color=col, lw=w, ls=ls, solid_capstyle="round", zorder=1)
-    for (g, y) in src:
-        if g in ("A", "B"):
-            for (h, y1) in tgt:
-                if h == g and abs(y1 - y) < 0.1:
-                    w = {"balanced": 1.1, "uot": 0.75, "cot": 0.9}[kind]
-                    line(y, y1, w, fs.RETAIN)
-        else:  # source-only C
-            if kind == "balanced":
-                line(y, 2.2 if y > 2 else 1.4, 1.1, fs.REJECT); line(y, 4.6, 0.6, fs.REJECT)
-            elif kind == "uot":
-                line(y, 1.8, 0.45, fs.REJECT); line(y, 4.6, 0.3, fs.REJECT)
-    if kind == "balanced":  # target-only D must receive mass
-        line(5.4, 2.2, 0.5, fs.REJECT); line(3.8, 1.4, 0.5, fs.REJECT)
-    if kind == "uot":
-        line(3.8, 1.4, 0.3, fs.REJECT)
-    for (g, y) in src:
-        rej = kind == "cot" and g == "C"
-        ax.scatter(xs, y, s=13, color=POPC[g], zorder=3, edgecolor="white", lw=0.3)
-        if rej:
-            ax.scatter(xs - 0.75, y, s=14, marker="x", color=fs.REJECT, lw=0.9, zorder=4)
-    for (g, y) in tgt:
-        rej = kind == "cot" and g == "D"
-        ax.scatter(xt, y, s=13, color=POPC[g], zorder=3, edgecolor="white", lw=0.3)
-        if rej:
-            ax.scatter(xt + 0.75, y, s=14, marker="x", color=fs.REJECT, lw=0.9, zorder=4)
-    ax.text(xs, 9.6, "S", color=fs.SRC, ha="center", fontsize=fs.FS_ANNOT)
-    ax.text(xt, 9.6, "T", color=fs.TGT, ha="center", fontsize=fs.FS_ANNOT)
-
-
 def panel_b(sh):
-    sh.panel("b", 2.60, 3.50, 7.20, 5.40, "Standard OT vs ConfidenceOT")
-    titles = [("balanced", "Balanced OT", "every cell sends and\nreceives all of its mass"),
-              ("uot", "Unbalanced OT (UOT)", "mass can shrink, but no cell\nis declared unmatched"),
-              ("cot", "ConfidenceOT", "UOT backbone + a keep / reject\ndecision for every cell")]
-    for i, (k, t, sub) in enumerate(titles):
-        x = 2.78 + i * 1.47
-        ax = sh.ax(x, 3.98, 1.25, 1.02); mini_plan(ax, k)
-        col = fs.METHOD["ConfidenceOT"] if k == "cot" else (fs.METHOD["UOT"] if k == "uot" else fs.INK)
-        sh.text(x + 0.625, 5.08, t, ha="center", va="bottom", fontsize=fs.FS_ANNOT + 0.4, color=col)
-        sh.text(x + 0.625, 3.92, sub, ha="center", va="top", fontsize=fs.FS_SMALL, color=fs.INK, linespacing=1.1)
-    axt = sh.ax(6.9, 5.12, 0.28, 0.2); fs.blank(axt); fs.schematic_tag(axt, 1.0, 1.0)
-    lg = sh.ax(2.78, 3.53, 4.3, 0.12); fs.blank(lg); lg.set_xlim(0, 1); lg.set_ylim(0, 1)
-    lg.plot([0.00, 0.04], [0.5, 0.5], color=fs.RETAIN, lw=1.1); lg.text(0.05, 0.5, "correct match", fontsize=fs.FS_SMALL, va="center")
-    lg.plot([0.25, 0.29], [0.5, 0.5], color=fs.REJECT, lw=1.1); lg.text(0.30, 0.5, "forced / wrong match", fontsize=fs.FS_SMALL, va="center")
-    lg.scatter([0.56], [0.5], marker="x", s=12, color=fs.REJECT, lw=0.9); lg.text(0.58, 0.5, "rejected (no counterpart)", fontsize=fs.FS_SMALL, va="center")
-    lg.text(0.86, 0.5, "line width = mass", fontsize=fs.FS_SMALL, va="center", color=fs.SUBTLE)
+    sh.panel("b", 3.35, 3.50, 7.20, 5.40, "Standard OT vs ConfidenceOT (same toy problem)")
+    ax = sax(sh, 3.38, 3.55, 3.80, 1.58)
+    rows = [(1.24, "Balanced OT", fs.METHOD["Balanced OT"], "balanced", "every cell sends and receives all its mass",
+             "cells without a counterpart are forced into matches"),
+            (0.76, "Unbalanced OT", fs.METHOD["UOT"], "uot", "less mass can be moved",
+             "but no cell is declared unmatched"),
+            (0.28, "ConfidenceOT", fs.METHOD["ConfidenceOT"], "cot", "UOT backbone + keep / reject per cell",
+             "unmatched cells are rejected (x)")]
+    for i, (y, name, col, kind, l1, l2) in enumerate(rows):
+        g.pill(ax, 0.0, y - 0.10, 0.92, 0.20, name, col, alpha=0.22 if kind == "balanced" else 0.16,
+               tc=fs.INK if kind == "balanced" else col)
+        g.arrow(ax, 0.96, y, 1.08, y)
+        g.coupling_icon(ax, 1.36, y, 0.21, kind=kind)
+        g.arrow(ax, 1.68, y, 1.80, y)
+        g.label(ax, 1.86, y + 0.07, l1, color=col if kind != "balanced" else fs.INK, ha="left")
+        g.label(ax, 1.86, y - 0.08, l2, color=fs.SUBTLE, ha="left")
+        g.ref(ax, 3.80, y, "Fig. 2d")
+        if i < 2:
+            g.rule(ax, 0.0, 3.80, y - 0.24)
+    ax.annotate("", xy=(0.46, 0.41), xytext=(0.46, 0.63), arrowprops=dict(arrowstyle="-|>", color=fs.REJECT, lw=0.6, mutation_scale=5))
+    g.label(ax, 0.52, 0.52, "+ gate", color=fs.REJECT, ha="left")
+    # legend
+    y = 0.01
+    ax.plot([0.0, 0.14], [y, y], color=fs.RETAIN, lw=1.0); g.label(ax, 0.17, y, "correct match", ha="left")
+    ax.plot([0.85, 0.99], [y, y], color=fs.REJECT, lw=1.0); g.label(ax, 1.02, y, "forced match", ha="left")
+    ax.scatter([1.72], [y], marker="x", s=10, color=fs.REJECT, lw=0.8); g.label(ax, 1.78, y, "rejected", ha="left")
+    g.label(ax, 2.35, y, "line width = transported mass", ha="left", color=fs.SUBTLE)
+    fs.schematic_tag(ax, 1.0, 1.06)
 
 
 # ------------------------------------------------------------------ c
 def panel_c(sh):
-    sh.panel("c", 0.0, 2.18, 7.20, 3.45, "ConfidenceOT workflow (as run for every result in this report)")
-    ax = sh.ax(0.05, 2.22, 7.10, 0.98); ax.set_xlim(0, 71); ax.set_ylim(0, 10); fs.blank(ax)
-    fs.schematic_tag(ax, 1.0, 1.06)
-    steps = [
-        ("Count matrices", "source and target\n(integer counts)"),
-        ("Rank encoding", "per cell: top 256 genes,\nvalue 1 - rank/256"),
-        ("Representation", "2,000 top-variance genes,\ngene scaling, PCA 50"),
-        ("Local correction", "shift target only where\ncredible anchors exist"),
-        ("Cost matrix", "cosine distance,\n/ median pair cost"),
-        ("UOT + gate", "coupling and keep / reject\nfitted together (M4-E)"),
-        ("Output", "retained cells + coupling;\nrejected cells listed"),
-    ]
-    w, gap = 8.85, 1.50
-    for i, (head, body) in enumerate(steps):
-        x = 0.3 + i * (w + gap)
-        hl = head in ("UOT + gate",)
-        fs.box(ax, x, 3.2, w, 5.6, "", fc="#FBEDEB" if hl else fs.PALE, ec=fs.REJECT if hl else fs.NEUTRAL, lw=0.7)
-        ax.text(x + w / 2, 7.55, head, ha="center", va="center", fontsize=fs.FS_ANNOT + 0.3,
-                color=fs.REJECT if hl else fs.INK)
-        ax.text(x + w / 2, 5.0, body, ha="center", va="center", fontsize=fs.FS_SMALL, color=fs.INK, linespacing=1.12)
-        if i < len(steps) - 1:
-            fs.arrow(ax, x + w + 0.15, 6.0, x + w + gap - 0.15, 6.0, color=fs.INK, lw=0.7, ms=5)
-    xg = 0.3 + 5 * (w + gap)
-    fs.box(ax, xg - 3.2, -0.6, w + 6.4, 2.9, "rejection cost: keeps 99% of cells of a\nwithin-sample split null (no labels)",
-           fc="white", ec=fs.RETAIN, tc=fs.RETAIN, fs=fs.FS_SMALL, lw=0.6, linespacing=1.05)
-    fs.arrow(ax, xg + w / 2, 2.35, xg + w / 2, 3.15, color=fs.RETAIN, lw=0.7, ms=5)
-    ax.text(0.3, 0.8, "Fixed everywhere: ranknm256-midrank|none|scale|cos|pca50; calibration v3; acceptance 0.99; "
-            "epsilon 0.1, lambda 1", fontsize=fs.FS_SMALL, color=fs.SUBTLE, va="center")
+    sh.panel("c", 0.0, 2.18, 7.20, 3.45, "ConfidenceOT workflow (the code path behind every result in this report)")
+    ax = sax(sh, 0.05, 2.20, 7.12, 1.00)
+    xs = np.linspace(0.42, 6.66, 7)
+    yi, yl, ys = 0.64, 0.36, 0.30
+    s = 0.18
+    # 1 counts
+    g.matrix_icon(ax, xs[0] - 0.09, yi + 0.04, 0.12, fs.SRC, rows=4, cols=5, seed=1)
+    g.matrix_icon(ax, xs[0] + 0.09, yi - 0.04, 0.12, fs.TGT, rows=4, cols=5, seed=2)
+    # 2 rank
+    g.rank_icon(ax, xs[1], yi, s, fs.SRC)
+    # 3 PCA
+    g.scatter_icon(ax, xs[2], yi, s, [fs.POP[0], fs.POP[1], fs.POP[2]])
+    # 4 correction: target cloud shifted onto source
+    rng = np.random.default_rng(5)
+    ax.scatter(xs[3] - 0.06 + rng.normal(0, 0.03, 10), yi + rng.normal(0, 0.03, 10), s=2, color=fs.SRC, lw=0, zorder=4)
+    ax.scatter(xs[3] + 0.10 + rng.normal(0, 0.03, 10), yi - 0.07 + rng.normal(0, 0.03, 10), s=2, color=fs.TGT, lw=0, zorder=4)
+    g.arrow(ax, xs[3] + 0.08, yi - 0.07, xs[3] - 0.02, yi - 0.01, color=fs.TGT, lw=0.6, ms=4)
+    ax.plot([xs[3] - s, xs[3] - s, xs[3] + s], [yi + s, yi - s, yi - s], color=fs.INK, lw=0.45)
+    # 5 cost
+    g.heat_icon(ax, xs[4], yi, 0.16, fs.SUBTLE, n=4, diag=True)
+    # 6 UOT + gate
+    g.coupling_icon(ax, xs[5], yi, 0.19, kind="cot")
+    # 7 output
+    for k, (dy, c) in enumerate(((0.10, fs.POP[0]), (0.0, fs.POP[1]))):
+        g.cell(ax, xs[6] - 0.10, yi + dy, 0.035, c, nucleus=False); g.cell(ax, xs[6] + 0.10, yi + dy, 0.035, c, nucleus=False)
+        ax.plot([xs[6] - 0.065, xs[6] + 0.065], [yi + dy] * 2, color=fs.RETAIN, lw=0.9)
+    g.cell(ax, xs[6] - 0.10, yi - 0.11, 0.035, fs.POP[2], nucleus=False)
+    ax.scatter(xs[6] + 0.0, yi - 0.11, marker="x", s=9, color=fs.REJECT, lw=0.8)
+    steps = [("Count matrices", "source and target,\ninteger counts"),
+             ("Rank encoding", "each cell: top 256 genes,\nvalue 1 - rank / 256"),
+             ("Representation", "2,000 top-variance genes,\nscaled, PCA 50"),
+             ("Local correction", "target moved only where\ncredible anchors exist"),
+             ("Cost matrix", "cosine distance,\n/ median pair cost"),
+             ("UOT + keep / reject", "fitted together\n(M4-E gate)"),
+             ("Output", "retained matches +\nlist of rejected cells")]
+    for i, (h, b) in enumerate(steps):
+        if i == 5:
+            g.pill(ax, xs[i] - 0.48, yl - 0.08, 0.96, 0.16, h, fs.REJECT, fs_=fs.FS_ANNOT)
+        else:
+            g.label(ax, xs[i], yl, h, color=fs.INK, size=fs.FS_ANNOT)
+        g.label(ax, xs[i], ys - 0.05, b, color=fs.SUBTLE, va="top")
+        if i < 6:
+            g.arrow(ax, xs[i] + 0.27, yi, xs[i + 1] - 0.27, yi)
+    g.pill(ax, xs[5] - 0.75, 0.90, 1.50, 0.12, "rejection cost: keeps 99% of a within-sample split null", fs.RETAIN,
+           fs_=fs.FS_SMALL)
+    g.arrow(ax, xs[5], 0.895, xs[5], yi + 0.215, color=fs.RETAIN)
+    g.label(ax, 0.02, 0.96, "same fixed configuration for every data set (Fig. 2c)", color=fs.SUBTLE, ha="left")
 
 
 # ------------------------------------------------------------------ d (real data)
@@ -150,6 +153,17 @@ def panel_d(sh):
     cells = pd.read_csv(EX / "cells.tsv", sep="\t")
     gm = pd.read_csv(EX / "group_mass.tsv", sep="\t")
     meta = json.loads((EX / "meta.json").read_text())
+    emb = EX / "umap_local.tsv"
+    if not emb.exists():  # display embedding computed here from the 30 PCs written on TACC
+        import umap
+        Z = cells[[f"pc{k + 1}" for k in range(30)]].to_numpy()
+        E = umap.UMAP(n_neighbors=30, min_dist=0.3, random_state=0).fit_transform(Z)
+        pd.DataFrame({"side": cells.side, "observation_id": cells.observation_id, "umap1": E[:, 0], "umap2": E[:, 1]}).to_csv(
+            emb, sep="\t", index=False)
+    e = pd.read_csv(emb, sep="\t")
+    assert (e.observation_id.astype(str).to_numpy() == cells.observation_id.astype(str).to_numpy()).all()
+    cells["umap1"], cells["umap2"] = e.umap1.to_numpy(), e.umap2.to_numpy()
+    meta["embedding"] = "UMAP (umap-learn 0.5.6, 30 neighbours, min_dist 0.3, seed 0) of PCA 30"
     cells["rejected"] = cells.rejected.astype(str).str.lower().isin(["true", "1"])
     cells["should_reject"] = cells.should_reject.astype(str).str.lower().isin(["true", "1"])
     groups = sorted(cells.group.unique())

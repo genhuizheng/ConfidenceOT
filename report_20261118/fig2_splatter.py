@@ -18,6 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import figstyle as fs  # noqa: E402
+import glyphs as g  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 GRID = REPO / "results/v3_grid_20261104/splatter"
@@ -102,35 +103,64 @@ def load():
 def panel_a(sh):
     x0, y0, x1, y1 = 0.0, 3.62, 3.05, 5.40
     sh.panel("a", x0, y0, x1, y1, "Benchmark design (Splatter, known truth)")
-    ax = sh.ax(0.10, 3.98, 1.80, 1.12); ax.set_xlim(0, 10); ax.set_ylim(0, 10); fs.blank(ax)
-    cases = [("Case 1\nall shared", [1, 2, 3, 4, 5], [1, 2, 3, 4, 5]),
-             ("Case 2\npopulation lost", [1, 2, 3, 4, 5], [1, 2, 3, 4]),
-             ("Case 2\npopulation emerged", [1, 2, 3, 4], [1, 2, 3, 4, 5]),
-             ("Case 3\nnone shared", [1, 2], [3, 4, 5])]
-    ax.text(5.35, 10.6, "Source", color=fs.SRC, ha="center", fontsize=fs.FS_ANNOT, va="bottom")
-    ax.text(8.45, 10.6, "Target", color=fs.TGT, ha="center", fontsize=fs.FS_ANNOT, va="bottom")
-    for i, (name, s, t) in enumerate(cases):
-        yy = 9.0 - i * 2.75
-        ax.text(0.0, yy, name, fontsize=fs.FS_SMALL, va="center", ha="left", linespacing=1.05)
-        for side_x, groups in ((4.40, s), (7.50, t)):
-            for gi in range(1, 6):
-                xx = side_x + (gi - 1) * 0.47
-                if gi in groups:
-                    ax.scatter(xx, yy, s=15, color=fs.POP[gi - 1], edgecolor="white", lw=0.3, zorder=3, clip_on=False)
+    ax = sh.ax(0.05, 3.64, 2.98, 1.46); ax.set_xlim(0, 2.98); ax.set_ylim(0, 1.46); fs.blank(ax)
+    fs.schematic_tag(ax, 1.0, 1.04)
+    # ---- cases: which of the 5 groups each side holds
+    xs0, xt0, dx = 0.84, 1.24, 0.066
+    g.label(ax, xs0 + 2 * dx, 1.36, "Source", color=fs.SRC, size=fs.FS_ANNOT)
+    g.label(ax, xt0 + 2 * dx, 1.36, "Target", color=fs.TGT, size=fs.FS_ANNOT)
+    cases = [("Case 1", "all shared", [1, 2, 3, 4, 5], [1, 2, 3, 4, 5]),
+             ("Case 2", "population lost", [1, 2, 3, 4, 5], [1, 2, 3, 4]),
+             ("Case 2", "population emerged", [1, 2, 3, 4], [1, 2, 3, 4, 5]),
+             ("Case 3", "none shared", [1, 2], [3, 4, 5])]
+    for i, (c, sub, s_, t_) in enumerate(cases):
+        y = 1.13 - i * 0.29
+        g.label(ax, 0.0, y + 0.05, c, ha="left", size=fs.FS_ANNOT)
+        g.label(ax, 0.0, y - 0.07, sub, ha="left", color=fs.SUBTLE)
+        for x_, groups in ((xs0, s_), (xt0, t_)):
+            for k in range(1, 6):
+                if k in groups:
+                    g.cell(ax, x_ + (k - 1) * dx, y, 0.027, fs.POP[k - 1], nucleus=False)
                 else:
-                    ax.scatter(xx, yy, s=15, facecolor="none", edgecolor=fs.NEUTRAL, lw=0.5, zorder=3, clip_on=False)
-    sh.text(0.10, 3.84, "Groups 1-5 (colours); open circle = absent on that side", fontsize=fs.FS_SMALL, color=fs.SUBTLE, va="center")
-    # levels ladder
-    ax2 = sh.ax(1.98, 3.98, 1.05, 1.12); ax2.set_xlim(0, 10); ax2.set_ylim(0, 10); fs.blank(ax2)
-    steps = [("L1", "target depth x 0.5"), ("L2", "+ dropout"), ("L3", "+ batch effect"),
-             ("L4", "+ Group 1 shifted\n   on the target"), ("L5", "+ unequal target\n   proportions")]
-    ax2.text(0, 10.6, "Technical levels (cumulative)", fontsize=fs.FS_SMALL, va="bottom")
-    for i, (lv, txt) in enumerate(steps):
-        yy = 9.2 - i * 2.2
-        ax2.text(0.0, yy, lv, fontsize=fs.FS_ANNOT, fontweight="normal", color=fs.INK, va="center")
-        ax2.text(1.9, yy, txt, fontsize=fs.FS_SMALL, va="center", color=fs.INK, linespacing=1.05)
-    sh.text(0.10, 3.70, "N = 5,000 per side, 10,000 genes, 3 replicates; Splatter defaults + listed factors",
-            fontsize=fs.FS_SMALL, color=fs.SUBTLE, va="center")
+                    ax.add_patch(__import__("matplotlib.patches", fromlist=["Circle"]).Circle(
+                        (x_ + (k - 1) * dx, y), 0.027, fc="white", ec=fs.NEUTRAL, lw=0.5, ls=(0, (1.2, 1.0)), zorder=4))
+        if i < 3:
+            g.rule(ax, 0.0, 1.55, y - 0.145)
+    for k in range(5):
+        g.cell(ax, 0.50 + k * 0.21, 0.03, 0.026, fs.POP[k], nucleus=False)
+        g.label(ax, 0.545 + k * 0.21, 0.03, f"G{k + 1}", ha="left", color=fs.POP[k])
+    g.label(ax, 0.0, 0.03, "Groups:", ha="left", color=fs.SUBTLE)
+    # ---- technical levels, cumulative, each with an icon
+    xl, xi, xt = 1.64, 1.90, 2.06
+    g.label(ax, xl, 1.38, "Technical levels (cumulative)", ha="left", size=fs.FS_ANNOT)
+    lv = [("L1", "target depth x 0.5"), ("L2", "+ dropout"), ("L3", "+ batch effect"),
+          ("L4", "+ Group 1 shifted\non the target"), ("L5", "+ unequal target\nproportions")]
+    for i, (l, t) in enumerate(lv):
+        y = 1.06 - i * 0.235
+        g.label(ax, xl, y, l, ha="left", size=fs.FS_ANNOT)
+        s = 0.075
+        if l == "L1":
+            from matplotlib.patches import Rectangle as R
+            ax.add_patch(R((xi - 0.06, y - s), 0.05, 2 * s, fc=g.tint(fs.SRC, 0.8), ec="none"))
+            ax.add_patch(R((xi + 0.01, y - s), 0.05, s, fc=g.tint(fs.TGT, 0.8), ec="none"))
+            ax.plot([xi - 0.08, xi + 0.08], [y - s, y - s], color=fs.INK, lw=0.45)
+        elif l == "L2":
+            g.matrix_icon(ax, xi, y, s, fs.TGT, rows=4, cols=5, seed=4, holes=0.4)
+        elif l == "L3":
+            rng = np.random.default_rng(3)
+            ax.scatter(xi - 0.04 + rng.normal(0, 0.018, 10), y + 0.03 + rng.normal(0, 0.018, 10), s=2.4, color=fs.SRC, lw=0)
+            ax.scatter(xi + 0.04 + rng.normal(0, 0.018, 10), y - 0.03 + rng.normal(0, 0.018, 10), s=2.4, color=fs.TGT, lw=0)
+        elif l == "L4":
+            g.cell(ax, xi - 0.04, y, 0.028, fs.POP[0], nucleus=False)
+            g.arrow(ax, xi - 0.005, y, xi + 0.025, y, color=fs.POP[0], lw=0.6, ms=4)
+            g.cell(ax, xi + 0.06, y, 0.028, fs.POP[0], nucleus=False)
+        else:
+            from matplotlib.patches import Rectangle as R
+            xx = xi - 0.08
+            for k, f in enumerate([0.40, 0.25, 0.15, 0.12, 0.08]):
+                ax.add_patch(R((xx, y - 0.03), 0.16 * f, 0.06, fc=fs.POP[k], ec="white", lw=0.3)); xx += 0.16 * f
+        g.label(ax, xt, y, t, ha="left")
+    g.label(ax, 2.98, 1.25, "N = 5,000 per side, 3 replicates", ha="right", color=fs.SUBTLE)
 
 
 def panel_b(sh, b):

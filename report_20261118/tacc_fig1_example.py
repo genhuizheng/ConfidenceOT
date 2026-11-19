@@ -3,13 +3,16 @@
 Unit: L2_depth_dropout, replicate 2, Case 2 population lost (Group 5 removed from the target), main configuration
 ranknm256-midrank|none|scale|cos|pca50, M4-E. Reads the v3 worker outputs (cell_confidence.csv.gz, coupling_m4e.npz) and
 the unit's input counts; writes small derived tables to --out (a new folder):
-  cells.tsv        side, observation_id, group, should_reject, rejected, total_counts, umap1, umap2
+  cells.tsv        side, observation_id, group, should_reject, rejected, total_counts_display, pc1..pc30
   group_mass.tsv   block (all / retained), source_group, target_group, mass
   meta.json        shapes, sums, embedding recipe
-The embedding is for display only (log1p CP10k, 2,000 top-variance genes, PCA 30, UMAP); it is not the OT input.
+The display embedding (log1p CP10k, 2,000 top-variance genes, PCA 30; UMAP locally) is not the OT input.
 
     python -I tacc_fig1_example.py --row ROWDIR --cond CONDDIR --out OUTDIR
 """
+import os
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+    os.environ[_v] = "1"  # shared login node: one thread
 import argparse
 import json
 from pathlib import Path
@@ -63,18 +66,15 @@ def main():
     top = np.argsort(var)[::-1][:2000]
     Y = X[:, top].toarray(); Y -= Y.mean(0)
     from sklearn.decomposition import PCA
-    Z = PCA(30, random_state=0).fit_transform(Y)
-    try:
-        import umap
-        E = umap.UMAP(n_neighbors=30, min_dist=0.3, random_state=0).fit_transform(Z); recipe = "UMAP (umap-learn) on PCA 30"
-    except Exception as err:  # noqa: BLE001
-        E = Z[:, :2]; recipe = f"PCA 1-2 (umap unavailable: {type(err).__name__})"
+    Z = PCA(30, random_state=0, svd_solver="randomized").fit_transform(Y)
+    recipe = "PCA 30 on TACC (single thread); UMAP computed locally from these PCs"
     order = pd.Index(np.r_[("source|" + S.obs_names.astype(str)).to_numpy(), ("target|" + T.obs_names.astype(str)).to_numpy()])
     key = cc.side + "|" + cc.observation_id.astype(str)
     pos = order.get_indexer(key); assert (pos >= 0).all()
-    cc["umap1"], cc["umap2"] = E[pos, 0], E[pos, 1]
+    for k in range(30):
+        cc[f"pc{k + 1}"] = Z[pos, k]
     cc["total_counts_display"] = tot[pos]
-    cols = ["side", "observation_id", "group", "should_reject", "rejected", "total_counts_display", "umap1", "umap2"]
+    cols = ["side", "observation_id", "group", "should_reject", "rejected", "total_counts_display"] + [f"pc{k + 1}" for k in range(30)]
     cc[cols].to_csv(a.out / "cells.tsv", sep="\t", index=False)
     rows = []
     a_g = src.observation_id.astype(str).map(dict(zip(cc.loc[cc.side == "source", "observation_id"].astype(str), cc.loc[cc.side == "source", "group"]))).to_numpy()

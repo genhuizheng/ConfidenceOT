@@ -152,36 +152,51 @@ def tables(cells, g, pairs, fit, trans, sc):
 
 
 # ------------------------------------------------------------------------------------------------------------ draw
-def panel_a(sh, design):
-    import matplotlib.patches as mpatches
+def panel_a(sh, design, comp):
+    import glyphs as g
     x0, y0, x1, y1 = 0.0, 3.62, 3.25, 5.4
     sh.panel("a", x0, y0, x1, y1, title="LTL331 PDX: sampling after host castration")
-    ax = sh.ax(0.15, 4.50, 3.05, 0.58); st.blank(ax)
-    ax.set_xlim(-2.4, 23.6); ax.set_ylim(-1.45, 1.35)
-    ax.axvspan(18.9, 23.6, color=st.PALE, lw=0)
-    ax.text(21.25, 1.3, "relapse\n(LTL331R)", ha="center", va="top", fontsize=st.FS_SMALL, color=st.SUBTLE, linespacing=1.1)
-    ax.plot([-1.6, 23], [0, 0], color=st.INK, lw=0.7)
-    ax.annotate("host castration", xy=(0, 0.08), xytext=(0.0, 1.0), ha="left", va="bottom", fontsize=st.FS_SMALL, color=st.INK,
-                arrowprops=dict(arrowstyle="-|>", lw=0.6, color=st.INK, mutation_scale=5))
-    ws = [r.weeks_after_castration - (1.3 if r.label == "pre" else 0) for _, r in design.iterrows()]
-    for w, (_, r) in zip(ws, design.iterrows()):
-        ax.plot([w], [0], "o", ms=3.2, color=st.INK, zorder=3)
-        ax.text(w, -0.3, r.label, ha="center", va="top", fontsize=st.FS_TICK)
-        ax.text(w, -0.86, f"{r.ot_cells:,}", ha="center", va="top", fontsize=st.FS_SMALL, color=st.SUBTLE)
-    for i in range(7):
-        ax.annotate("", xy=(ws[i + 1] - 0.35, 0.36), xytext=(ws[i] + 0.35, 0.36),
-                    arrowprops=dict(arrowstyle="-|>", lw=0.5, color=st.RULE, mutation_scale=4))
-    tot = int(design.ot_cells.sum()); rem = int(design.removed_by_27_qc.sum())
-    sh.text(0.20, 4.43, "week after castration (pre = before); grey: cells after QC", fontsize=st.FS_SMALL, color=st.SUBTLE, va="top")
-    sh.text(0.20, 4.31, f"{tot:,} cells; {rem:,} of {int(design.authors_qc_cells.sum()):,} authors' cells removed by QC before OT",
-            fontsize=st.FS_SMALL, color=st.SUBTLE, va="top")
-    sh.text(0.20, 4.19, "arrows: 7 adjacent pairs, Source = earlier, Target = next sample", fontsize=st.FS_SMALL, color=st.SUBTLE, va="top")
-    sh.text(0.20, 4.04, "States (published map, Sar et al.; Seurat clusters)", fontsize=st.FS_ANNOT, va="top")
+    W, H = 3.18, 1.46
+    ax = sh.ax(0.05, 3.64, W, H); ax.set_xlim(0, W); ax.set_ylim(0, H); st.blank(ax)
+    st.schematic_tag(ax, 1.0, 1.04)
+    # PDX host
+    g.mouse_icon(ax, 0.20, 1.10, 0.12)
+    g.tumour(ax, 0.17, 1.05, 0.065, [SCOL["AR-high PRAD"], SCOL["AR-low PRAD"]], seed=2)
+    g.label(ax, 0.20, 0.90, "PDX host", color=st.SUBTLE)
+    # timeline
+    xa, xb, yt = 0.66, 3.08, 1.02
+    pos = {r.sample_id: xa + (r.weeks_after_castration + (1.6 if r.label == "pre" else 0) + 0.0) / 23.6 * (xb - xa)
+           if r.label != "pre" else xa for _, r in design.iterrows()}
+    rx0 = pos["w20_20wkCX_1_R"] - 0.12
+    g.frame(ax, rx0, 0.74, xb + 0.10 - rx0, 0.58, color=st.PALE, fc=st.PALE, lw=0)
+    g.label(ax, (rx0 + xb + 0.10) / 2, 1.38, "relapse (LTL331R)", color=st.SUBTLE)
+    ax.plot([xa - 0.05, xb + 0.05], [yt, yt], color=st.INK, lw=0.6, zorder=2)
+    xc = (pos["w00_preCX_1"] + pos["w02_2wkCX_2"]) / 2
+    g.pill(ax, xc - 0.30, 1.33, 0.60, 0.12, "host castration", st.REJECT, fs_=st.FS_SMALL)
+    g.arrow(ax, xc, 1.325, xc, yt + 0.02, color=st.REJECT)
+    for k, (_, r) in enumerate(design.iterrows()):
+        x = pos[r.sample_id]
+        row = comp.loc[r.sample_id]
+        top = [s for s in row.sort_values(ascending=False).index if row[s] / row.sum() >= 0.05][:3]
+        cols = [SCOL[s] for s in (top * 3)[:3]]
+        for j, (dx, dy) in enumerate(((-0.035, 0.02), (0.035, 0.02), (0.0, -0.035))):
+            g.cell(ax, x + dx, yt + 0.12 + dy, 0.028, cols[j], nucleus=False, z=5)
+        g.label(ax, x, yt - 0.07, r.label, size=st.FS_TICK)
+        g.label(ax, x, yt - 0.18, f"{r.ot_cells / 1000:.1f}k", color=st.SUBTLE)
+        if k < 7:
+            nx = pos[design.sample_id.iloc[k + 1]]
+            ax.annotate("", xy=(nx - 0.05, yt + 0.25), xytext=(x + 0.05, yt + 0.25),
+                        arrowprops=dict(arrowstyle="-|>", lw=0.45, color=st.RULE, mutation_scale=3.5,
+                                        connectionstyle="arc3,rad=-0.25"))
+    tot = int(design.ot_cells.sum()); rem = int(design.removed_by_27_qc.sum()); auth = int(design.authors_qc_cells.sum())
+    g.label(ax, 0.0, 0.66, "Numbers: week after castration (pre = before; R = relapse) and cells after QC.", color=st.SUBTLE, ha="left")
+    g.label(ax, 0.0, 0.56, f"7 adjacent Source -> Target pairs; {tot:,} cells ({rem:,} of {auth:,} removed by QC before OT).", color=st.SUBTLE, ha="left")
+    # state legend as cells
+    g.label(ax, 0.0, 0.44, "States (published map, Sar et al.; Seurat clusters):", ha="left", size=st.FS_ANNOT)
     for i, s in enumerate(STATES):
-        cx = 0.22 + (i // 4) * 1.5; cy = 3.885 - (i % 4) * 0.073
-        sh.fig.patches.append(mpatches.Rectangle((cx / sh.W, (cy - 0.026) / sh.H), 0.09 / sh.W, 0.052 / sh.H,
-                              transform=sh.fig.transFigure, fc=SCOL[s], ec="none"))
-        sh.text(cx + 0.12, cy, f"{SHORT[s]}  ({CLUSTERS[s]})", fontsize=st.FS_SMALL, va="center")
+        cx = 0.05 + (i // 4) * 1.60; cy = 0.335 - (i % 4) * 0.098
+        g.cell(ax, cx, cy, 0.03, SCOL[s], nucleus=True)
+        g.label(ax, cx + 0.07, cy, f"{SHORT[s]}  ({CLUSTERS[s]})", ha="left")
 
 
 def panel_b(sh, comp):
@@ -432,7 +447,7 @@ def main():
     cells, g, pairs, fit, trans, sc = load()
     comp, design, rej, bys, heat, e = tables(cells, g, pairs, fit, trans, sc)
     sh = st.Sheet(7.2, 5.4, "Figure3")
-    panel_a(sh, design); panel_b(sh, comp); panel_c(sh, rej, heat); panel_d(sh, bys, e); panel_e(sh, comp, rej, heat, e)
+    panel_a(sh, design, comp); panel_b(sh, comp); panel_c(sh, rej, heat); panel_d(sh, bys, e); panel_e(sh, comp, rej, heat, e)
     write_text(comp, design, rej, bys, heat, e)
     sh.save()
     print(rej[["pair", "side", "cells", "rejected_fraction", "m4e_inference_valid", "depth_auc_rejected_deeper"]].to_string())

@@ -80,20 +80,39 @@ def panel_a(sh, t):
 
 
 def panel_b(sh):
+    import glyphs as gl
     sh.panel("b", 0.0, 0.0, 4.55, 1.90, "Most worth completing: independent reference information")
-    ax = sh.ax(0.05, 0.05, 4.45, 1.55); ax.set_xlim(0, 100); ax.set_ylim(0, 10); fs.blank(ax)
+    W, H = 4.45, 1.58
+    ax = sh.ax(0.05, 0.04, W, H); ax.set_xlim(0, W); ax.set_ylim(0, H); fs.blank(ax)
+    fs.schematic_tag(ax, 1.0, 1.04)
     cards = [
-        ("LARRY in vivo", "clone barcodes\n(DNA, not RNA)", "Do day-2 cells couple\nto later cells of\ntheir own clone?"),
-        ("SPLINTR AML", "expressed barcodes;\nvehicle vs chemo", "Are clones lost after\nchemo rejected more\nthan after vehicle?"),
-        ("sciPlex2", "dose; cells\nrecovered per dose", "Does rejection grow\nwith dose where\ncells are lost?"),
-        ("Kang PBMC", "no population absent\n(negative control)", "Does rejection stay\nlow? Is the shift\nlargest in myeloid?"),
+        ("LARRY in vivo", "clone barcodes\n(DNA, not RNA)", "Do day-2 cells couple\nto later cells of\ntheir own clone?", "clone"),
+        ("SPLINTR AML", "expressed barcodes;\nvehicle vs chemo", "Are clones lost after\nchemo rejected more\nthan after vehicle?", "barcode"),
+        ("sciPlex2", "dose; cells\nrecovered per dose", "Does rejection grow\nwith dose where\ncells are lost?", "dose"),
+        ("Kang PBMC", "no population absent\n(negative control)", "Does rejection stay\nlow? Is the shift\nlargest in myeloid?", "control"),
     ]
-    for i, (h, ref, q) in enumerate(cards):
-        x = 0.5 + i * 25.0
-        fs.box(ax, x, 0.3, 23.5, 9.4, "", fc="white", ec=fs.NEUTRAL, lw=0.6)
-        ax.text(x + 1.2, 8.7, h, fontsize=fs.FS_ANNOT + 0.4, va="top", color=fs.SRC)
-        ax.text(x + 1.2, 7.3, ref, fontsize=fs.FS_SMALL, va="top", color=fs.SUBTLE, linespacing=1.1)
-        ax.text(x + 1.2, 4.5, q, fontsize=fs.FS_SMALL, va="top", color=fs.INK, linespacing=1.1)
+    w, gap = 1.04, 0.09
+    for i, (h, ref, q, icon) in enumerate(cards):
+        x = 0.02 + i * (w + gap)
+        gl.frame(ax, x, 0.02, w, 1.40, color=fs.NEUTRAL, lw=0.6)
+        gl.pill(ax, x + 0.06, 1.20, w - 0.12, 0.16, h, fs.SRC, fs_=fs.FS_ANNOT)
+        cx, cy = x + w / 2, 0.96
+        if icon == "clone":
+            for k, c in enumerate((fs.POP[0], fs.POP[0], fs.POP[2])):
+                gl.cell(ax, cx - 0.22 + k * 0.10, cy + 0.02, 0.035, c, nucleus=False)
+            gl.arrow(ax, cx + 0.03, cy + 0.02, cx + 0.12, cy + 0.02)
+            for k, c in enumerate((fs.POP[0], fs.POP[2])):
+                gl.cell(ax, cx + 0.17 + k * 0.09, cy + 0.02, 0.035, c, nucleus=False)
+        elif icon == "barcode":
+            gl.edit_array(ax, cx - 0.25, cy - 0.015, 0.5, 0.07, [1, 3, 0, 5, 2, 0, 4, 1], fs.POP)
+        elif icon == "dose":
+            gl.bars_icon(ax, cx, cy + 0.01, 0.12, fs.TGT, vals=(0.95, 0.85, 0.7, 0.45, 0.25))
+        else:
+            gl.cell_cluster(ax, cx - 0.16, cy + 0.01, fs.POP[0], n=3, r=0.03, spread=0.05, seed=1)
+            gl.arrow(ax, cx - 0.06, cy + 0.01, cx + 0.06, cy + 0.01, color=fs.RETAIN)
+            gl.cell_cluster(ax, cx + 0.16, cy + 0.01, fs.POP[0], n=3, r=0.03, spread=0.05, seed=2)
+        gl.label(ax, x + 0.07, 0.76, ref, ha="left", va="top", color=fs.SUBTLE)
+        gl.label(ax, x + 0.07, 0.44, q, ha="left", va="top", color=fs.INK)
 
 
 def panel_c(sh, g):

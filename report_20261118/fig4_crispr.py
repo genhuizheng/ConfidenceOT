@@ -155,25 +155,52 @@ def legend_swatch(sh, x, y, color, label, fsz=None):
 
 
 def panel_a(sh):
+    import glyphs as g
     x0, y0, x1, y1 = 0.0, 3.30, 2.62, 5.40
     sh.panel("a", x0, y0, x1, y1, title="Two measurements of the same cells")
-    ax = sh.ax(x0 + 0.06, y0 + 0.04, x1 - x0 - 0.12, y1 - y0 - 0.30)
-    ax.set_xlim(0, 10); ax.set_ylim(0, 10); fs.blank(ax)
-    F = fs.FS_SMALL
-    fs.box(ax, 1.6, 8.75, 6.8, 1.15, "KP-Tracer tumours, primary → metastases:\nthe same single cells, two read-outs", fc=fs.PALE, ec=fs.SUBTLE, fs=F)
-    fs.arrow(ax, 3.0, 8.75, 2.3, 7.75); fs.arrow(ax, 7.0, 8.75, 7.7, 7.75)
-    fs.box(ax, 0.0, 6.75, 4.6, 0.95, "scRNA counts", ec=RNA_OT, tc=RNA_OT, fs=F)
-    fs.box(ax, 5.4, 6.75, 4.6, 0.95, "CRISPR edits (raw allele table)", ec=fs.INK, fs=F)
-    fs.arrow(ax, 2.3, 6.75, 2.3, 5.9, color=RNA_OT)
-    fs.box(ax, 0.0, 4.35, 4.6, 1.5, "RNA-only ConfidenceOT\nmain configuration, M4-E\n(never sees the edits)", ec=RNA_OT, tc=RNA_OT, lw=0.9, fs=F)
-    fs.arrow(ax, 7.7, 6.75, 7.7, 5.9)
-    fs.box(ax, 5.4, 4.35, 4.6, 1.5, "edit agreement s per cell pair\n→ clades within a family\n(founder edits removed)", ec=fs.INK, fs=F)
-    fs.arrow(ax, 2.3, 4.35, 2.3, 3.15, color=RNA_OT); fs.arrow(ax, 6.6, 4.35, 3.6, 3.15)
-    fs.box(ax, 0.0, 2.05, 4.6, 1.05, "evaluation: does RNA matching\nfollow families and clades?", fc=fs.PALE, ec=fs.INK, fs=F)
-    fs.arrow(ax, 8.6, 4.35, 8.6, 3.15, color=CRISPR_OT)
-    pb = fs.box(ax, 5.4, 1.7, 4.6, 1.45, "CRISPR-guided OT\n(same solver, cost 1 − s)\nuses the edits: reference only", ec=CRISPR_OT, tc=CRISPR_OT, fs=F)
-    pb.set_linestyle((0, (2.5, 1.5)))
-    ax.text(0.0, 0.6, "schematic", fontsize=F, color=fs.SUBTLE, style="italic", ha="left", va="center")
+    W, H = 2.54, 1.78
+    ax = sh.ax(0.04, 3.32, W, H); ax.set_xlim(0, W); ax.set_ylim(0, H); fs.blank(ax)
+    fs.schematic_tag(ax, 1.0, 1.0)
+    # the same cell, two read-outs
+    g.cell(ax, 0.16, 1.55, 0.08, fs.SUBTLE)
+    g.label(ax, 0.16, 1.38, "one cell", color=fs.SUBTLE)
+    ax.plot([0.27, 0.42], [1.62, 1.62], color=RNA_OT, lw=0.6)
+    t = np.linspace(0, 1, 30)
+    ax.plot(0.44 + 0.22 * t, 1.62 + 0.015 * np.sin(t * 18), color=RNA_OT, lw=0.8)
+    g.label(ax, 0.70, 1.62, "mRNA", color=RNA_OT, ha="left")
+    ax.plot([0.27, 0.42], [1.48, 1.48], color=fs.INK, lw=0.6)
+    g.edit_array(ax, 0.44, 1.45, 0.30, 0.06, [3, 0, 5, 1, 0, 2, None, 4], fs.POP)
+    g.label(ax, 0.78, 1.48, "CRISPR target array (edits)", color=fs.INK, ha="left")
+    g.rule(ax, 0.0, W, 1.29)
+    # row 1: RNA -> RNA-only ConfidenceOT
+    y = 1.04
+    g.matrix_icon(ax, 0.14, y, 0.10, RNA_OT, rows=4, cols=5, seed=3)
+    g.label(ax, 0.14, y - 0.15, "counts", color=RNA_OT)
+    g.arrow(ax, 0.27, y, 0.38, y)
+    g.pill(ax, 0.40, y - 0.11, 0.86, 0.22, "RNA-only\nConfidenceOT", RNA_OT, fs_=fs.FS_SMALL)
+    g.arrow(ax, 1.28, y, 1.40, y)
+    g.coupling_icon(ax, 1.62, y, 0.15, kind="cot")
+    g.label(ax, 1.62, y - 0.20, "matches + gate", color=fs.SUBTLE)
+    # row 2: edits -> clades
+    y2 = 0.53
+    from matplotlib.patches import Rectangle as R
+    for k in range(4):
+        g.edit_array(ax, 0.02, y2 + 0.07 - k * 0.05, 0.24, 0.04, [(k + j) % 4 if (k * j) % 5 else 0 for j in range(6)], fs.POP)
+    g.label(ax, 0.14, y2 - 0.17, "allele table", color=fs.INK, size=fs.FS_SMALL - 0.3)
+    g.arrow(ax, 0.27, y2, 0.38, y2)
+    g.pill(ax, 0.40, y2 - 0.11, 0.86, 0.22, "edit agreement s\n(founders removed)", fs.SUBTLE, tc=fs.INK, fs_=fs.FS_SMALL)
+    g.arrow(ax, 1.28, y2, 1.40, y2)
+    g.tree_icon(ax, 1.62, y2 + 0.03, 0.14, [CL_COL["3457-A"], CL_COL["3457-A"], CL_COL["3457-B"], CL_COL["3457-C"]])
+    g.label(ax, 1.62, y2 - 0.17, "clades", color=fs.SUBTLE)
+    # evaluation
+    g.elbow(ax, [(1.82, y), (1.82, y2)], (1.98, (y + y2) / 2), xmid=1.90)
+    g.pill(ax, 1.99, (y + y2) / 2 - 0.17, 0.55, 0.34, "evaluate:\nfamilies,\nclades", fs.INK, tc=fs.INK, fs_=fs.FS_SMALL, alpha=0.08)
+    g.ref(ax, W, (y + y2) / 2 - 0.27, "b, d")
+    # CRISPR-guided OT: uses the edits -> reference only
+    y3 = 0.10
+    ax.plot([0.83, 0.83], [y2 - 0.11, y3 + 0.07], color=CRISPR_OT, lw=0.6, ls=(0, (2, 1.5)))
+    g.pill(ax, 0.40, y3 - 0.07, 1.30, 0.14, "CRISPR-guided OT (cost 1 - s)", CRISPR_OT, fs_=fs.FS_SMALL, ec=CRISPR_OT, ls=(0, (2, 1.5)))
+    g.label(ax, 1.75, y3, "reference only\n(uses the edits)", color=CRISPR_OT, ha="left")
 
 
 def panel_b(sh, m, allcfg, main):
