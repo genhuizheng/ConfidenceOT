@@ -333,3 +333,7 @@ Checks that each label means what it says. Means are log1p(CP10k).
 2. SPLINTR cells: barcoded cells only (as proposed), or our own HTO demultiplexing so that unbarcoded pool cells can be
    used.
 3. Zebrafish unit list: the 9 units above, in particular the treatment-contrast units.
+4. SPLINTR pool-2 days. The options:
+   - follow the authors' code;
+   - follow Supplementary Table 2 / singletCode;
+   - do not split day 5 from day 7, and treat the four pool-2 mice as "chemo day 5–7".
