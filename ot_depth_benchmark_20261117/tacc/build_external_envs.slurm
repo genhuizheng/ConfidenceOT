@@ -17,11 +17,13 @@ module load gcc python3/3.11.8 2>/dev/null || module load python3
 E=${OTDB_ENVS:-/scratch/10119/ghzheng/OT_project/envs}
 TOOLS=${OTDB_TOOLS:-/scratch/10119/ghzheng/OT_project/code}
 mkdir -p "$E" "$TOOLS"
-REPORT="$E/ENVS_REPORT.txt"
+REPORT="$E/ENVS_REPORT${OTDB_ONLY:+_only}.txt"
 echo "build $(date -Iseconds) on $(hostname) $(uname -m); $(python3 --version)" > "$REPORT"
 
+only=${OTDB_ONLY:-}   # space-separated environment names to build; empty = all
 mk() {
     name=$1; shift
+    if [ -n "$only" ] && [[ " $only " != *" $name "* ]]; then return 0; fi
     if [ -x "$E/$name/bin/python" ]; then echo "$name exists, packages updated in place" >> "$REPORT"; else python3 -m venv "$E/$name" || { echo "$name: venv failed" >> "$REPORT"; return 1; }; fi
     "$E/$name/bin/pip" install -q -U pip wheel setuptools
     "$E/$name/bin/pip" install "$@" > "$E/$name.pip.log" 2>&1 || echo "$name: pip install returned an error, see $name.pip.log" >> "$REPORT"
@@ -39,6 +41,7 @@ wrap() {
 }
 check() {
     name=$1; code=$2
+    if [ -n "$only" ] && [[ " $only " != *" $name "* ]]; then return 0; fi
     "$E/$name/bin/python" -c "$code" >> "$REPORT" 2>&1 || echo "$name: import check FAILED" >> "$REPORT"
 }
 
@@ -51,9 +54,11 @@ check otdb_wot "import platform, wot, numpy, pandas, scanpy; print('otdb_wot', p
 mk otdb_cfm torch "torchcfm==1.0.7" torchdyn scanpy POT "numpy<2"
 check otdb_cfm "import platform, torch, torchcfm, torchdyn; print('otdb_cfm', platform.machine(), 'torch', torch.__version__)"
 
-mk otdb_otbench "numpy<2" scipy pandas "scanpy==1.10.4" "anndata<0.11" scikit-learn statsmodels "cinemaot==0.0.5" "pot==0.9.5" \
+# pandas / scipy / scikit-learn pinned to the local otbench versions (2026-11-18): pandas 3 strings break anndata 0.10
+# h5ad writing (CellOT) and scipy 1.17 csr_array has no getnnz (CINEMA-OTW neighbours), pilot 1153414
+mk otdb_otbench "numpy<2" "scipy==1.15.3" "pandas==2.3.3" "scanpy==1.10.4" "anndata<0.11" "scikit-learn==1.7.2" statsmodels "cinemaot==0.0.5" "pot==0.9.5" \
     ml-collections absl-py "torch==2.3.1" tables igraph leidenalg pyyaml tqdm
-check otdb_otbench "import platform, torch, cinemaot, ot, scanpy, tables, leidenalg, ml_collections; print('otdb_otbench', platform.machine(), 'torch', torch.__version__, 'pot', ot.__version__)"
+check otdb_otbench "import platform, torch, cinemaot, ot, scanpy, tables, leidenalg, ml_collections, pandas, scipy, sklearn; print('otdb_otbench', platform.machine(), 'torch', torch.__version__, 'pot', ot.__version__, 'pandas', pandas.__version__, 'scipy', scipy.__version__, 'sklearn', sklearn.__version__)"
 
 # CellOT, the authors' repository at the commit tested locally (522d2b9)
 if [ ! -d "$TOOLS/cellot/.git" ]; then git clone -q https://github.com/bunnech/cellot.git "$TOOLS/cellot"; fi
