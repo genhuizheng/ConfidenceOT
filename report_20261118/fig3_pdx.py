@@ -43,7 +43,7 @@ SHORT = {"AR-high PRAD": "AR-high", "AR-low PRAD": "AR-low", "pre-EMT": "pre-EMT
 CLUSTERS = {"AR-high PRAD": "11, 15", "AR-low PRAD": "0, 2, 4, 5, 8, 12, 16", "pre-EMT": "6", "intermediate EMT-like": "17",
             "NEPC ASCL1+": "10", "early NEPC ASCL1-": "13", "terminal NEPC ASCL1-": "1, 7, 9", "NEPC other": "3, 14"}
 # PDX state colours (their own category; none equals a side / gate colour of figstyle)
-SCOL = dict(zip(STATES, ["#0B3C5D", "#7FB8E0", "#1B7F5B", "#C2DF8A", "#E8A33D", "#C0392B", "#3D1236", "#A884C9"]))  # = pdx_figures.COLOUR (CVD-checked)
+SCOL = dict(zip(STATES, ["#0B3C5D", "#7FB8E0", "#1B7F5B", "#C2DF8A", "#E8A33D", "#7A4FA3", "#3D1236", "#A884C9"]))  # pdx_figures.COLOUR, early ASCL1- moved off the reject red (min CVD dE 13.2)
 KEY_PAIRS = [("w12_12wkCX_2", "w16_16wkCX_1"), ("w16_16wkCX_1", "w20_20wkCX_1_R"), ("w20_20wkCX_1_R", "w22_22wkCX_2_R")]
 
 
