@@ -23,6 +23,8 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.util import Inches, Pt
 
 HERE = Path(__file__).resolve().parent
+import sys
+sys.path.insert(0, str(HERE))
 INK = RGBColor(0x33, 0x33, 0x33); SUB = RGBColor(0x6B, 0x72, 0x80); ACC = RGBColor(0xC0, 0x39, 0x2B)
 SRC = RGBColor(0x2C, 0x6E, 0x9B); GRN = RGBColor(0x4E, 0x8A, 0x6B); ORANGE = RGBColor(0xBF, 0x57, 0x00)
 FONT = "Calibri"
@@ -225,6 +227,38 @@ def closing_slides(D: Deck):
     txt(s, 0.8, 1.1, 11.8, 5.8, paras)
 
 
+def supplementary_slides(D: Deck, outroot: Path):
+    import shutil
+    from supplementary import SUPP, LEGEND_SOLVERS
+    sdir = outroot / "Supplementary"; sdir.mkdir(parents=True, exist_ok=True)
+    s = D.slide("Supplementary figures")
+    paras = [[("Earlier figures of the current result sets, shown as they were made; they are not part of Figures 1-4.",
+               {"size": 16})]]
+    groups = {}
+    for i, (grp, f, t, c, n) in enumerate(SUPP, 1):
+        groups.setdefault(grp, []).append(f"S{i} {t}")
+    for grp, items in groups.items():
+        paras.append(("__space__", 12, [(f"{grp}  ", {"bold": True, "color": ORANGE, "size": 14}),
+                                        ("; ".join(items), {"size": 12, "color": SUB})]))
+    txt(s, 0.8, 1.0, 11.8, 5.9, paras)
+    index = ["# Supplementary figures (copies of the original files)\n", "| S | Supports | Title | Original file |", "|---|---|---|---|"]
+    for i, (grp, f, t, c, n) in enumerate(SUPP, 1):
+        assert f.exists(), f
+        dst = sdir / f"S{i:02d}_{f.name}"; shutil.copy2(f, dst)
+        index.append(f"| S{i} | {grp} | {t} | `{f.relative_to(HERE.parent).as_posix()}` |")
+        s = D.slide(f"Supplementary S{i} | {t}", notes=f"S{i} (supports {grp}). {c} {n or ''} Source: {f.relative_to(HERE.parent).as_posix()}")
+        box = (0.3, 0.75, 12.7, 5.35) if n != "legend" else (0.3, 0.75, 10.2, 5.35)
+        D.picture(s, f, box)
+        if n == "legend":
+            D.picture(s, LEGEND_SOLVERS, (10.6, 2.2, 2.5, 2.3))
+        paras = [[(f"Supports {grp}.  ", {"bold": True, "color": ORANGE, "size": 12}), (c, {"size": 12})]]
+        if n and n != "legend":
+            paras.append(("__space__", 3, [(n, {"size": 12, "color": ACC, "bold": True})]))
+        paras.append(("__space__", 3, [(f"Source: {f.relative_to(HERE.parent).as_posix()}", {"size": 10, "color": SUB})]))
+        txt(s, 0.45, 6.15, 12.4, 0.95, paras)
+    (sdir / "INDEX.md").write_text("\n".join(index) + "\n", encoding="utf-8")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--template", type=Path, required=True)
@@ -241,6 +275,7 @@ def main():
             continue
         figure_slides(D, root, stem, label, q, msg)
     closing_slides(D)
+    supplementary_slides(D, a.root)
     D.save(a.out)
     print("slides", D.n, "->", a.out)
 
