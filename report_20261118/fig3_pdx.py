@@ -206,7 +206,7 @@ def panel_c(sh, rej, heat):
     from matplotlib.colors import LinearSegmentedColormap
     x0, y0, x1, y1 = 0.0, 1.80, 7.2, 3.58
     sh.panel("c", x0, y0, x1, y1, title="ConfidenceOT matching between adjacent samples (main configuration, M4-E)")
-    ax = sh.ax(0.40, 2.25, 2.2, 0.92); st.tidy(ax)
+    ax = sh.ax(0.40, 2.25, 1.85, 0.92); st.tidy(ax)
     labs = list(rej.pair.unique()); xs = np.arange(len(labs))
     for side, col, dx in (("source", st.SRC, -0.14), ("target", st.TGT, 0.14)):
         r = rej[rej.side == side].set_index("pair").reindex(labs)
@@ -217,11 +217,11 @@ def panel_c(sh, rej, heat):
     ax.set_xticks(xs, labs, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_ylim(0, 1.0); ax.set_yticks([0, 0.5, 1.0]); ax.set_ylabel("rejected fraction")
     ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.07), ncol=2, handlelength=0.9, columnspacing=0.8, borderaxespad=0)
-    sh.text(1.75, 3.245, "† M4-E calibration flag (reported, not removed)", fontsize=st.FS_SMALL,
+    sh.text(1.50, 3.245, "† M4-E calibration\n   flag (kept, not removed)", fontsize=st.FS_SMALL,
             color=st.SUBTLE, va="bottom", linespacing=1.1)
     cmap = LinearSegmentedColormap.from_list("ret", ["#FFFFFF", st.RETAIN]); cmap.set_bad(st.PALE)
-    c = 0.10; top = 3.12; xs0 = [3.55, 4.78, 6.01]
-    sh.text(3.65, 3.455, "Retained cells: P(Target state | Source state); grey numbers = retained cells",
+    c = 0.115; top = 3.28; xs0 = [2.98, 4.30, 5.62]
+    sh.text(3.65, 3.455, "Retained cells: P(Target state | Source state) in %, shown where ≥ 20; grey = retained Source cells",
             fontsize=st.FS_SMALL, color=st.SUBTLE, va="bottom")
     for k, (s0, s1) in enumerate(KEY_PAIRS):
         P, ns, nt, tot = heat[(s0, s1)]
@@ -231,12 +231,10 @@ def panel_c(sh, rej, heat):
         ax.imshow(np.ma.masked_invalid(A), cmap=cmap, vmin=0, vmax=1, aspect="auto", interpolation="nearest")
         for i in range(8):
             for j in range(8):
-                if np.isfinite(A[i, j]) and A[i, j] >= 0.10:
-                    ax.text(j, i, f"{A[i, j]:.2f}".lstrip("0"), ha="center", va="center", fontsize=st.FS_SMALL,
+                if np.isfinite(A[i, j]) and A[i, j] >= 0.20:
+                    ax.text(j, i, f"{100 * A[i, j]:.0f}", ha="center", va="center", fontsize=st.FS_SMALL,
                             color="white" if A[i, j] > 0.6 else st.INK)
             ax.text(8.0, i, f"{int(ns[STATES[i]]):,}", ha="left", va="center", fontsize=st.FS_SMALL, color=st.SUBTLE)
-        for j in range(8):
-            ax.text(j, -0.75, f"{int(nt[STATES[j]]):,}", ha="center", va="bottom", fontsize=st.FS_SMALL, color=st.SUBTLE, rotation=90)
         ax.set_xticks(range(8), [SHORT[s] for s in STATES], rotation=90, fontsize=st.FS_SMALL)
         ax.set_yticks(range(8), [SHORT[s] for s in STATES] if k == 0 else [], fontsize=st.FS_SMALL)
         ax.tick_params(length=1.2, pad=1)
@@ -244,12 +242,12 @@ def panel_c(sh, rej, heat):
             ax.tick_params(axis="y", length=0)
         for sp in ax.spines.values():
             sp.set_visible(False)
-        ax.text(3.5, -2.35, plab(s0, s1), ha="center", va="bottom", fontsize=st.FS_ANNOT)
+        ax.text(3.5, -0.75, plab(s0, s1), ha="center", va="bottom", fontsize=st.FS_ANNOT)
         if k == 0:
             ax.text(-0.6, 8.9, "Source ↓  Target →", ha="right", va="top", fontsize=st.FS_SMALL, color=st.SUBTLE)
-    cax = sh.ax(2.98, 1.98, 0.38, 0.045)
-    cb = mpl.colorbar.ColorbarBase(cax, cmap=cmap, norm=mpl.colors.Normalize(0, 1), ticks=[0, 1], orientation="horizontal")
-    cax.set_title("P", fontsize=st.FS_SMALL, pad=1)
+    cax = sh.ax(7.0, 2.45, 0.05, 0.7)
+    cb = mpl.colorbar.ColorbarBase(cax, cmap=cmap, norm=mpl.colors.Normalize(0, 1), ticks=[0, 0.5, 1])
+    cb.set_ticklabels(["0", "50", "100"]); cax.set_title("%", fontsize=st.FS_SMALL, pad=2)
     cb.outline.set_visible(False); cax.tick_params(labelsize=st.FS_SMALL, length=1.5, pad=1)
 
 
@@ -366,8 +364,8 @@ intermediate EMT-like state (cluster 17) is {comp.loc['w12_12wkCX_2', 'intermedi
 
 **c**, Left: rejected fraction of Source and Target cells per pair (n cells per side in `data/c_rejected_fraction.tsv`).
 Dagger: the calibration reports M4-E inference as not valid ({flagged}); these pairs are shown, not removed. Right:
-retained block of the coupling for 12->16, 16->20R and 20R->22R, as P(Target state | Source state); grey numbers are
-retained cells per state (rows: Source, top: Target); values >= 0.10 printed; pale rows have no retained cell. At 16->20R only {int(ns1620.sum())} of {int(r.loc[('16→20R', 'source')].cells):,} Source cells are retained,
+retained block of the coupling for 12->16, 16->20R and 20R->22R, as P(Target state | Source state) in percent; values >= 20% printed; grey numbers are
+retained Source cells per state; pale rows have no retained cell. Retained Target cells per state are in `data/c_transition_*.tsv`. At 16->20R only {int(ns1620.sum())} of {int(r.loc[('16→20R', 'source')].cells):,} Source cells are retained,
 so these links rest on few cells.
 
 **d**, Left: Source-side rejected fraction by state at the three later pairs (colour: rejected fraction; dot size grows with log10 cells). At
