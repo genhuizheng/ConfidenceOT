@@ -278,6 +278,56 @@ Written after `06_prepare_tacc.py` ran on all six datasets and before any OT run
   - IWR-1 units: rejection and coupling of endocardium-derived vs epicardium-derived fibroblast types.
 - **Cannot support:** the ancestry of any cell. Rejection is not read as death or as a cell-type origin.
 
+### Content checks (`08_content_checks.py`, outputs in `$APP/content/`)
+
+Checks that each label means what it says. Means are log1p(CP10k).
+
+**Consistent with the original papers:**
+- **Kang:** ISG15 / IFI6 / IFIT1 / MX1 are far higher in stim in all 8 types (CD14 Mono ISG15 0.69 → 6.06).
+- **Schiebinger:**
+  - Dppa5a and Nanog rise with age, and Col1a1 is high at D0.
+  - 2i is above serum at D12 (Dppa5a 1.54 vs 0.53).
+  - The pertpy age of every GSM equals its GEO title.
+- **Pancreas:** every marker sits in its type: Neurog3 in Ngn3 high EP, Fev in Fev+, Ins1 in Beta, Gcg in Alpha, Sst in
+  Delta, Ghrl in Epsilon, Cpa1 in acinar.
+- **LARRY in vivo:** Ltf in Neu, Cd79a in B, Klf1 / Hba-a1 in Ery, Csf1r / Ly6c2 in Mono.
+- **sciPlex2:**
+  - Dex raises FKBP5 and TSC22D3.
+  - Nutlin 5–50 µM raises CDKN1A and MDM2 and lowers MKI67 / TOP2A.
+  - SAHA raises CDKN1A.
+- **Zebrafish:** every metadata cell is found in the barcodes of exactly one GEO library (100% for all 39).
+  - Hr2a = GEO Hr2, and Hr2b = GEO Hr2_morecells.
+  - **GEO file names Hr22 and Hr23 are swapped relative to the metadata:** metadata Hr22 matches `GSE158919 Hr23`, and
+    metadata Hr23 matches `GSE159032 Hr22`. Libraries are therefore taken by barcode match, never by file name. Both are
+    3 dpi morphine hearts with trees, so no unit changes.
+
+**Problems found:**
+- **SPLINTR pool-2 day labels conflict.** The hashtags themselves are clean: each pool sample's cells take one hashtag at
+  99–100%. Mouse identity is therefore certain; which pool-2 mice are day 5 and which day 7 is not:
+
+  | Pool-2 hashtag | Authors' code | Supplementary Table 2 | singletCode sheet |
+  |---|---|---|---|
+  | A0301 (M07) | D5 | D5 | `chemoDay5_1` (D5) |
+  | A0302 (M09) | **D7** | D5 | `chemoDay5_2` (D5) |
+  | A0303 (M11) | **D5** | (not listed) | `chemoDay7_1` (D7) |
+  | A0305 (M12) | D7 | D7 | `chemoDay7_2` (D7) |
+
+  Supplementary Table 2 lists A0306, which has almost no counts. A second recode in the same Rmd labels M07 as D6. Pool
+  1 agrees across all sources: A0301 / A0302 vehicle, A0303 / A0305 day 2. **Decision needed.**
+- **C. elegans `< 100` bin is mostly germline.**
+  - 368 of its 458 cells are annotated Z2 / Z3; the `> 650` bin holds 102 more.
+  - Expression-estimated time places transcriptionally quiet germ cells early, so `< 100 → 100-130` is largely germline
+    → early soma, and lineage compatibility there is not meaningful.
+  - The unit stays (no pair selection) and is reported with this caveat; the Z2 / Z3 share is reported for every bin.
+  - Other bins: estimated time rises monotonically and lineage names lengthen (median 2 → 11).
+- **LARRY in vivo depth differs 3–5× between sides:** median total counts are d2 4,860 (LSK), d9 1,740, d16 920.
+  Depth AUROC is reported with every rejection result.
+- **sciPlex2 BMS 1 µM carries a p53-like signal in all 6 of its wells** (CDKN1A 0.69–1.43, MDM2 1.97–2.34, MKI67 about
+  0.5). No other BMS dose shows it.
+  - It is not a single-well error, and these data cannot say whether it is biology or a dose-level annotation problem.
+    The unit stays and is reported with this note.
+  - Nutlin 100 µM keeps 86 cells whose p53 targets are back near vehicle, so the survivors look like non-responders.
+
 ### Decisions needed before the SPLINTR and zebrafish preparation code is written
 1. SPLINTR clone per cell: the dominant barcode with ties left unlabelled (as proposed above), or another rule.
 2. SPLINTR cells: barcoded cells only (as proposed), or our own HTO demultiplexing so that unbarcoded pool cells can be
