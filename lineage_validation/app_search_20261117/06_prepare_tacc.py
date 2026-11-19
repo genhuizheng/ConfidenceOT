@@ -65,7 +65,7 @@ def is_integer(X) -> bool:
 
 class Writer:
     def __init__(self, out: Path, dataset: str):
-        self.root = out / dataset
+        self.root = (out / dataset).resolve()  # manifest paths must be absolute for the worker
         (self.root / "inputs").mkdir(parents=True, exist_ok=True); (self.root / "prep").mkdir(exist_ok=True)
         self.dataset, self.man, self.units = dataset, [], []
 
