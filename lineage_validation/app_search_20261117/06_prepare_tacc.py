@@ -75,6 +75,12 @@ class Writer:
         rng = np.random.default_rng(SEED)
         rec = {"pair_id": u, "dataset_id": self.dataset, "patient_id": patient, **(meta or {})}
         man = {"pair_id": u, "dataset_id": self.dataset, "patient_id": patient}
+        empty = [s for s, i in (("source", src), ("target", tgt)) if len(i) == 0]
+        if empty:  # the unit does not exist in the data (no threshold: only zero cells); listed, never written
+            rec.update({"source_all": len(src), "target_all": len(tgt), "formed": False, "note": "no cells on " + " and ".join(empty)})
+            self.units.append(rec); print(rec, flush=True)
+            return
+        rec["formed"] = True
         for side, idx in (("source", src), ("target", tgt)):
             idx = np.asarray(idx)
             pri = idx[priority[idx]] if priority is not None else idx[:0]
