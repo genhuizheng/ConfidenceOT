@@ -32,8 +32,8 @@ ROWS = [
     ("C. elegans embryo", "Packer 2019", "Whole embryo, 12 time bins", "adjacent time bins", "11", "invariant lineage (names inferred)", 3, ""),
     ("Mouse pancreas", "Bastidas-Ponce 2019", "Endocrinogenesis E12.5-E15.5", "stage -> next stage", "3", "stage only", 3, ""),
     ("LARRY in vivo", "Weinreb 2020", "Transplanted progenitors", "day 2 -> day 9 / 16", "3", "DNA clone barcodes", 3, ""),
-    ("SPLINTR AML", "Fennell 2022", "Mouse AML, chemotherapy vs vehicle", "baseline -> each mouse", "16*", "expressed clone barcodes", 2, "*proposed"),
-    ("Zebrafish heart", "Hu 2022", "Cryoinjury, Ctrl -> 30 dpi", "adjacent times per treatment", "9*", "scar trees (within heart)", 2, "*proposed"),
+    ("SPLINTR AML", "Fennell 2022", "Mouse AML, chemotherapy vs vehicle", "baseline -> each mouse", "16", "expressed clone barcodes (units proposed)", 2, "*proposed"),
+    ("Zebrafish heart", "Hu 2022", "Cryoinjury, Ctrl -> 30 dpi", "adjacent times per treatment", "9", "scar trees, within heart (units proposed)", 2, "*proposed"),
 ]
 
 
@@ -54,9 +54,9 @@ def panel_a(sh, t):
             (57.0, "Independent reference")]
     sx = [75.5 + i * 5.6 for i in range(5)]
     for x, h in cols:
-        ax.text(x, 0.35, h, fontsize=fs.FS_SMALL + 0.3, color=fs.SUBTLE, va="center")
+        ax.text(x, 0.35, h, fontsize=fs.FS_SMALL + 0.3, color=fs.INK, va="center")
     for i, s in enumerate(STAGES):
-        ax.text(sx[i], 0.35, s, fontsize=fs.FS_SMALL - 0.3, color=fs.SUBTLE, va="center", ha="center", linespacing=0.95)
+        ax.text(sx[i], 0.35, s, fontsize=fs.FS_SMALL - 0.3, color=fs.INK, va="center", ha="center", linespacing=0.95)
     ax.plot([0, 100], [1.0, 1.0], color=fs.INK, lw=0.5)
     stage_col = ["#B0B5B9", "#8FB0C6", fs.SRC, fs.RETAIN, fs.REJECT]
     for r, row in t.iterrows():
@@ -64,7 +64,7 @@ def panel_a(sh, t):
         if r % 2 == 0:
             ax.add_patch(__import__("matplotlib.patches", fromlist=["Rectangle"]).Rectangle((0, y - 0.5), 100, 1.0, color=fs.PALE, lw=0, zorder=0))
         ax.text(0.0, y, f"{row.dataset}", fontsize=fs.FS_ANNOT, va="center")
-        ax.text(0.0, y + 0.33, row.paper, fontsize=fs.FS_SMALL - 0.4, va="center", color=fs.SUBTLE)
+        ax.text(0.0, y + 0.33, row.paper, fontsize=fs.FS_SMALL - 0.4, va="center", color=fs.INK)
         ax.text(17.5, y, row.system, fontsize=fs.FS_SMALL, va="center")
         ax.text(37.0, y, row.source_to_target, fontsize=fs.FS_SMALL, va="center")
         ax.text(54.0, y, row.units, fontsize=fs.FS_SMALL, va="center", ha="center")
@@ -81,7 +81,7 @@ def panel_a(sh, t):
 
 def panel_b(sh):
     import glyphs as gl
-    sh.panel("b", 0.0, 0.0, 4.55, 1.90, "Most worth completing: independent reference information")
+    sh.panel("b", 0.0, 0.0, 4.55, 1.90, "Most worth completing: independent reference information (schematic)")
     W, H = 4.45, 1.58
     ax = sh.ax(0.05, 0.04, W, H); ax.set_xlim(0, W); ax.set_ylim(0, H); fs.blank(ax)
     fs.schematic_tag(ax, 1.0, 1.04)
@@ -111,7 +111,7 @@ def panel_b(sh):
             gl.cell_cluster(ax, cx - 0.16, cy + 0.01, fs.POP[0], n=3, r=0.03, spread=0.05, seed=1)
             gl.arrow(ax, cx - 0.06, cy + 0.01, cx + 0.06, cy + 0.01, color=fs.RETAIN)
             gl.cell_cluster(ax, cx + 0.16, cy + 0.01, fs.POP[0], n=3, r=0.03, spread=0.05, seed=2)
-        gl.label(ax, x + 0.07, 0.76, ref, ha="left", va="top", color=fs.SUBTLE)
+        gl.label(ax, x + 0.07, 0.76, ref, ha="left", va="top", color=fs.INK)
         gl.label(ax, x + 0.07, 0.44, q, ha="left", va="top", color=fs.INK)
 
 

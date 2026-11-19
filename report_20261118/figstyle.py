@@ -105,7 +105,23 @@ class Sheet:
         if title:
             self.text(x0 + 0.22, y1 - 0.035, title, fontsize=FS_TITLE, va="top", ha="left", color=INK)
 
+    def drop_grey_text(self):
+        """User 2026-11-19: no small grey text in the figures (footnotes, tags, notes live in the captions).
+        Removes every text artist drawn in SUBTLE; labels that carry data are drawn in INK and stay."""
+        from matplotlib.colors import to_hex
+        grey = SUBTLE.lower()
+        n = 0
+        for t in list(self.fig.texts) + [t for a in self.fig.axes for t in a.texts]:
+            if to_hex(t.get_color()).lower() == grey:
+                t.remove(); n += 1
+        for a in self.fig.axes:
+            for lab in a.get_xticklabels() + a.get_yticklabels():
+                if to_hex(lab.get_color()).lower() == grey:
+                    lab.set_color(INK)
+        return n
+
     def save(self, outdir: Path | None = None, dpi=450):
+        removed = self.drop_grey_text()
         outdir = (outdir or OUT) / self.name
         outdir.mkdir(parents=True, exist_ok=True)
         stem = outdir / self.name
@@ -121,7 +137,7 @@ class Sheet:
             meta["panels"][k] = [x0, y0, x1, y1]
         (outdir / f"{self.name}_panels.json").write_text(json.dumps(meta, indent=1))
         plt.close(self.fig)
-        print(f"{self.name}: {self.W:.2f} x {self.H:.2f} in = {self.W*25.4:.0f} x {self.H*25.4:.0f} mm; panels {list(self.panels)}")
+        print(f"{self.name}: {self.W:.2f} x {self.H:.2f} in; panels {list(self.panels)}; grey text removed: {removed}")
 
 
 def box(ax, x, y, w, h, text, fc="white", ec=INK, tc=INK, fs=FS_ANNOT, lw=0.6, style="round,pad=0.02,rounding_size=0.04", **kw):

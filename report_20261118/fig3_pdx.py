@@ -154,21 +154,21 @@ def tables(cells, g, pairs, fit, trans, sc):
 def panel_a(sh, design, comp):
     import glyphs as g
     x0, y0, x1, y1 = 0.0, 3.62, 3.25, 5.4
-    sh.panel("a", x0, y0, x1, y1, title="LTL331 PDX: sampling after host castration")
+    sh.panel("a", x0, y0, x1, y1, title="LTL331 PDX: sampling after host castration (schematic)")
     W, H = 3.18, 1.46
     ax = sh.ax(0.05, 3.64, W, H); ax.set_xlim(0, W); ax.set_ylim(0, H); st.blank(ax)
     st.schematic_tag(ax, 1.0, 1.04)
     # PDX host
     g.mouse_icon(ax, 0.20, 1.10, 0.12)
     g.tumour(ax, 0.17, 1.05, 0.065, [SCOL["AR-high PRAD"], SCOL["AR-low PRAD"]], seed=2)
-    g.label(ax, 0.20, 0.90, "PDX host", color=st.SUBTLE)
+    g.label(ax, 0.20, 0.90, "PDX host", color=st.INK)
     # timeline
     xa, xb, yt = 0.66, 3.08, 1.02
     pos = {r.sample_id: xa + (r.weeks_after_castration + (1.6 if r.label == "pre" else 0) + 0.0) / 23.6 * (xb - xa)
            if r.label != "pre" else xa for _, r in design.iterrows()}
     rx0 = pos["w20_20wkCX_1_R"] - 0.12
     g.frame(ax, rx0, 0.74, xb + 0.10 - rx0, 0.58, color=st.PALE, fc=st.PALE, lw=0)
-    g.label(ax, (rx0 + xb + 0.10) / 2, 1.38, "relapse (LTL331R)", color=st.SUBTLE)
+    g.label(ax, (rx0 + xb + 0.10) / 2, 1.38, "relapse (LTL331R)", color=st.INK)
     ax.plot([xa - 0.05, xb + 0.05], [yt, yt], color=st.INK, lw=0.6, zorder=2)
     xc = (pos["w00_preCX_1"] + pos["w02_2wkCX_2"]) / 2
     g.pill(ax, xc - 0.30, 1.33, 0.60, 0.12, "host castration", st.REJECT, fs_=st.FS_SMALL)
@@ -181,7 +181,7 @@ def panel_a(sh, design, comp):
         for j, (dx, dy) in enumerate(((-0.035, 0.02), (0.035, 0.02), (0.0, -0.035))):
             g.cell(ax, x + dx, yt + 0.12 + dy, 0.028, cols[j], nucleus=False, z=5)
         g.label(ax, x, yt - 0.07, r.label, size=st.FS_TICK)
-        g.label(ax, x, yt - 0.18, f"{r.ot_cells / 1000:.1f}k", color=st.SUBTLE)
+        g.label(ax, x, yt - 0.18, f"{r.ot_cells / 1000:.1f}k", color=st.INK)
         if k < 7:
             nx = pos[design.sample_id.iloc[k + 1]]
             ax.annotate("", xy=(nx - 0.05, yt + 0.25), xytext=(x + 0.05, yt + 0.25),
@@ -208,8 +208,8 @@ def panel_b(sh, comp):
         ax.bar(xs, frac[s].to_numpy(), bottom=bot, color=SCOL[s], width=0.72, lw=0, label=SHORT[s])
         bot += frac[s].to_numpy()
     for i, n in enumerate(comp.sum(1)):
-        ax.text(i, 1.03, f"{n:,}", ha="center", va="bottom", fontsize=st.FS_SMALL, color=st.SUBTLE)
-    ax.text(-0.6, 1.17, "n cells", ha="left", va="bottom", fontsize=st.FS_SMALL, color=st.SUBTLE, clip_on=False)
+        ax.text(i, 1.03, f"{n:,}", ha="center", va="bottom", fontsize=st.FS_SMALL, color=st.INK)
+    ax.text(-0.6, 1.17, "n cells", ha="left", va="bottom", fontsize=st.FS_SMALL, color=st.INK, clip_on=False)
     ax.set_xticks(xs, [TLAB[s] for s in SAMPLE_ORDER]); ax.set_xlabel("week after castration (R = relapse)")
     ax.set_ylim(0, 1.0); ax.set_yticks([0, 0.5, 1.0]); ax.set_ylabel("fraction of cells")
     ax.set_xlim(-0.6, 7.5)
@@ -321,11 +321,11 @@ def panel_d(sh, bys, e):
     for i, s in enumerate(STATES):
         ax.text(-0.5, i, SHORT[s], ha="right", va="center", fontsize=st.FS_SMALL)
         ax.plot([-0.45, 2.45], [i, i], color=st.GUIDE, lw=0.3, zorder=0)
-    ax.text(0.85, 8.1, "colour: Source rejected fraction; size: cells", ha="center", va="top", fontsize=st.FS_SMALL, color=st.SUBTLE)
+    ax.text(0.85, 8.1, "colour: Source rejected fraction; size: cells", ha="center", va="top", fontsize=st.FS_SMALL, color=st.INK)
     for j, n in enumerate([10, 100, 1000, 10000]):
         xk = [-0.45, 0.2, 0.92, 1.78][j]
         ax.scatter(xk, 9.1, s=3 + 5 * np.log10(n) ** 2, c="white", edgecolor=st.INK, lw=0.3, clip_on=False)
-        ax.text(xk + [0.12, 0.17, 0.22, 0.27][j], 9.1, f"{n:,}", ha="left", va="center", fontsize=st.FS_SMALL, color=st.SUBTLE)
+        ax.text(xk + [0.12, 0.17, 0.22, 0.27][j], 9.1, f"{n:,}", ha="left", va="center", fontsize=st.FS_SMALL, color=st.INK)
     ax2 = sh.ax(2.42, 0.42, 0.5, 1.0); st.tidy(ax2)
     v = np.log2(e.enrichment.clip(lower=1e-3).to_numpy())
     ax2.hist(v, bins=np.linspace(-1, 7, 25), orientation="horizontal", color=st.NEUTRAL, lw=0)
@@ -363,9 +363,9 @@ def panel_e(sh, comp, rej, heat, e):
          "not testable"),
     ]
     for xx, t in ((0.0, "Published (as recorded in repo)"), (0.40, "This analysis"), (0.82, "Status")):
-        ax.text(xx, 0.965, t, fontsize=st.FS_ANNOT, va="center", color=st.SUBTLE)
+        ax.text(xx, 0.965, t, fontsize=st.FS_ANNOT, va="center", color=st.INK)
     ax.plot([0, 1], [0.915, 0.915], color=st.GUIDE, lw=0.6)
-    stcol = {"consistent (data)": st.RETAIN, "consistent (OT)": st.RETAIN, "consistent;\npair flagged": st.FALSE_REJ, "not testable": st.SUBTLE}
+    stcol = {"consistent (data)": st.RETAIN, "consistent (OT)": st.RETAIN, "consistent;\npair flagged": st.FALSE_REJ, "not testable": st.INK}
     for i, (a, b, c) in enumerate(rows):
         yy = 0.83 - i * 0.165
         ax.text(0.0, yy, a, fontsize=st.FS_SMALL, va="center", linespacing=1.15)
@@ -378,7 +378,7 @@ def panel_e(sh, comp, rej, heat, e):
     ax.text(0.0, 0.0, f"Limits: at 16→20R only {s1620.cells - s1620.rejected} of {s1620.cells:,} Source cells are retained.\n"
             f"Rejected cells are deeper (Source AUC {a1:.2f} pre→2, {a2:.2f} 4→8, {a3:.2f} 16→20R); unresolved.\n"
             "Rejection is not cell death or a state change; no PRAD→NEPC trajectory is reconstructed.",
-            fontsize=st.FS_SMALL, va="bottom", color=st.SUBTLE, linespacing=1.15)
+            fontsize=st.FS_SMALL, va="bottom", color=st.INK, linespacing=1.15)
 
 
 # ------------------------------------------------------------------------------------------------------------ text

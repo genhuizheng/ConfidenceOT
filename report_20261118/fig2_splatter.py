@@ -35,7 +35,7 @@ ARMS = [  # (config id, legend label, colour)
     ("ranknm256-midrank|none|noscale|cos|pca50", "Main, no gene scaling", "#37536B"),
     ("ranknm256-production|none|noscale|cos|pca30", "Earlier default (PCA 30)", "#6E8E7D"),
     ("logcpm|none|noscale|cos|pca30", "log CPM, cosine", "#BCA177"),
-    ("logcpm|none|scale|sqeuc|pca50", "log CPM, Euclidean *", "#8FB0C6"),
+    ("logcpm|none|scale|sqeuc|pca50", "log CPM, Euclidean", "#8FB0C6"),
     ("ranknm256-midrank|none|scale|sqeuc|pca50", "Main, Euclidean cost", "#444444"),
 ]
 
@@ -102,7 +102,7 @@ def load():
 # ------------------------------------------------------------------ panels
 def panel_a(sh):
     x0, y0, x1, y1 = 0.0, 3.62, 3.05, 5.40
-    sh.panel("a", x0, y0, x1, y1, "Benchmark design (Splatter, known truth)")
+    sh.panel("a", x0, y0, x1, y1, "Benchmark design (Splatter, known truth; schematic)")
     ax = sh.ax(0.05, 3.64, 2.98, 1.46); ax.set_xlim(0, 2.98); ax.set_ylim(0, 1.46); fs.blank(ax)
     fs.schematic_tag(ax, 1.0, 1.04)
     # ---- cases: which of the 5 groups each side holds
@@ -116,7 +116,7 @@ def panel_a(sh):
     for i, (c, sub, s_, t_) in enumerate(cases):
         y = 1.13 - i * 0.29
         g.label(ax, 0.0, y + 0.05, c, ha="left", size=fs.FS_ANNOT)
-        g.label(ax, 0.0, y - 0.07, sub, ha="left", color=fs.SUBTLE)
+        g.label(ax, 0.0, y - 0.07, sub, ha="left", color=fs.INK)
         for x_, groups in ((xs0, s_), (xt0, t_)):
             for k in range(1, 6):
                 if k in groups:
@@ -129,7 +129,7 @@ def panel_a(sh):
     for k in range(5):
         g.cell(ax, 0.50 + k * 0.21, 0.03, 0.026, fs.POP[k], nucleus=False)
         g.label(ax, 0.545 + k * 0.21, 0.03, f"G{k + 1}", ha="left", color=fs.POP[k])
-    g.label(ax, 0.0, 0.03, "Groups:", ha="left", color=fs.SUBTLE)
+    g.label(ax, 0.0, 0.03, "Groups:", ha="left", color=fs.INK)
     # ---- technical levels, cumulative, each with an icon
     xl, xi, xt = 1.64, 1.90, 2.06
     g.label(ax, xl, 1.38, "Technical levels (cumulative)", ha="left", size=fs.FS_ANNOT)
@@ -169,7 +169,7 @@ def panel_b(sh, b):
     xs = np.arange(5)
     ax = sh.ax(3.55, 4.02, 1.75, 0.92); fs.tidy(ax)
     ax.axhline(b.reject_all_f1.mean(), **fs.REF_KW)
-    ax.text(4.25, b.reject_all_f1.mean() + 0.03, "reject all", fontsize=fs.FS_SMALL, color=fs.SUBTLE, ha="right", va="bottom")
+    ax.text(4.25, b.reject_all_f1.mean() + 0.03, "reject all", fontsize=fs.FS_SMALL, color=fs.INK, ha="right", va="bottom")
     ax.errorbar(xs, b.case2_f1_eff, yerr=b.case2_f1_eff_rep_sd, color=fs.METHOD["ConfidenceOT"], lw=1.2, marker="o", ms=3.2,
                 capsize=1.6, elinewidth=0.6, label="Case 2 (mean of both directions)", zorder=4)
     ax.plot(xs, b.lost_src_f1_mean, color=fs.SRC, lw=0.8, marker="s", ms=2.4, label="lost population (source side)")

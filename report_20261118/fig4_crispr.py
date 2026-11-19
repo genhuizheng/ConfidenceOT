@@ -157,13 +157,13 @@ def legend_swatch(sh, x, y, color, label, fsz=None):
 def panel_a(sh):
     import glyphs as g
     x0, y0, x1, y1 = 0.0, 3.30, 2.62, 5.40
-    sh.panel("a", x0, y0, x1, y1, title="Two measurements of the same cells")
+    sh.panel("a", x0, y0, x1, y1, title="Two measurements of the same cells (schematic)")
     W, H = 2.54, 1.78
     ax = sh.ax(0.04, 3.32, W, H); ax.set_xlim(0, W); ax.set_ylim(0, H); fs.blank(ax)
     fs.schematic_tag(ax, 1.0, 1.0)
     # the same cell, two read-outs
     g.cell(ax, 0.16, 1.55, 0.08, fs.SUBTLE)
-    g.label(ax, 0.16, 1.38, "one cell", color=fs.SUBTLE)
+    g.label(ax, 0.16, 1.38, "one cell", color=fs.INK)
     ax.plot([0.27, 0.42], [1.62, 1.62], color=RNA_OT, lw=0.6)
     t = np.linspace(0, 1, 30)
     ax.plot(0.44 + 0.22 * t, 1.62 + 0.015 * np.sin(t * 18), color=RNA_OT, lw=0.8)
@@ -180,7 +180,7 @@ def panel_a(sh):
     g.pill(ax, 0.40, y - 0.11, 0.86, 0.22, "RNA-only\nConfidenceOT", RNA_OT, fs_=fs.FS_SMALL)
     g.arrow(ax, 1.28, y, 1.40, y)
     g.coupling_icon(ax, 1.62, y, 0.15, kind="cot")
-    g.label(ax, 1.62, y - 0.20, "matches + gate", color=fs.SUBTLE)
+    g.label(ax, 1.62, y - 0.20, "matches + gate", color=fs.INK)
     # row 2: edits -> clades
     y2 = 0.53
     from matplotlib.patches import Rectangle as R
@@ -191,7 +191,7 @@ def panel_a(sh):
     g.pill(ax, 0.40, y2 - 0.11, 0.86, 0.22, "edit agreement s\n(founders removed)", fs.SUBTLE, tc=fs.INK, fs_=fs.FS_SMALL)
     g.arrow(ax, 1.28, y2, 1.40, y2)
     g.tree_icon(ax, 1.62, y2 + 0.03, 0.14, [CL_COL["3457-A"], CL_COL["3457-A"], CL_COL["3457-B"], CL_COL["3457-C"]])
-    g.label(ax, 1.62, y2 - 0.17, "clades", color=fs.SUBTLE)
+    g.label(ax, 1.62, y2 - 0.17, "clades", color=fs.INK)
     # evaluation
     g.elbow(ax, [(1.82, y), (1.82, y2)], (1.98, (y + y2) / 2), xmid=1.90)
     g.pill(ax, 1.99, (y + y2) / 2 - 0.17, 0.55, 0.34, "evaluate:\nfamilies,\nclades", fs.INK, tc=fs.INK, fs_=fs.FS_SMALL, alpha=0.08)
@@ -231,7 +231,7 @@ def panel_b(sh, m, allcfg, main):
     ax2.axhline(0, **fs.REF_KW)
     ax2.set_ylim(-0.25, 0.95); ax2.set_xlim(-0.45, 0.45); ax2.set_xticks([0]); ax2.set_xticklabels(["296\nconfigs"], fontsize=fs.FS_SMALL)
     ax2.set_yticks([]); fs.tidy(ax2, left=False)
-    ax2.text(0.5, 0.99, f"median\n{np.median(v):.3f}", transform=ax2.transAxes, ha="center", va="top", fontsize=fs.FS_SMALL, color=fs.SUBTLE)
+    ax2.text(0.5, 0.99, f"median\n{np.median(v):.3f}", transform=ax2.transAxes, ha="center", va="top", fontsize=fs.FS_SMALL, color=fs.INK)
     sh.text(x0 + 0.42, y0 + 0.04, f"grey: {len(m)} metastases; red: mouse means", fontsize=fs.FS_SMALL,
             color=fs.SUBTLE, va="bottom")
 
@@ -288,10 +288,10 @@ def panel_c(sh, rows, code, pos, founder, intbcs):
              ("3457-B state", CL_COL["3457-B"]), ("A = B state", "#7E6A9A"), ("other edit", fs.NEUTRAL)]
     for k, (t_, c_) in enumerate(items):
         legend_swatch(sh, x0 + 0.10 + (k % 3) * 0.84, 1.02 - (k // 3) * 0.13, c_, t_, fsz=fs.FS_TICK)
-    sh.text(x0 + 0.10, 0.63, "site:", fontsize=fs.FS_TICK, va="center", color=fs.SUBTLE)
+    sh.text(x0 + 0.10, 0.63, "site:", fontsize=fs.FS_TICK, va="center", color=fs.INK)
     for k, (t_, c_) in enumerate([("T1 primary", SITE_COL["T1"]), ("K1 met", SITE_COL["K1"]), ("N2 met", SITE_COL["N2"])]):
         legend_swatch(sh, x0 + 0.40 + k * 0.70, 0.63, c_, t_, fsz=fs.FS_TICK)
-    sh.text(x0 + 0.10, 0.49, "RNA state (cells):", fontsize=fs.FS_TICK, va="center", color=fs.SUBTLE)
+    sh.text(x0 + 0.10, 0.49, "RNA state (cells):", fontsize=fs.FS_TICK, va="center", color=fs.INK)
     other_n = int((~rows.state.isin(top_states)).sum())
     labs = [(f"{s} ({int(states[s])})", st_col[s]) for s in top_states] + [(f"other ({other_n})", "#D9D9D9")]
     for k, (t_, c_) in enumerate(labs):

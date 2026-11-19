@@ -39,7 +39,7 @@ def sax(sh, x, y, w, h):
 
 # ------------------------------------------------------------------ a
 def panel_a(sh):
-    sh.panel("a", 0.0, 3.50, 3.30, 5.40, "Why do we need rejection?")
+    sh.panel("a", 0.0, 3.50, 3.30, 5.40, "Why do we need rejection? (schematic)")
     ax = sax(sh, 0.05, 3.55, 3.22, 1.58)
     for x0, lab, col in ((0.05, "Source sample", fs.SRC), (2.02, "Target sample", fs.TGT)):
         g.frame(ax, x0, 0.22, 1.15, 1.18, color=col, lw=0.7)
@@ -66,7 +66,7 @@ def panel_a(sh):
 
 # ------------------------------------------------------------------ b
 def panel_b(sh):
-    sh.panel("b", 3.35, 3.50, 7.20, 5.40, "Standard OT vs ConfidenceOT (same toy problem)")
+    sh.panel("b", 3.35, 3.50, 7.20, 5.40, "Standard OT vs ConfidenceOT (schematic)")
     ax = sax(sh, 3.38, 3.55, 3.80, 1.58)
     rows = [(1.24, "Balanced OT", fs.METHOD["Balanced OT"], "balanced", "every cell sends and receives all its mass",
              "cells without a counterpart are forced into matches"),
@@ -98,7 +98,7 @@ def panel_b(sh):
 
 # ------------------------------------------------------------------ c
 def panel_c(sh):
-    sh.panel("c", 0.0, 2.18, 7.20, 3.45, "ConfidenceOT workflow (the code path behind every result in this report)")
+    sh.panel("c", 0.0, 2.18, 7.20, 3.45, "ConfidenceOT workflow (schematic of the code path used for every result)")
     ax = sax(sh, 0.05, 2.20, 7.12, 1.00)
     xs = np.linspace(0.42, 6.66, 7)
     yi, yl, ys = 0.64, 0.36, 0.30
@@ -138,7 +138,7 @@ def panel_c(sh):
             g.pill(ax, xs[i] - 0.48, yl - 0.08, 0.96, 0.16, h, fs.REJECT, fs_=fs.FS_ANNOT)
         else:
             g.label(ax, xs[i], yl, h, color=fs.INK, size=fs.FS_ANNOT)
-        g.label(ax, xs[i], ys - 0.05, b, color=fs.SUBTLE, va="top")
+        g.label(ax, xs[i], ys - 0.05, b, color=fs.INK, va="top")
         if i < 6:
             g.arrow(ax, xs[i] + 0.27, yi, xs[i + 1] - 0.27, yi)
     g.pill(ax, xs[5] - 0.75, 0.90, 1.50, 0.12, "rejection cost: keeps 99% of a within-sample split null", fs.RETAIN,
@@ -219,7 +219,7 @@ def panel_d(sh):
     for i in range(r.shape[0]):
         if few.iloc[i]:
             ax.add_patch(__import__("matplotlib.patches", fromlist=["Rectangle"]).Rectangle((-0.5, i - 0.5), r.shape[1], 1, fc=fs.PALE, ec="none"))
-            ax.text((r.shape[1] - 1) / 2, i, f"{ret_n.iloc[i]} retained cell (lost group)", ha="center", va="center", fontsize=fs.FS_SMALL, color=fs.SUBTLE)
+            ax.text((r.shape[1] - 1) / 2, i, f"{ret_n.iloc[i]} retained cell (lost group)", ha="center", va="center", fontsize=fs.FS_SMALL, color=fs.INK)
             continue
         for j in range(r.shape[1]):
             v = r.iloc[i, j]
