@@ -390,8 +390,8 @@ CRISPR-OT keeps 3457-B {int(k.loc['3457-B','crispr_kept'])}/{int(k.loc['3457-B',
 
 **e**, Limits and other lineage systems. Top: frozen resolution rule for the {nf} KP families in the OT units (filled = criterion
 met); {nres} of {nf} are resolved. Middle: cell-level edit gain of the RNA coupling over an independent coupling (L3 matrix ΔS_norm,
-main configuration, pooled cases): KP 3724 {kp_l3.get('3724', np.nan):.3f}, other KP cases {', '.join(f'{v:.3f}' for mo, v in kp_l3.items() if mo != '3724')};
-Quinn A549 xenografts {', '.join(f'{v:.3f}' for v in q_l3)}. One family (3724, 20,992 cells) carries the cell-level signal. Bottom: LARRY in vitro
+main configuration, pooled cases): KP 3724 {kp_l3.get('3724', np.nan):.3f}, other KP cases {', '.join(f'{mo} {v:.3f}' for mo, v in kp_l3.items() if mo != '3724')};
+Quinn A549 xenografts {', '.join(f'{mo} {v:.3f}' for mo, v in q_l3.items())}. One family (3724, 20,992 cells) carries the cell-level signal. Bottom: LARRY in vitro
 (lentiviral barcodes, not CRISPR) local pilot, 3,000 cells per side, M4-E: median clone mass of retained cells relative to a uniform
 coupling, {', '.join(f'{v:.2f}' for v in cm.median_m_over_uniform)} (below 1 = no cell-level clone matching), while fate composition is recovered
 (fate TV below the clone-label null, p = {fate.p_null_le_obs.iloc[0]:.4f} in every unit). The full TACC LARRY run is complete but its score tables were
