@@ -43,8 +43,7 @@ SHORT = {"AR-high PRAD": "AR-high", "AR-low PRAD": "AR-low", "pre-EMT": "pre-EMT
 CLUSTERS = {"AR-high PRAD": "11, 15", "AR-low PRAD": "0, 2, 4, 5, 8, 12, 16", "pre-EMT": "6", "intermediate EMT-like": "17",
             "NEPC ASCL1+": "10", "early NEPC ASCL1-": "13", "terminal NEPC ASCL1-": "1, 7, 9", "NEPC other": "3, 14"}
 # PDX state colours (their own category; none equals a side / gate colour of figstyle)
-SCOL = {"AR-high PRAD": "#1F3B5C", "AR-low PRAD": "#8DB3D3", "pre-EMT": "#D9B44A", "intermediate EMT-like": "#8C5E9E",
-        "NEPC ASCL1+": "#2F8C86", "early NEPC ASCL1-": "#A8D5A2", "terminal NEPC ASCL1-": "#5E7D33", "NEPC other": "#A3A3A3"}
+SCOL = dict(zip(STATES, ["#0B3C5D", "#7FB8E0", "#1B7F5B", "#C2DF8A", "#E8A33D", "#C0392B", "#3D1236", "#A884C9"]))  # = pdx_figures.COLOUR (CVD-checked)
 KEY_PAIRS = [("w12_12wkCX_2", "w16_16wkCX_1"), ("w16_16wkCX_1", "w20_20wkCX_1_R"), ("w20_20wkCX_1_R", "w22_22wkCX_2_R")]
 
 
@@ -217,53 +216,90 @@ def panel_b(sh, comp):
 
 
 def panel_c(sh, rej, heat):
-    import matplotlib as mpl
-    from matplotlib.colors import LinearSegmentedColormap
+    """State flow over time (redrawn from realdata_benchmark/v3_grid/figures/pdx_figures.py::flow, same tables and
+    rules): per time point two bars of all its OT cells (as Target of the previous pair, as Source of the next),
+    solid = retained, hatched = rejected; bands = coupling mass on the retained x retained block, each end scaled to the
+    retained segment it joins (row-normalised at the source end, column-normalised at the target end)."""
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon, Rectangle
     x0, y0, x1, y1 = 0.0, 1.80, 7.2, 3.58
-    sh.panel("c", x0, y0, x1, y1, title="ConfidenceOT matching between adjacent samples (main configuration, M4-E)")
-    ax = sh.ax(0.40, 2.25, 1.85, 0.92); st.tidy(ax)
-    labs = list(rej.pair.unique()); xs = np.arange(len(labs))
-    for side, col, dx in (("source", st.SRC, -0.14), ("target", st.TGT, 0.14)):
-        r = rej[rej.side == side].set_index("pair").reindex(labs)
-        ax.bar(xs + dx, r.rejected_fraction, width=0.27, color=col, lw=0, label=side.capitalize())
-    for i, l in enumerate(labs):
-        if not bool(rej[(rej.pair == l)].m4e_inference_valid.iloc[0]):
-            ax.text(i, 1.0, "†", ha="center", va="bottom", fontsize=st.FS_TICK, color=st.INK)
-    ax.set_xticks(xs, labs, rotation=35, ha="right", rotation_mode="anchor")
-    ax.set_ylim(0, 1.0); ax.set_yticks([0, 0.5, 1.0]); ax.set_ylabel("rejected fraction")
-    ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.07), ncol=2, handlelength=0.9, columnspacing=0.8, borderaxespad=0)
-    sh.text(1.50, 3.245, "† M4-E calibration\n   flag (kept, not removed)", fontsize=st.FS_SMALL,
-            color=st.SUBTLE, va="bottom", linespacing=1.1)
-    cmap = LinearSegmentedColormap.from_list("ret", ["#FFFFFF", st.RETAIN]); cmap.set_bad(st.PALE)
-    c = 0.115; top = 3.28; xs0 = [2.98, 4.30, 5.62]
-    sh.text(3.65, 3.455, "Retained cells: P(Target state | Source state) in %, shown where ≥ 20; grey = retained Source cells",
+    sh.panel("c", x0, y0, x1, y1, title="ConfidenceOT over time: states, gates and retained matches (main configuration, M4-E)")
+    srej = pd.read_csv(PDX / "state_rejected_all.tsv", sep="\t")
+    srej = srej[srej.config_id == MAIN]
+    tr = pd.read_csv(PDX / f"transitions_{KEY}.tsv", sep="\t")
+    tr = tr[tr.block == "retained"]
+    srej.to_csv(DATA / "c_flow_state_gates.tsv", sep="\t", index=False)
+    tr.to_csv(DATA / "c_flow_retained_mass.tsv", sep="\t", index=False)
+    pairs = [unit(a, b) for a, b in zip(SAMPLE_ORDER[:-1], SAMPLE_ORDER[1:])]
+    ax = sh.ax(0.42, 2.10, 5.62, 1.12)
+    bw, gap = 0.085, 0.05
+    hatch_lw = plt.rcParams["hatch.linewidth"]; plt.rcParams["hatch.linewidth"] = 0.45
+
+    def bar(xb, pair, side):
+        gg = srej[(srej.pair == pair) & (srej.side == side)].set_index("state").reindex(STATES).fillna(0)
+        n = gg.cells.sum()
+        share, ret = (gg.cells / n).to_numpy(), ((gg.cells - gg.rejected) / n).to_numpy()
+        yb = np.concatenate([[0], np.cumsum(share)])[:-1]
+        for i, s in enumerate(STATES):
+            if share[i] <= 0:
+                continue
+            ax.add_patch(Rectangle((xb, yb[i]), bw, ret[i], facecolor=SCOL[s], lw=0))
+            ax.add_patch(Rectangle((xb, yb[i] + ret[i]), bw, share[i] - ret[i], facecolor=g_tint(SCOL[s]),
+                                   edgecolor=SCOL[s], hatch="//////", lw=0))
+        ax.text(xb + (bw if side == "target" else 0), -0.02, f"{100 * (1 - ret.sum()):.0f}%",
+                ha="right" if side == "target" else "left", va="bottom", fontsize=st.FS_SMALL, color=st.INK)
+        return yb, ret
+
+    for k, pair in enumerate(pairs):
+        xs_, xt_ = k + gap / 2, k + 1 - gap / 2 - bw
+        ys, rs = bar(xs_, pair, "source")
+        yt, rt = bar(xt_, pair, "target")
+        M = tr[tr.pair == pair].pivot(index="source_state", columns="target_state", values="mass").reindex(
+            index=STATES, columns=STATES).fillna(0).to_numpy()
+        with np.errstate(invalid="ignore", divide="ignore"):
+            R = np.nan_to_num(M / M.sum(1, keepdims=True)); C = np.nan_to_num(M / M.sum(0, keepdims=True))
+        o_src, o_tgt = ys.copy(), yt.copy()
+        xl, xr = xs_ + bw, xt_
+        xx = np.linspace(xl, xr, 40); w = (1 - np.cos(np.pi * (xx - xl) / (xr - xl))) / 2
+        for i, s in enumerate(STATES):
+            for j in range(len(STATES)):
+                ha, hb = rs[i] * R[i, j], rt[j] * C[i, j]
+                if ha < 2e-4 and hb < 2e-4:
+                    continue
+                top = o_src[i] + (o_tgt[j] - o_src[i]) * w
+                bot = o_src[i] + ha + (o_tgt[j] + hb - o_src[i] - ha) * w
+                o_src[i] += ha; o_tgt[j] += hb
+                ax.add_patch(Polygon(np.c_[np.r_[xx, xx[::-1]], np.r_[top, bot[::-1]]], closed=True,
+                                     facecolor=SCOL[s], alpha=0.40, lw=0))
+        lab = plab(*pair.split("__")[1:])
+        if not bool(rej[rej.pair == lab].m4e_inference_valid.iloc[0]):
+            ax.text(k + 0.5, -0.02, "†", ha="center", va="bottom", fontsize=st.FS_TICK, color=st.INK)
+    plt.rcParams["hatch.linewidth"] = hatch_lw
+    ax.set_xlim(-0.05, len(pairs) + 0.05); ax.set_ylim(1.0, -0.08)
+    ax.set_xticks(range(len(SAMPLE_ORDER)), ["pre", "wk 2", "wk 4", "wk 8", "wk 12", "wk 16", "wk 20R", "wk 22R"])
+    ax.set_yticks([0, 0.5, 1]); ax.set_ylabel("share of cells")
+    ax.spines["left"].set_bounds(0, 1); st.tidy(ax)
+    # legend
+    lx = 6.18
+    for i, s in enumerate(STATES):
+        yy = 3.22 - i * 0.105
+        sh.fig.patches.append(Rectangle((lx / sh.W, (yy - 0.03) / sh.H), 0.08 / sh.W, 0.06 / sh.H, transform=sh.fig.transFigure,
+                                        fc=SCOL[s], ec="none"))
+        sh.text(lx + 0.11, yy, SHORT[s], fontsize=st.FS_SMALL, va="center")
+    for k, (lab_, solid) in enumerate((("retained", True), ("rejected", False))):
+        yy = 3.22 - 8.3 * 0.105 - k * 0.105
+        sh.fig.patches.append(Rectangle((lx / sh.W, (yy - 0.03) / sh.H), 0.08 / sh.W, 0.06 / sh.H, transform=sh.fig.transFigure,
+                                        fc="#6B7177" if solid else g_tint("#6B7177"), ec="#6B7177",
+                                        hatch=None if solid else "//////", lw=0))
+        sh.text(lx + 0.11, yy, lab_, fontsize=st.FS_SMALL, va="center")
+    sh.text(0.42, 1.84, "Two bars per time point: its cells as Target of the previous pair (left) and as Source of the next (right); "
+            "% = rejected share. Bands: retained x retained coupling mass. † calibration flag (kept).",
             fontsize=st.FS_SMALL, color=st.SUBTLE, va="bottom")
-    for k, (s0, s1) in enumerate(KEY_PAIRS):
-        P, ns, nt, tot = heat[(s0, s1)]
-        A = P.loc[STATES, STATES].to_numpy().copy()
-        A[ns.reindex(STATES).to_numpy() == 0, :] = np.nan
-        ax = sh.ax(xs0[k], top - 8 * c, 8 * c, 8 * c)
-        ax.imshow(np.ma.masked_invalid(A), cmap=cmap, vmin=0, vmax=1, aspect="auto", interpolation="nearest")
-        for i in range(8):
-            for j in range(8):
-                if np.isfinite(A[i, j]) and A[i, j] >= 0.20:
-                    ax.text(j, i, f"{100 * A[i, j]:.0f}", ha="center", va="center", fontsize=st.FS_SMALL,
-                            color="white" if A[i, j] > 0.6 else st.INK)
-            ax.text(8.0, i, f"{int(ns[STATES[i]]):,}", ha="left", va="center", fontsize=st.FS_SMALL, color=st.SUBTLE)
-        ax.set_xticks(range(8), [SHORT[s] for s in STATES], rotation=90, fontsize=st.FS_SMALL)
-        ax.set_yticks(range(8), [SHORT[s] for s in STATES] if k == 0 else [], fontsize=st.FS_SMALL)
-        ax.tick_params(length=1.2, pad=1)
-        if k:
-            ax.tick_params(axis="y", length=0)
-        for sp in ax.spines.values():
-            sp.set_visible(False)
-        ax.text(3.5, -0.75, plab(s0, s1), ha="center", va="bottom", fontsize=st.FS_ANNOT)
-        if k == 0:
-            ax.text(-0.6, 8.9, "Source ↓  Target →", ha="right", va="top", fontsize=st.FS_SMALL, color=st.SUBTLE)
-    cax = sh.ax(7.0, 2.45, 0.05, 0.7)
-    cb = mpl.colorbar.ColorbarBase(cax, cmap=cmap, norm=mpl.colors.Normalize(0, 1), ticks=[0, 0.5, 1])
-    cb.set_ticklabels(["0", "50", "100"]); cax.set_title("%", fontsize=st.FS_SMALL, pad=2)
-    cb.outline.set_visible(False); cax.tick_params(labelsize=st.FS_SMALL, length=1.5, pad=1)
+
+
+def g_tint(c, f=0.30):
+    r, gg, b = (int(c[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    return (1 - f + f * r, 1 - f + f * gg, 1 - f + f * b)
 
 
 def panel_d(sh, bys, e):
@@ -377,11 +413,16 @@ Target = next sample. States follow the published map of Sar et al. (Seurat clus
 intermediate EMT-like state (cluster 17) is {comp.loc['w12_12wkCX_2', 'intermediate EMT-like']} and {comp.loc['w16_16wkCX_1', 'intermediate EMT-like']} cells at 12 and 16 weeks; NEPC ASCL1+ is
 {frac.loc['w20_20wkCX_1_R', 'NEPC ASCL1+']:.1%} at 20R, terminal NEPC ASCL1- {frac.loc['w22_22wkCX_2_R', 'terminal NEPC ASCL1-']:.1%} at 22R.
 
-**c**, Left: rejected fraction of Source and Target cells per pair (n cells per side in `data/c_rejected_fraction.tsv`).
-Dagger: the calibration reports M4-E inference as not valid ({flagged}); these pairs are shown, not removed. Right:
-retained block of the coupling for 12->16, 16->20R and 20R->22R, as P(Target state | Source state) in percent; values >= 20% printed; grey numbers are
-retained Source cells per state; pale rows have no retained cell. Retained Target cells per state are in `data/c_transition_*.tsv`. At 16->20R only {int(ns1620.sum())} of {int(r.loc[('16→20R', 'source')].cells):,} Source cells are retained,
-so these links rest on few cells.
+**c**, ConfidenceOT over the time course (main configuration, M4-E), redrawn from the tables of
+`realdata_benchmark/v3_grid/figures/pdx_figures.py` (same rules). Each time point has two bars of all its cells: as Target of
+the pair from the previous time point (left) and as Source of the pair to the next (right); the cells are the same, each
+pair gates them separately. Segment height = the state's share of the cells, solid retained, hatched rejected; the number
+above a bar is its rejected share (n cells per side in `data/c_rejected_fraction.tsv`). Bands join retained segments with
+the coupling mass of the retained x retained block, row-normalised at the Source end and column-normalised at the Target
+end. Dagger: the calibration reports M4-E inference as not valid ({flagged}); these pairs are shown, not removed. Retained
+transition shares, P(Target state | Source state), are in `data/c_transition_*.tsv` (and Supplementary S11): at 12->16
+intermediate -> intermediate {P1216.loc['intermediate EMT-like', 'intermediate EMT-like']:.2f}, at 20R->22R ASCL1+ -> terminal ASCL1- {P2022.loc['NEPC ASCL1+', 'terminal NEPC ASCL1-']:.2f}. At 16->20R only
+{int(ns1620.sum())} of {int(r.loc[('16→20R', 'source')].cells):,} Source cells are retained, so these links rest on few cells.
 
 **d**, Left: Source-side rejected fraction by state at the three later pairs (colour: rejected fraction; dot size grows with log10 cells). At
 12->16 the intermediate state is rejected least ({bs('12→16', 'source', 'intermediate EMT-like')[0]:.3f}, n = {bs('12→16', 'source', 'intermediate EMT-like')[1]}) and AR-low most
@@ -426,8 +467,8 @@ the fate GSEA (logCPM arm only, not the main configuration).
               "compared": "Fraction of cells in each published state per sample (data, before any OT).",
               "observe": f"AR-high PRAD {frac.loc['w00_preCX_1', 'AR-high PRAD']:.0%} before castration, AR-low PRAD dominates 2-12 weeks, the intermediate EMT-like state appears at 12-16 weeks, NEPC dominates the relapse.",
               "meaning": "Adjacent samples differ in which states they contain, so some cells should have no counterpart."},
-        "c": {"title": "Rejection and retained state-to-state matching",
-              "compared": "Rejected fraction per pair and side; for three later pairs, where retained Source cells of each state are matched in the Target.",
+        "c": {"title": "States, gates and retained matches over time",
+              "compared": "For every time point, the share of each state retained or rejected as Target and as Source, and where the retained cells are matched in the next sample.",
               "observe": f"Rejection is high where composition changes most (16->20R: {r.loc[('16→20R', 'source')].rejected_fraction:.0%} of Source cells); retained intermediate cells match intermediate cells (P = {P1216.loc['intermediate EMT-like', 'intermediate EMT-like']:.2f}); ASCL1+ at 20R matches terminal ASCL1- at 22R (P = {P2022.loc['NEPC ASCL1+', 'terminal NEPC ASCL1-']:.2f}).",
               "meaning": "The retained correspondences follow the published order of states, but some rest on few cells and three pairs carry a calibration flag."},
         "d": {"title": "Which states keep a counterpart, and is it robust?",

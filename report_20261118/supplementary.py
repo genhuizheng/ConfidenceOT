@@ -38,10 +38,6 @@ SUPP = [
     ("Figure 2", OTDB / "bot_uot/figures/conflict_f0.1_uot_minus_balanced_by_cost.png", "UOT minus balanced OT, by cost",
      "Conflict arm at f = 0.1: correct-group share of entropic UOT minus entropic balanced OT (epsilon 0.1), per level and "
      "cost. C1 main configuration; C2 log1p-PCA; C3 ranknm512-expected noscale cos PCA30; C4 logCPM noscale cos PCA30.", None),
-    ("Figure 3", V3 / "pdx/pdx_flow_splatter_l5_best.png", "Cell states and their gates over time (main configuration)",
-     "LTL331, M4-E. Each time point: left bar = its cells as target of the previous pair, right bar = the same cells as "
-     "source of the next pair (solid retained, hatched rejected); number = rejected share. Bands: coupling mass on the "
-     "retained x retained block.", None),
     ("Figure 3", V3 / "pdx/pdx_slices_splatter_l5_best.png", "Matching drawn on the authors' UMAP",
      "Authors' UMAP, same coordinates in every slice. Lines: 250 retained source cells per pair, sampled by coupling "
      "mass, each to its retained target of largest mass (M4-E). Grey: rejected in every pair.", None),
@@ -53,7 +49,7 @@ SUPP = [
     ("Figure 3", V3 / "pdx/pdx_rejected_median296.png", "Rejected fraction, median over 296 configurations",
      "Same layout as the previous slide, median over all 296 preprocessing configurations.", None),
     ("Figure 3", V3 / "pdx/pdx_flow_logcpm.png", "Comparison arm: logCPM",
-     "Same display for logcpm noscale sqeuc PCA30 (logCPM + PCA only, no cosine, no scaling). Rejection is higher at "
+     "Same display as Figure 3c for logcpm noscale sqeuc PCA30 (logCPM + PCA only, no cosine, no scaling). Rejection is higher at "
      "12->16 (95%) and 16->20 (98%) than with the main configuration.", None),
     ("Figure 4", RLD / "1b_cell_tree_3457_Apc_T1.png", "Family 3457 T1: cell-level CRISPR tree",
      "Raw CRISPR edits only (no OT): average-linkage tree on edit distance 1 - s, clade cut 0.5; tracks: clade, RNA "
