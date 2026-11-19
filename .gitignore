@@ -119,3 +119,7 @@ lineage_validation/**/*.pdf
 lineage_validation/**/*.svg
 !/realdata_benchmark/*.md
 !/realdata_benchmark/*/*.md
+
+# 2026-11-18 report: rendered figures, decks and derived panel tables (scripts are tracked)
+/report_20261118/out/
+/report_20261118/out_layoutcheck/
