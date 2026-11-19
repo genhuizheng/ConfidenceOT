@@ -206,13 +206,21 @@ def panel_d(sh):
         yy = 0.85 - i * 0.24
         lg2.scatter(0.03, yy, s=8, color=ccol[k]); lg2.text(0.08, yy, f"{k}: {int(vc.get(k, 0)):,}", fontsize=fs.FS_SMALL, va="center")
     # d3: retained coupling by group
-    ax = sh.ax(5.15, 0.42, 1.25, 1.25)
+    ax = sh.ax(5.42, 0.56, 1.10, 1.12)
     r = gm[gm.block == "retained"].pivot(index="source_group", columns="target_group", values="mass")
     r = r.div(r.sum(1).replace(0, np.nan), axis=0)
-    im = ax.imshow(r.to_numpy(dtype=float), cmap="Greens", vmin=0, vmax=1, aspect="auto")
-    ax.set_xticks(range(r.shape[1]), [g.replace("Group", "") for g in r.columns]); ax.set_yticks(range(r.shape[0]), [g.replace("Group", "") for g in r.index])
-    ax.set_xlabel("Target group"); ax.set_ylabel("Source group")
+    ret_n = cells[(cells.side == "source") & ~cells.rejected].group.value_counts().reindex(r.index).fillna(0).astype(int)
+    few = ret_n < 10  # a row share over fewer than 10 retained cells is not shown as a distribution
+    rv = r.to_numpy(dtype=float).copy(); rv[few.to_numpy()] = np.nan
+    im = ax.imshow(rv, cmap="Greens", vmin=0, vmax=1, aspect="auto")
+    ax.set_xticks(range(r.shape[1]), [g.replace("Group", "") for g in r.columns])
+    ax.set_yticks(range(r.shape[0]), [f"{g.replace('Group', '')}  ({n:,})" for g, n in zip(r.index, ret_n)])
+    ax.set_xlabel("Target group", labelpad=1); ax.set_ylabel("Source group (retained cells)")
     for i in range(r.shape[0]):
+        if few.iloc[i]:
+            ax.add_patch(__import__("matplotlib.patches", fromlist=["Rectangle"]).Rectangle((-0.5, i - 0.5), r.shape[1], 1, fc=fs.PALE, ec="none"))
+            ax.text((r.shape[1] - 1) / 2, i, f"{ret_n.iloc[i]} retained cell (lost group)", ha="center", va="center", fontsize=fs.FS_SMALL, color=fs.SUBTLE)
+            continue
         for j in range(r.shape[1]):
             v = r.iloc[i, j]
             if np.isfinite(v) and v >= 0.005:
@@ -220,10 +228,10 @@ def panel_d(sh):
     ax.set_title("Retained coupling (row share)", fontsize=fs.FS_ANNOT, pad=2)
     for s_ in ax.spines.values():
         s_.set_linewidth(0.4)
-    cax = sh.ax(6.48, 0.42, 0.06, 1.25); cb = sh.fig.colorbar(im, cax=cax); cb.outline.set_linewidth(0.4); cb.set_ticks([0, 0.5, 1])
-    src5 = cells[(cells.side == "source") & cells.should_reject]
-    sh.text(5.15, 0.10, f"Group 5 (lost): {int(src5.rejected.sum()):,} of {len(src5):,} rejected;\nrows with no retained cell are empty",
-            fontsize=fs.FS_SMALL, color=fs.SUBTLE, va="bottom", linespacing=1.1)
+    cax = sh.ax(6.60, 0.56, 0.06, 1.12); cb = sh.fig.colorbar(im, cax=cax); cb.outline.set_linewidth(0.4); cb.set_ticks([0, 0.5, 1])
+    tg = cells[cells.side == "target"]
+    sh.text(4.75, 0.06, f"Target: {int(tg.rejected.sum()):,} of {len(tg):,} rejected, all with a counterpart (false)",
+            fontsize=fs.FS_SMALL, color=fs.SUBTLE, va="bottom")
     return cells, gm, meta, vc
 
 

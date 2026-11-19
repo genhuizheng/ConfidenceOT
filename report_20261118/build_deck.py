@@ -180,15 +180,15 @@ def intro_slides(D: Deck):
     w, gap, x0, y0 = 2.25, 0.27, 0.55, 2.45
     for i, (f, h, q, ev) in enumerate(steps):
         x = x0 + i * (w + gap)
-        b = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y0), Inches(w), Inches(2.55))
+        b = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y0), Inches(w), Inches(1.75))
         b.fill.solid(); b.fill.fore_color.rgb = RGBColor(0xF3, 0xF4, 0xF5); b.line.color.rgb = RGBColor(0xB0, 0xB5, 0xB9)
         b.adjustments[0] = 0.08
         txt(s, x + 0.08, y0 + 0.12, w - 0.16, 2.35, [[(f, {"bold": True, "color": ORANGE, "size": 15})],
                                                      ("__space__", 2, [(h, {"bold": True, "size": 15})]),
                                                      ("__space__", 10, [(q, {"size": 13})])])
-        txt(s, x + 0.05, y0 + 2.7, w - 0.1, 0.9, [[(ev, {"size": 12, "color": SUB, "italic": True})]], align=PP_ALIGN.CENTER)
+        txt(s, x + 0.05, y0 + 1.88, w - 0.1, 0.9, [[(ev, {"size": 12, "color": SUB, "italic": True})]], align=PP_ALIGN.CENTER)
         if i < len(steps) - 1:
-            a = s.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(x + w + 0.04), Inches(y0 + 1.15), Inches(0.19), Inches(0.28))
+            a = s.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(x + w + 0.04), Inches(y0 + 0.74), Inches(0.19), Inches(0.28))
             a.fill.solid(); a.fill.fore_color.rgb = RGBColor(0x6B, 0x72, 0x80); a.line.fill.background()
     txt(s, 0.6, 6.2, 12.1, 0.7, [[("The levels of evidence differ and are not merged: known truth (Figure 2), consistency with a "
                                    "paper (Figure 3), independent lineage (Figure 4), prepared but unevaluated data (Future work).",

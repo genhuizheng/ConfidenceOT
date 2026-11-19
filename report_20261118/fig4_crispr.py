@@ -266,7 +266,7 @@ def panel_c(sh, rows, code, pos, founder, intbcs):
         axt = sh.ax(hx - 0.60 + i * 0.19, hy, 0.15, hh)
         img = np.array([to_rgb(c) for c in cols])[:, None, :]
         axt.imshow(img, aspect="auto", interpolation="nearest")
-        axt.set_xticks([0]); axt.set_xticklabels([nm], rotation=90, fontsize=fs.FS_SMALL); axt.set_yticks([])
+        axt.set_xticks([0]); axt.set_xticklabels([nm], rotation=90, fontsize=fs.FS_TICK); axt.set_yticks([])
         axt.xaxis.set_ticks_position("top"); axt.tick_params(axis="x", length=0, pad=1)
         for s_ in axt.spines.values():
             s_.set_visible(False)
@@ -283,19 +283,19 @@ def panel_c(sh, rows, code, pos, founder, intbcs):
         if lab_ == "minor":
             yy += 30
         axr.text(0.35, yy, f"{lab_}\n{len(idx)}",
-                 fontsize=fs.FS_SMALL, va="center", ha="left", color=fs.INK)
+                 fontsize=fs.FS_TICK, va="center", ha="left", color=fs.INK)
     items = [("missing", "#FFFFFF"), ("uncut", "#EDEFF1"), ("founder state", "#3B3F42"), ("3457-A state", CL_COL["3457-A"]),
              ("3457-B state", CL_COL["3457-B"]), ("A = B state", "#7E6A9A"), ("other edit", fs.NEUTRAL)]
     for k, (t_, c_) in enumerate(items):
-        legend_swatch(sh, x0 + 0.10 + (k % 3) * 0.84, 1.02 - (k // 3) * 0.13, c_, t_)
-    sh.text(x0 + 0.10, 0.63, "site:", fontsize=fs.FS_SMALL, va="center", color=fs.SUBTLE)
+        legend_swatch(sh, x0 + 0.10 + (k % 3) * 0.84, 1.02 - (k // 3) * 0.13, c_, t_, fsz=fs.FS_TICK)
+    sh.text(x0 + 0.10, 0.63, "site:", fontsize=fs.FS_TICK, va="center", color=fs.SUBTLE)
     for k, (t_, c_) in enumerate([("T1 primary", SITE_COL["T1"]), ("K1 met", SITE_COL["K1"]), ("N2 met", SITE_COL["N2"])]):
-        legend_swatch(sh, x0 + 0.40 + k * 0.70, 0.63, c_, t_)
-    sh.text(x0 + 0.10, 0.49, "RNA state (cells):", fontsize=fs.FS_SMALL, va="center", color=fs.SUBTLE)
+        legend_swatch(sh, x0 + 0.40 + k * 0.70, 0.63, c_, t_, fsz=fs.FS_TICK)
+    sh.text(x0 + 0.10, 0.49, "RNA state (cells):", fontsize=fs.FS_TICK, va="center", color=fs.SUBTLE)
     other_n = int((~rows.state.isin(top_states)).sum())
     labs = [(f"{s} ({int(states[s])})", st_col[s]) for s in top_states] + [(f"other ({other_n})", "#D9D9D9")]
     for k, (t_, c_) in enumerate(labs):
-        legend_swatch(sh, x0 + 0.10 + (k % 3) * 0.86, 0.36 - (k // 3) * 0.13, c_, t_)
+        legend_swatch(sh, x0 + [0.10, 0.94, 1.86][k % 3], 0.36 - (k // 3) * 0.13, c_, t_, fsz=fs.FS_TICK)
     return top_states
 
 

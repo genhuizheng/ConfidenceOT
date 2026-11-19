@@ -380,7 +380,7 @@ Excluded: `splatter/discarded_run1_pot_uot/`, `splatter_s2b/discarded_pairid_col
         "a": {"title": "Benchmark design", "compared": "Simulated source and target samples with known populations: all shared, one lost, one emerged, none shared; five cumulative technical levels.",
               "observe": "Every cell has a known answer: keep it (it has a counterpart) or reject it (it does not).", "meaning": "We can score the decision exactly, and see which technical change breaks it."},
         "b": {"title": "How well does ConfidenceOT find unmatched cells?", "compared": "Rejection F1 for the unmatched population (Case 2) and false rejection when nothing should be rejected (Case 1), L1-L5, main configuration, N = 5,000.",
-              "observe": f"F1 {b.case2_f1_eff.iloc[0]:.2f}-{b.case2_f1_eff.iloc[3]:.2f} at L1-L4 and {b.case2_f1_eff.iloc[-1]:.2f} at L5; the L5 drop is the rare emerged population (target F1 {b.emerged_tgt_f1_mean.iloc[-1]:.2f}).",
+              "observe": f"F1 {b.case2_f1_eff.iloc[:4].min():.2f}-{b.case2_f1_eff.iloc[:4].max():.2f} at L1-L4 and {b.case2_f1_eff.iloc[-1]:.2f} at L5; the L5 drop is the rare emerged population (target F1 {b.emerged_tgt_f1_mean.iloc[-1]:.2f}).",
               "meaning": "Rejection is reliable under depth, dropout, batch and a shifted population; it weakens when the unmatched population is rare and the proportions differ."},
         "c": {"title": "Does preprocessing matter?", "compared": "Case 2 F1 for 296 preprocessing configurations; six highlighted.",
               "observe": "Most configurations agree at L1-L3; they separate at L4-L5; a squared Euclidean cost on the same representation fails everywhere.",
