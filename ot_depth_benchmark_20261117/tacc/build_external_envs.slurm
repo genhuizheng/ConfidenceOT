@@ -25,6 +25,17 @@ mk() {
     if [ -x "$E/$name/bin/python" ]; then echo "$name exists, packages updated in place" >> "$REPORT"; else python3 -m venv "$E/$name" || { echo "$name: venv failed" >> "$REPORT"; return 1; }; fi
     "$E/$name/bin/pip" install -q -U pip wheel setuptools
     "$E/$name/bin/pip" install "$@" > "$E/$name.pip.log" 2>&1 || echo "$name: pip install returned an error, see $name.pip.log" >> "$REPORT"
+    wrap "$name"
+}
+# The venv interpreter links libpython from the python3 module, which is on the library path only after `module load`.
+# The workers run in the conda environment without that module, so bin/python becomes a wrapper that adds the module's
+# lib directory for this interpreter only and execs the venv's own python3 (pyvenv.cfg is found from its path).
+# First seen 2026-11-18, pilot 1152855: every row exit 127, libpython3.11.so.1.0 not found.
+wrap() {
+    name=$1; libdir=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
+    rm -f "$E/$name/bin/python"
+    printf '#!/bin/bash\nexport LD_LIBRARY_PATH=%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\nexec %s "$@"\n' "$libdir" "$E/$name/bin/python3" > "$E/$name/bin/python"
+    chmod +x "$E/$name/bin/python"
 }
 check() {
     name=$1; code=$2
