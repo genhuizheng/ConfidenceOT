@@ -146,3 +146,140 @@ Later changes go in dated post-hoc sections.
 3. OT submission on the user's go.
 4. Scoring with the definitions above.
 5. Map each result to the original conclusion, both directions.
+
+## Post-hoc 2026-11-18: preparation outcome, SPLINTR and zebrafish (DRAFT, not yet approved)
+
+Written after `06_prepare_tacc.py` ran on all six datasets and before any OT run. Nothing above is changed.
+
+### Preparation outcome and deviations
+- **Units formed:** Kang 9, sciPlex2 28, Schiebinger 14, C. elegans 11, pancreas 3, LARRY in vivo 3 (68 in all).
+- **OT-ready:** all six manifests pass `build_worklist.py --dataset larry` (key `ranknm256-midrank|none`).
+- **Inputs checked:** `07_verify_inputs.py` checked all 136 input files and found 0 problems. Checks:
+  - integer, non-negative counts over the whole matrix;
+  - no zero-total cells;
+  - `sample_id` / `malignant` as the manifest says;
+  - unique obs and var names;
+  - identical var names on both sides;
+  - no missing obs;
+  - cell counts equal to `units.tsv`.
+- **LARRY in vivo has 3 units, not 4.**
+  - LK cells exist only at day 2 (222) and day 9 (22,740). There are no LK day-16 cells, so LK d2 → d16 does not exist.
+  - It is listed in `units.tsv` as `formed = False` and is not in the manifest. The rule is only "a side with zero
+    cells"; no threshold.
+- **LK d2 → d9 has no clone shared between the two days.**
+  - Its clone scores are undefined and reported as such. Fate scores (Neu vs Mono, fate TV) are reported.
+  - LSK d2 → d9 and d2 → d16 share 508 and 245 clones.
+- **LARRY in vivo integer recovery:** median share of integer entries 1.000, and every cell is at least 0.99.
+  131,060 of 182,173 cells carry a clone; none carries more than one.
+- **Pancreas:** every cell in the authors' h5ad was found in the raw barcodes of its stage. The raw totals equal the
+  authors' `n_counts` (mean 15,668.9 for both).
+- **Script fixes** were made before any output was used (`424ffd2`, `8e4c5f0`, `07acd7f`):
+  - the in vivo clone matrix ships as clones × cells, so it is transposed;
+  - the pancreas gene index carried an integer name;
+  - manifest paths are now absolute.
+
+### 7. SPLINTR AML chemotherapy (Fennell 2022), unblocked
+- **Clone data found:**
+  - The singletCode figshare (doi 10.6084/m9.figshare.25478680; md5 verified) holds
+    `allBarcodeSheets/SPLINTR/stepFourStarcodeShavedReads50.csv`.
+  - One row per barcode read; columns `cellID, barcode, sample`; 15 samples.
+  - This is not the authors' own file: the authors released no per-cell barcode table.
+- **Libraries match.** About 99% of each sample's cells fall in the expected GSE186305 library:
+
+  | Samples | GSE186305 library |
+  |---|---|
+  | `chemoKRASBaseline_1` / `_2` | KF16_TP0_1 / _2 |
+  | `chemoVehicle_*`, `chemoDay2_*` | KF16_POOL_1 |
+  | `chemoDay5_*`, `chemoDay7_*` | KF16_POOL_2 |
+
+  This matches the authors' HTO map (pool 1: vehicle × 2, day 2 × 2; pool 2: day 5 × 2, day 7 × 2).
+- **Original conclusions:**
+  - Malignant clonal dominance is cell-intrinsic and heritable (repressed antigen presentation, higher Slpi).
+  - The two sources disagree on chemotherapy:
+    - The published abstract says LSC clonal output dictates sensitivity, and that high- and low-output clones adapt
+      differently yet both emerge from minimal residual disease.
+    - The GEO series text says output does not dictate sensitivity.
+  - The paper's text and figures are read before results are mapped to either statement.
+- **Cells:**
+  - Used: cells with a barcode call that are also in the GEX matrix of their library, with integer counts from the GEO
+    matrices.
+  - Not used: pool cells without a barcode, because this table gives them no mouse. We do not demultiplex HTOs
+    ourselves.
+  - Each sample's cells are checked against the HTO matrix: the argmax hashtag should agree with the authors' map.
+    Disagreements are reported, not removed.
+- **Units (16):** each baseline library (TP0_1, TP0_2) → each mouse sample (vehicle 1, 2; day 2 1, 2; day 5 1, 2;
+  day 7 1, 2).
+  - Baseline sides are capped at 10,000 cells at random. Every baseline cell carries a barcode, so no priority applies.
+  - Baselines are not pooled; the two libraries are replicates.
+- **Clone per cell (DECISION NEEDED):** 20–40% of cells carry more than one barcode.
+  - Proposed: clone = the barcode with the most reads in that cell. A tie leaves the cell without a clone; it stays in
+    the OT and is left out of clone scores.
+  - Reported beside it: clone scores with every multi-barcode cell left out.
+- **Scoring** uses the same definitions as LARRY `03_score.py` where they apply:
+  - per source cell, truth = its clone has at least one cell in that target sample;
+  - source rejection by truth (AUROC; rejected share in each class), with vehicle units beside chemo units;
+  - clone mass per retained source cell vs uniform and independent baselines;
+  - baseline clone size (cells per clone in that baseline library) vs source rejection (Spearman);
+  - target rejection, and the share of target cells whose clone is absent from that baseline library.
+- **Can support:** whether source rejection is higher, after chemotherapy than after vehicle, for baseline clones that
+  are not recovered.
+- **Cannot support:** death or resistance per clone. An absent clone may simply be unsampled: targets hold 389–2,619
+  barcoded cells against about 3,900–4,600 clones per baseline library.
+
+### 8. Zebrafish heart regeneration (Hu 2022, Nat Genet 54:1227), unblocked
+- **Data found (moslin figshare):**
+  - `Zebrafish_metadata.csv`: 202,075 cells after the authors' QC, with `Cell_type` (32 types), `time` (Ctrl / 3 / 7 /
+    30 dpi), `morphine`, `inhib` and `AV`.
+  - `trees.pkl`: 20 LINNAEUS trees as networkx DiGraphs, leaves = cell IDs. The pickle references only networkx
+    DiGraph / NodeView and `dict`.
+  - `Tree_times`.
+- **Expression:** GSE159032 (filtered 10x h5 per library), plus GSE158919 for Hr8, Hr11, Hr15 and Hr23. Cell IDs are
+  `<library>_<barcode>`, and every ID's prefix equals `orig.ident`.
+- **Original conclusions:**
+  - After cryoinjury, activated fibroblast states appear (col12a1a, col11a1a, nppc and others).
+  - They derive from two sources, the epicardium and the endocardium (scar lineage; Cre-lox confirms this for
+    col12a1a).
+  - col12a1a fibroblasts are pro-regenerative.
+  - Wnt signalling regulates the endocardial fibroblast response (IWR-1).
+- **Conditions are kept apart, never pooled:**
+
+  | Condition | Ctrl | 3 dpi | 7 dpi | 30 dpi |
+  |---|---|---|---|---|
+  | Untreated | H5, H6, H7, H8a/v | Hr11, 12, 24, 27 | Hr1, 2a, 2b, 6a/v, 7a/v, 8, 9, 13 | Hr3, 4, 19 |
+  | Morphine | same Ctrl hearts | Hr10, 22, 23, 25, 26, 28 | Hr14, 15, 30 | Hr20, 21 (874 cells) |
+  | Morphine + IWR-1 | none | Hr29, 34, 35 | Hr31, 32, 33 | none |
+
+  The role of morphine is read from the paper before scoring.
+- **Units (9):**
+  - untreated: Ctrl → 3 dpi, 3 → 7 dpi, 7 → 30 dpi;
+  - morphine: Ctrl → 3 dpi, 3 → 7 dpi, 7 → 30 dpi;
+  - morphine → morphine + IWR-1, at 3 dpi and at 7 dpi (same day, inhibitor on the target side, as in Kang ctrl → stim);
+  - untreated → morphine at 3 dpi.
+
+  Hearts are pooled within a side and capped at 10,000 cells (seed 20261118), with cells that are tree leaves taken
+  first.
+- **Cells:** those in the authors' metadata, with raw counts from the GEO h5 matched by barcode (as for pancreas).
+  Library names that differ between GEO and the metadata (Hr2 / Hr2_morecells vs Hr2a / Hr2b) are resolved by barcode
+  overlap and reported in `prep/barcode_match.tsv`.
+- **Truth:** none across time. Scars are not shared between animals, so no source-target pair has a lineage relation.
+  Trees give within-heart relatedness only.
+- **Scoring:**
+  - label × label coupling on `Cell_type`, and same-label mass vs independent expectation;
+  - in Ctrl → 3 dpi, target rejection of the activated fibroblast types that are near-absent in Ctrl (col11a1a 2 cells,
+    col12a1a 9, nppc 8, proliferating fibroblasts 0);
+  - which source types the retained coupling of activated fibroblasts lands on (epicardium, endocardium, constitutive
+    fibroblasts, other);
+  - tree relatedness, fixed now and parameter-free:
+    - in each heart with a tree, a cell's clade is its parent node;
+    - relatedness(a, b) = the share of clades holding type a that also hold type b, averaged over the hearts of that
+      time point;
+    - reported: the rank correlation, over source types, between the OT coupling of each activated fibroblast type and
+      its tree relatedness at the target time point. This is consistency only, not lineage validation;
+  - IWR-1 units: rejection and coupling of endocardium-derived vs epicardium-derived fibroblast types.
+- **Cannot support:** the ancestry of any cell. Rejection is not read as death or as a cell-type origin.
+
+### Decisions needed before the SPLINTR and zebrafish preparation code is written
+1. SPLINTR clone per cell: the dominant barcode with ties left unlabelled (as proposed above), or another rule.
+2. SPLINTR cells: barcoded cells only (as proposed), or our own HTO demultiplexing so that unbarcoded pool cells can be
+   used.
+3. Zebrafish unit list: the 9 units above, in particular the treatment-contrast units.
