@@ -100,6 +100,34 @@ The user asked whether the 3724 pooled flow figure (`figures/flow/L23__KPTracer_
 
 **Implication for figures:** a flow figure should carry its structureless-coupling Shared beside the observed one, or be shown next to the distribution over all units.
 
+## RNA-OT clade flow, every unit, CRISPR-OT removed (2026-11-23)
+
+The user asked to show every result with the RNA-OT flow only. Script: `03_rna_flow_all.py`.
+
+**Figures.** `results/clade_overlap_20261119/figures/rna_flow/`:
+- 49 unit figures and one summary panel, one PDF+PNG per panel;
+- `CAPTIONS.md` with every unit's numbers.
+
+**How the figures differ from the `92_` flow figures.**
+- The cells are RNA-OT's own M4-E retained block; there is no CRISPR gate.
+- Ribbons are blue for the same CRISPR clade and grey for a different clade or no clade.
+- Each title gives the same-clade mass, the mass expected without pairing (a coupling with the same clade totals and no structure inside them) and the excess.
+- Quinn is included: its clades are LineageGroups, drawn without a tree.
+
+**Excess** (same-clade mass − expected without pairing; median [range] over units):
+
+| Stratum | Units | Median excess [range] |
+|---|---|---|
+| KP: primary → one metastasis | 40 | 0.000 [−0.009, 0.037] |
+| KP: pooled metastases | 5 | 0.003 [−0.000, 0.422] |
+| Quinn: pooled tissues | 4 | 0.074 [0.011, 0.292] |
+
+- Only 3 of 49 units exceed 0.05: KP 3724 pooled (+0.42), Quinn 100k (+0.29) and Quinn 10k (+0.11).
+- In the summary panel, every other unit lies on the diagonal.
+- This agrees with §1–2. The numbers differ slightly from the `01_` table: here the denominator is all retained mass, with clades under 2% merged into Other; `01_` uses evaluable targets only.
+
+The `92_` RNA-vs-CRISPR figures are kept unchanged, because decks `110_` and `113_` use them.
+
 ## Limits
 
 - Clades are a summary of the edits (UPGMA cut 0.5), not the authors' Cassiopeia tree. A finer or coarser cut changes
