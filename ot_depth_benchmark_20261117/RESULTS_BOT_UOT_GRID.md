@@ -69,3 +69,27 @@ C3 / "grid best" in this study after the local grid; that label is the local res
 Tables: `results/ot_depth_benchmark_20261117/bot_uot_grid/tables/` (`PAIRED_bot_vs_uot_by_config_level.tsv`,
 `DIFF_by_level_distance.tsv`, `NAMED_configs_bot_vs_uot.tsv`, `OVERALL_L1L5_mean_by_config.tsv`) and both grids' own
 `GRID_SUMMARY_v3tacc.{md,tsv}` / `GRID_OVERALL_v3tacc.tsv`. Panels `figures/scatter_{metric}_{level}`.
+
+## Exploratory metrics (user 2026-11-23; not the benchmark readout)
+
+`explore_metrics_bot_uot_grid.py`, tables `bot_uot_grid/tables/exploratory/`. Only columns the grid already writes; the
+whole-side threshold (>= 99% of a side rejected) is summarize_local.py's one_side_all rule. Cosine configurations,
+median over configurations, UOT -> balanced:
+
+| Level | E1 precision | E1 recall | E2 shared-pop. FRR | E3 F1 above reject-all | E5 Case 1/2 whole-side share | E6 F1 replicate SD |
+|---|---|---|---|---|---|---|
+| L1 | 0.961 -> 0.966 | 0.999 -> 0.999 | 0.014 -> 0.015 | 0.643 -> 0.647 | 0 -> 0 | 0.002 -> 0.002 |
+| L2 | 0.952 -> 0.952 | 0.997 -> 0.997 | 0.020 -> 0.021 | 0.628 -> 0.628 | 0 -> 0 | 0.005 -> 0.005 |
+| L3 | 0.962 -> 0.964 | 0.994 -> 0.995 | 0.012 -> 0.014 | 0.643 -> 0.644 | 0.012 -> 0.012 | 0.006 -> 0.006 |
+| L4 | 0.807 -> 0.813 | 0.994 -> 0.994 | 0.091 -> 0.089 | 0.526 -> 0.531 | 0.028 -> 0.028 | 0.036 -> 0.039 |
+| L5 | 0.450 -> 0.406 | 0.956 -> 0.950 | 0.271 -> 0.336 | 0.313 -> 0.283 | 0.044 -> 0.044 | 0.032 -> 0.030 |
+
+- E1/E2: the L5 loss of the balanced backbone is a precision loss (more shared cells rejected); recall is unchanged.
+- E4 Case 3 false asserted mass: 0 on every cosine configuration; sqeuclidean L1 / L2 0.093 -> 0.141 and 0.137 -> 0.157.
+- E5: C1 has no Case 1/2 whole-side rejection at any level with either backbone.
+- E6: C1 is least stable at L5 (F1 replicate SD 0.127 UOT, 0.084 balanced; ≤ 0.05 elsewhere).
+- E7: the order of the 296 configurations by Case 2 F1 is the same under both backbones (Spearman 0.992-0.996 at
+  L1-L4, 0.956 at L5).
+- E8: M4-E and M4-R reject the same number of cells in only 16-32% of side x fit rows; they are different estimators.
+- E9 per fit: M4-E converges in every fit (median 34 s UOT, 20 s balanced); M4-R cycles in 53% (UOT) / 58% (balanced)
+  of fits (median 76 s / 103 s).
