@@ -55,10 +55,12 @@ mk otdb_cfm torch "torchcfm==1.0.7" torchdyn scanpy POT "numpy<2"
 check otdb_cfm "import platform, torch, torchcfm, torchdyn; print('otdb_cfm', platform.machine(), 'torch', torch.__version__)"
 
 # pandas / scipy / scikit-learn pinned to the local otbench versions (2026-11-18): pandas 3 strings break anndata 0.10
-# h5ad writing (CellOT) and scipy 1.17 csr_array has no getnnz (CINEMA-OTW neighbours), pilot 1153414
-mk otdb_otbench "numpy<2" "scipy==1.15.3" "pandas==2.3.3" "scanpy==1.10.4" "anndata<0.11" "scikit-learn==1.7.2" statsmodels "cinemaot==0.0.5" "pot==0.9.5" \
+# h5ad writing (CellOT), pilot 1153414. scipy 1.13.1 (2026-11-23): scanpy 1.10.4 calls csr_array.getnnz, removed in scipy
+# 1.14, on its pynndescent path (n_obs >= 4096), which CINEMA-OTW reaches on the 5,000-cell units (pilot 1153579); the
+# local test units were smaller and never took that path
+mk otdb_otbench "numpy<2" "scipy==1.13.1" "pandas==2.3.3" "scanpy==1.10.4" "anndata<0.11" "scikit-learn==1.7.2" statsmodels "cinemaot==0.0.5" "pot==0.9.5" \
     ml-collections absl-py "torch==2.3.1" tables igraph leidenalg pyyaml tqdm
-check otdb_otbench "import platform, torch, cinemaot, ot, scanpy, tables, leidenalg, ml_collections, pandas, scipy, sklearn; print('otdb_otbench', platform.machine(), 'torch', torch.__version__, 'pot', ot.__version__, 'pandas', pandas.__version__, 'scipy', scipy.__version__, 'sklearn', sklearn.__version__)"
+check otdb_otbench "import platform, torch, cinemaot, ot, scanpy, tables, leidenalg, ml_collections, pandas, scipy, sklearn; print('otdb_otbench', platform.machine(), 'torch', torch.__version__, 'pot', ot.__version__, 'pandas', pandas.__version__, 'scipy', scipy.__version__, 'sklearn', sklearn.__version__, 'csr_array.getnnz', hasattr(__import__('scipy.sparse').sparse.csr_array((1, 1)), 'getnnz'))"
 
 # CellOT, the authors' repository at the commit tested locally (522d2b9)
 if [ ! -d "$TOOLS/cellot/.git" ]; then git clone -q https://github.com/bunnech/cellot.git "$TOOLS/cellot"; fi
