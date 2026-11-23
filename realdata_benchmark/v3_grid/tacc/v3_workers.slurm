@@ -21,10 +21,13 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_TH
 procs=${V3_PROCS:-36}
 scratch=/tmp/v3_grid_${SLURM_JOB_ID:-local}
 mkdir -p "$scratch"
-echo "task ${SLURM_ARRAY_TASK_ID:-0} job ${SLURM_JOB_ID:-local} on $(hostname): $procs workers x ${V3_FIT_WORKERS:-4} fit workers; worklist $V3_WORKLIST; commit $(git rev-parse --short HEAD); $(date -Iseconds)"
+# V3_CONFIGS (optional): ';'-separated configuration ids, passed to worker.py --configs (fit only these of each key)
+configs=()
+if [[ -n "${V3_CONFIGS:-}" ]]; then IFS=';' read -r -a configs <<< "$V3_CONFIGS"; configs=(--configs "${configs[@]}"); fi
+echo "task ${SLURM_ARRAY_TASK_ID:-0} job ${SLURM_JOB_ID:-local} on $(hostname): $procs workers x ${V3_FIT_WORKERS:-4} fit workers; worklist $V3_WORKLIST; representation ${V3_REPRESENTATION_SOURCE:-rna}; configs ${V3_CONFIGS:-all}; commit $(git rev-parse --short HEAD); $(date -Iseconds)"
 for (( w = 0; w < procs; w++ )); do
     python realdata_benchmark/v3_grid/worker.py --worklist "$V3_WORKLIST" --fit-workers "${V3_FIT_WORKERS:-4}" --scratch "$scratch" \
-        --large-slots "$scratch/slots" --max-large "${V3_MAX_LARGE:-4}" --large-size "${V3_LARGE_SIZE:-2e7}" \
+        --large-slots "$scratch/slots" --max-large "${V3_MAX_LARGE:-4}" --large-size "${V3_LARGE_SIZE:-2e7}" "${configs[@]}" \
         > "$V3_LOGS/worker_${SLURM_JOB_ID:-local}_${SLURM_ARRAY_TASK_ID:-0}_${w}.log" 2>&1 &
     sleep 2
 done

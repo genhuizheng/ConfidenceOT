@@ -82,7 +82,16 @@ def fit_args(dataset: str, device: str, workers: int) -> list[str]:
     # V3_BACKBONE=balanced: the balanced-backbone ConfidenceOT (02_run_pair --backbone, 2026-11-18); unset or 'uot'
     # leaves the production command exactly as it was
     backbone = os.environ.get("V3_BACKBONE", "uot")
-    return args if backbone == "uot" else set_arg(args, "--backbone", backbone)
+    args = args if backbone == "uot" else set_arg(args, "--backbone", backbone)
+    # V3_REPRESENTATION_SOURCE=rna_cnv (or cnv) with V3_CNV_ROOT: 02_run_pair --representation-source / --cnv-root (the
+    # infercnvpy exports, <root>/<dataset_id>/<patient_id>/); the RNA block is the row's corrected coordinates unchanged.
+    # Unset leaves the production command exactly as it was (2026-11-23)
+    source = os.environ.get("V3_REPRESENTATION_SOURCE", "rna")
+    if source != "rna":
+        if not os.environ.get("V3_CNV_ROOT"):
+            raise SystemExit(f"V3_REPRESENTATION_SOURCE={source} needs V3_CNV_ROOT")
+        args = set_arg(set_arg(args, "--representation-source", source), "--cnv-root", os.environ["V3_CNV_ROOT"])
+    return args
 
 
 class Inputs:
