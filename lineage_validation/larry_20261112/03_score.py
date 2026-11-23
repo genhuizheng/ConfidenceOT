@@ -55,11 +55,14 @@ def main() -> None:
     p.add_argument("--v3-root", type=Path, required=True)
     p.add_argument("--inputs", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--units", nargs="*", default=UNITS, help="unit ids (default: the four in vitro units)")
+    p.add_argument("--non-mature", nargs="*", default=["Undifferentiated"],
+                   help="cell types that are not mature fates (in vivo, PLAN_TACC: Undifferentiated Prog)")
     a = p.parse_args()
     import anndata as ad
     a.out.mkdir(parents=True, exist_ok=True)
     CM, FA, GA, GT, PC = [], [], [], [], []
-    for u in UNITS:
+    for u in a.units:
         if not all((a.inputs / f"{u}__{s}.h5ad").exists() for s in ("source", "target")):
             print(f"missing inputs of {u}", flush=True); continue
         obs = {s: ad.read_h5ad(a.inputs / f"{u}__{s}.h5ad", backed="r").obs[["clone", "cell_type"]].copy() for s in ("source", "target")}
@@ -92,7 +95,7 @@ def main() -> None:
                 rows = np.flatnonzero(~rej_s & has_sis)
                 rs = P.sum(1); b = P[~rej_s].sum(0) * (~rej_t); bt = b.sum(); n_t = len(tid)
                 sis_of = {c: np.flatnonzero(ct == c) for c in set(cs[rows])}
-                mature = typ_t != "Undifferentiated"; types = sorted(set(typ_t[mature]))
+                mature = ~np.isin(typ_t, a.non_mature); types = sorted(set(typ_t[mature]))
                 tix = {t: np.flatnonzero(typ_t == t) for t in types}
                 rec = []
                 for i in rows:
