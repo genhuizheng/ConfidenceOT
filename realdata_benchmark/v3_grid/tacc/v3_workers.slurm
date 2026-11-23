@@ -12,8 +12,16 @@
 # resubmission continues where the last one stopped. One BLAS thread per process.
 # No set -e / -u / pipefail (TACC rules).
 
-source /home1/10119/ghzheng/.bashrc
-conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+# V3_VENV (optional, 2026-11-23): a module-python3 venv instead of the conda environment (whose interpreter the scratch
+# purge removed); its bin/python is the wrapper that puts the module's libpython on the library path
+if [[ -n "${V3_VENV:-}" ]]; then
+    module load gcc python3/3.11.8 2> /dev/null || module load python3
+    export PATH="$V3_VENV/bin:$PATH"
+else
+    source /home1/10119/ghzheng/.bashrc
+    conda activate "${CONFIDENCEOT_ENV:-/scratch/10119/ghzheng/conda_envs/worldmodel_withconfidenceot}"
+fi
+echo "python $(command -v python) $(python --version 2>&1)"
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 cd "$repo" || exit 1
 export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo/realdata_benchmark:$repo
