@@ -337,3 +337,21 @@ Checks that each label means what it says. Means are log1p(CP10k).
    - follow the authors' code;
    - follow Supplementary Table 2 / singletCode;
    - do not split day 5 from day 7, and treat the four pool-2 mice as "chemo day 5–7".
+
+## Post-hoc 2026-11-23: OT submitted, two configurations
+
+- **User 2026-11-23:** run the prepared units with "best preprocessing" and "logcpm only". The user chose:
+  - `ranknm256-midrank|none|scale|cos|pca50`, the Splatter N = 5,000 L5 best and the report's main configuration;
+  - `logcpm|none|noscale|sqeuc|pca30`, logCPM + PCA only, the PDX comparison arm.
+  - The frozen text above names only the first. The second is an added comparison arm and is reported beside it,
+    never instead of it.
+  - Not used: the local N = 200 Pareto winner `ranknm512-expected|none|noscale|cos|pca30` (C3).
+- **What ran:** `tacc/submit_app_ot.sh`, with the v3 worker manifest route, `--configs` set to the two configurations,
+  frozen calibration v3, and M4-E and M4-R. Couplings were saved.
+- **Units:** the 68 prepared units of Kang, sciPlex2, Schiebinger, C. elegans, pancreas and LARRY in vivo, giving
+  136 rows (68 units × 2 configurations).
+- **Outputs:** new roots `$SCRATCH/OT_project/app_search_20261117/<dataset>/ot_20261123`.
+- **Jobs:** one gg node per dataset, 1164877–1164882. Environment: the otdb_otbench venv (the conda environment lost
+  its interpreter in the scratch purge).
+- **Not yet submitted:** SPLINTR and zebrafish (preparation pending). Scoring follows the definitions above once the
+  rows finish.
