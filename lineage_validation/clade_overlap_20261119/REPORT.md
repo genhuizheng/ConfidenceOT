@@ -82,6 +82,24 @@ Values are averaged per unit, then per mouse; tables give the median over mice.
 - This agrees with the earlier gate-vs-coupling decomposition (`crispr_matrix_benchmark_20261108/REPORT.md` §3: gate
   +0.132, coupling +0.001 in KP same-family pairs). It does not replace it.
 
+## The grey "Shared" of the flow figures (2026-11-23)
+
+The user asked whether the 3724 pooled flow figure (`figures/flow/L23__KPTracer_3724__3724_NT_T1__family_metastases`) is representative, and whether grey dominates. Script: `02_flow_shared_baseline.py`, run on the existing clade × clade flows of `92_flow_figure.py` (45 KP units, common support). Table: `results/clade_overlap_20261119/flow_shared_baseline.tsv`.
+
+**Grey dominates almost everywhere, but it is not evidence of matching.**
+- Median Shared (grey) is 0.899 over the 45 units. Every unit has at least 0.50.
+- A coupling with RNA-OT's clade marginals and no structure inside them also gets a median of 0.899 against CRISPR-OT.
+- RNA-OT's own clade flow is 0.992 identical (median) to that structureless coupling.
+- So the grey share is set by the clade marginals of the common support, not by the pairing. Example: 3515 T1 → L2 has 97% grey, while same-clade mass is 0.011 for RNA-OT and 0.029 for CRISPR-OT.
+
+**The 3724 pooled figure is the one exception in 45.**
+- Its grey is 0.926 against 0.518 for the structureless coupling, an excess of 0.41.
+- The next largest excess is 0.021; 44 of 45 units have less than 0.05.
+- It matches §1–2: this is the only KP unit where RNA-OT's coupling gain is large (0.43). There, the two clades c5 and c45 are also two states (Mesenchymal-1 vs Mesenchymal-2) and different metastatic sites.
+- The figure was chosen as "the only 3724 unit with two named clades on both sides" (`FLOW_FIGURE.md`). It shows the best case and must not be read as typical.
+
+**Implication for figures:** a flow figure should carry its structureless-coupling Shared beside the observed one, or be shown next to the distribution over all units.
+
 ## Limits
 
 - Clades are a summary of the edits (UPGMA cut 0.5), not the authors' Cassiopeia tree. A finer or coarser cut changes
