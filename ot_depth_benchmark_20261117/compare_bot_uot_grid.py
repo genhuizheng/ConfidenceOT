@@ -82,8 +82,7 @@ def main():
         for x in METRICS:
             v = d[f"{x}_diff"].dropna()
             r |= {f"{x}_uot_median": d[f"{x}_uot"].median(), f"{x}_bot_median": d[f"{x}_bot"].median(),
-                  f"{x}_diff_median": v.median(), f"{x}_diff_q10": v.quantile(0.1), f"{x}_diff_q90": v.quantile(0.9),
-                  f"{x}_bot_higher_frac": (v > 0.005).mean(), f"{x}_bot_lower_frac": (v < -0.005).mean()}
+                  f"{x}_diff_median": v.median(), f"{x}_diff_q10": v.quantile(0.1), f"{x}_diff_q90": v.quantile(0.9)}
         rows.append(r)
     s = pd.DataFrame(rows)
     s["level"] = pd.Categorical(s.level, LEVELS); s = s.sort_values(["level", "distance"])
@@ -103,8 +102,7 @@ def main():
         scatter(m, "case2_f1_eff", lv, "Case 2 F1")
         scatter(m, "case1_frr_eff", lv, "Case 1 FRR")
         scatter(m, "case3_false_asserted_mass", lv, "Case 3 false asserted")
-    print(s[["level", "distance", "n_configs", "case2_f1_eff_uot_median", "case2_f1_eff_bot_median", "case2_f1_eff_diff_median",
-             "case2_f1_eff_bot_higher_frac", "case2_f1_eff_bot_lower_frac", "case1_frr_eff_diff_median",
+    print(s[["level", "distance", "n_configs", "case2_f1_eff_uot_median", "case2_f1_eff_bot_median", "case2_f1_eff_diff_median", "case1_frr_eff_diff_median",
              "case3_false_asserted_mass_diff_median"]].round(3).to_string(index=False))
 
 
