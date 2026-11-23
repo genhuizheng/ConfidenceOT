@@ -91,6 +91,8 @@ def fit_args(dataset: str, device: str, workers: int) -> list[str]:
         if not os.environ.get("V3_CNV_ROOT"):
             raise SystemExit(f"V3_REPRESENTATION_SOURCE={source} needs V3_CNV_ROOT")
         args = set_arg(set_arg(args, "--representation-source", source), "--cnv-root", os.environ["V3_CNV_ROOT"])
+        if os.environ.get("V3_CNV_WEIGHT"):  # rna_cnv beta (02_run_pair --cnv-weight); unset = 1
+            args = set_arg(args, "--cnv-weight", os.environ["V3_CNV_WEIGHT"])
     return args
 
 

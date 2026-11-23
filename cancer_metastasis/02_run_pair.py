@@ -436,6 +436,10 @@ def main() -> None:
     )
     parser.add_argument("--cnv-root", type=Path, default=None,
                         help="Exported CNV profiles, <root>/<dataset_id>/<patient_id>/")
+    parser.add_argument("--cnv-weight", type=float, default=1.0,
+                        help="rna_cnv only: beta in cost = c_rna / median + beta * c_cnv / median (the CNV block "
+                             "multiplied by sqrt(beta) after its median scaling). The default 1 is the equal-weight "
+                             "sum every earlier rna_cnv run used")
     parser.add_argument("--input-gate-budget-tag", default="budget_source_0.85_target_0.95")
     parser.add_argument("--input-gate-method", default="M4-E")
     parser.add_argument("--input-gate-state", choices=("retained", "rejected"))
@@ -542,6 +546,10 @@ def main() -> None:
         raise ValueError("cell-filter and cell-filter-column must be given together")
     if (args.representation_source != "rna") != (args.cnv_root is not None):
         raise ValueError("cnv-root is needed by, and only by, a cnv or rna_cnv representation")
+    if not (np.isfinite(args.cnv_weight) and args.cnv_weight > 0):
+        raise ValueError("cnv-weight must be positive and finite")
+    if args.cnv_weight != 1.0 and args.representation_source != "rna_cnv":
+        raise ValueError("cnv-weight applies to rna_cnv only")
     if (args.input_gate_root is None) != (args.input_gate_state is None):
         raise ValueError("input-gate-root and input-gate-state must be provided together")
     manifest = pd.read_csv(args.manifest_csv)
@@ -719,11 +727,13 @@ def main() -> None:
             block_rng = np.random.default_rng(args.seed + args.index * 104729 + 1)
             rna_scale = median_pair_scale(source_pca, target_pca, rng=block_rng)
             cnv_scale = median_pair_scale(source_cnv, target_cnv, rng=block_rng)
+            w = np.sqrt(args.cnv_weight)  # squared distance: c_rna / rna_scale + beta * c_cnv / cnv_scale
             source_pca = np.hstack([source_pca / np.sqrt(rna_scale),
-                                    source_cnv / np.sqrt(cnv_scale)]).astype(np.float32)
+                                    w * source_cnv / np.sqrt(cnv_scale)]).astype(np.float32)
             target_pca = np.hstack([target_pca / np.sqrt(rna_scale),
-                                    target_cnv / np.sqrt(cnv_scale)]).astype(np.float32)
-            cnv_record.update(rna_block_scale=float(rna_scale), cnv_block_scale=float(cnv_scale))
+                                    w * target_cnv / np.sqrt(cnv_scale)]).astype(np.float32)
+            cnv_record.update(rna_block_scale=float(rna_scale), cnv_block_scale=float(cnv_scale),
+                              cnv_weight=float(args.cnv_weight))
         print(f"representation {args.representation_source}: {cnv_record}")
     rng = np.random.default_rng(args.seed + args.index * 104729)
     scale = median_pair_scale(source_pca, target_pca, rng=rng)
