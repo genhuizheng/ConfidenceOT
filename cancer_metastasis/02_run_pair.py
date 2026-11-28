@@ -436,6 +436,9 @@ def main() -> None:
     )
     parser.add_argument("--cnv-root", type=Path, default=None,
                         help="Exported CNV profiles, <root>/<dataset_id>/<patient_id>/")
+    parser.add_argument("--cnv-n-pcs", type=int, default=None,
+                        help="PCs of the CNV profile (default: --n-pcs, as every earlier CNV run). Needed with a "
+                             "precomputed / no-PCA RNA label, whose --n-pcs is 0: a CNV block of 0 PCs stops the run")
     parser.add_argument("--cnv-weight", type=float, default=1.0,
                         help="rna_cnv only: beta in cost = c_rna / median + beta * c_cnv / median (the CNV block "
                              "multiplied by sqrt(beta) after its median scaling). The default 1 is the equal-weight "
@@ -720,7 +723,9 @@ def main() -> None:
         source_cnv, target_cnv, cnv_record = cnv_coordinates(
             args.cnv_root, str(row["dataset_id"]), str(row["patient_id"]),
             source.obs_names.astype(str), target.obs_names.astype(str),
-            n_pcs=args.n_pcs, seed=args.seed + args.index)
+            n_pcs=args.n_pcs if args.cnv_n_pcs is None else args.cnv_n_pcs, seed=args.seed + args.index)
+        if cnv_record["pcs"] < 1:  # 2026-11-23: a precomputed RNA label set n_pcs 0 and the CNV block was empty
+            raise SystemExit(f"the CNV block has {cnv_record['pcs']} PCs (--n-pcs {args.n_pcs}); set --cnv-n-pcs")
         if args.representation_source == "cnv":
             source_pca, target_pca = source_cnv, target_cnv
         else:

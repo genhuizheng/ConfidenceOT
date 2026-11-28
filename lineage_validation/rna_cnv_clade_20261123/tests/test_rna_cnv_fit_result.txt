@@ -1,0 +1,9 @@
+PASS  rna_cnv fits
+PASS  CNV block has PCs (default V3_CNV_NPCS 30, capped by the data)  (pcs 30)
+PASS  a CNV block of 0 PCs stops the run  (exit 1)
+PASS  beta 4 recorded
+PASS  beta 4 changes the coupling
+PASS  beta 1 explicit = default (gates, coupling)
+PASS  rna alone differs from rna_cnv
+
+7 passed, 0 failed

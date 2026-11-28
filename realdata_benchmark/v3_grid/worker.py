@@ -93,6 +93,8 @@ def fit_args(dataset: str, device: str, workers: int) -> list[str]:
         args = set_arg(set_arg(args, "--representation-source", source), "--cnv-root", os.environ["V3_CNV_ROOT"])
         if os.environ.get("V3_CNV_WEIGHT"):  # rna_cnv beta (02_run_pair --cnv-weight); unset = 1
             args = set_arg(args, "--cnv-weight", os.environ["V3_CNV_WEIGHT"])
+        # the v3 labels are precomputed (n_pcs 0), so the CNV PCA needs its own count (02_run_pair refuses 0)
+        args = set_arg(args, "--cnv-n-pcs", os.environ.get("V3_CNV_NPCS", "30"))
     return args
 
 

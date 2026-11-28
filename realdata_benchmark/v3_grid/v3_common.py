@@ -99,6 +99,8 @@ def run_pair(argv: list[str]) -> tuple[int, str]:
             _RUN_PAIR.main()
     except SystemExit as e:
         code = int(e.code or 0) if not isinstance(e.code, str) else 1
+        if isinstance(e.code, str):  # a refusal's reason, kept in the row's fit.log (2026-11-23)
+            buf.write(f"\nSystemExit: {e.code}\n")
     except Exception:
         code = 1; buf.write(traceback.format_exc())
     finally:

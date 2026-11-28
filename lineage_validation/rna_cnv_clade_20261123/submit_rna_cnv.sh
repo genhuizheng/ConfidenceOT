@@ -85,7 +85,7 @@ run)
     (( dry_run || queued + nodes <= 40 )) || { echo "$queued queued; $nodes more would pass the cap of 40" >&2; exit 3; }
     run mkdir -p "$root/logs/workers" || exit 1
     extra=""
-    [[ $arm != rna ]] && extra=",V3_REPRESENTATION_SOURCE=$source_,V3_CNV_ROOT=$root/cnv_root"
+    [[ $arm != rna ]] && extra=",V3_REPRESENTATION_SOURCE=$source_,V3_CNV_ROOT=$root/cnv_root,V3_CNV_NPCS=30"
     [[ -n "$beta" ]] && extra="$extra,V3_CNV_WEIGHT=$beta"
     run sbatch --parsable --array=0-$((nodes - 1)) -t "$hours:00:00" -J "lv_${arm}${tool:+_$tool}" -o "$root/logs/run_%A_%a.out" \
         --export=ALL,CONFIDENCEOT_REPO="$repo",V3_VENV="$venv",V3_WORKLIST="$root/WORKLIST.tsv",V3_PROCS="$procs",V3_FIT_WORKERS="$fitw",V3_LOGS="$root/logs/workers",V3_MAX_LARGE=4,V3_LARGE_SIZE=2e7,V3_CONFIGS="$configs"$extra \
