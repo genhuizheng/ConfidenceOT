@@ -30,6 +30,13 @@ if [[ ! -x "$ENV/bin/R" ]]; then
         r-mixtools r-pheatmap r-beanplot r-rtsne r-mcmcpack r-gplots r-parallelly git compilers make \
         || { echo "conda create failed"; exit 1; }
 fi
+# Second pass (2026-11-27): the first build compiled SCEVAN's and CONICSmat's dependencies from CRAN / Bioconductor
+# sources against R 4.3 and failed (fgsea C++, rsvd unavailable for BiocSingular, treeio / dbplyr lazy loading, xml2 /
+# XML without libxml2 headers). Take them prebuilt from conda, matched to the environment's R; idempotent.
+"$CONDA" install -y -p "$ENV" -c conda-forge -c bioconda --override-channels \
+    bioconductor-fgsea bioconductor-scran bioconductor-biocsingular r-rsvd bioconductor-treeio bioconductor-ggtree \
+    bioconductor-biomart bioconductor-biocfilecache r-dbplyr r-xml2 r-xml libxml2 \
+    || echo "conda install of the prebuilt dependencies failed (see the job log)"
 export PATH="$ENV/bin:$PATH"
 mkdir -p "$SRC"
 echo "R $(R --version | head -1)" > "$REPORT"
