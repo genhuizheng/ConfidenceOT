@@ -391,7 +391,7 @@ the 2026-11-18 draft, this section holds.
     absent cells carry a single barcode read (median 1, 90th percentile 1) against median 3-4 reads for cells in GEX,
     i.e. droplets outside the cell calling. They are excluded by the existing rule (a), no new threshold.
   - Barcoded share of the GEX cells: TP0_1 70%, TP0_2 74%. Baseline sides capped at 10,000 of 14,155 / 15,112.
-  - Cells with more than one barcode: baselines 31-36%, mice 17-26%; all barcodes kept.
+  - Cells with more than one barcode: baselines 31-37%, mice 17-24%; all barcodes kept.
 - **Zebrafish:** 9 units formed; every metadata cell matched in exactly one GEO library; raw totals equal the authors'
   `nCount_RNA` to within 1% (median 2,300 vs 2,293). `trees.pkl` holds 25 trees (the draft said 20) with 51,225 leaves,
   all in the metadata; the IWR-1 hearts and Hr9 / Hr8 / Hr28-Hr35 have no tree. Morphine 30 dpi has 874 cells and
