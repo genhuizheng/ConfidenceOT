@@ -3,7 +3,8 @@
     "moscot": "/scratch/10119/ghzheng/OT_project/envs/otdb_moscot/bin/python",
     "wot": "/scratch/10119/ghzheng/OT_project/envs/otdb_wot/bin/python",
     "cfm": "/scratch/10119/ghzheng/OT_project/envs/otdb_cfm/bin/python",
-    "otbench": "/scratch/10119/ghzheng/OT_project/envs/otdb_otbench/bin/python"
+    "otbench": "/scratch/10119/ghzheng/OT_project/envs/otdb_otbench/bin/python",
+    "cinemaotw": "/scratch/10119/ghzheng/OT_project/envs/otdb_cinemaotw/bin/python"
   },
   "methods": {
     "wot": "wot",
@@ -12,7 +13,7 @@
     "moscot_temporal": "moscot",
     "cinemaot_tutorial": "otbench",
     "cinemaot_default": "otbench",
-    "cinemaotw": "otbench",
+    "cinemaotw": "cinemaotw",
     "otcfm": "cfm",
     "sbcfm": "cfm",
     "cellot": "otbench"

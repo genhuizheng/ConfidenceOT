@@ -62,6 +62,12 @@ mk otdb_otbench "numpy<2" "scipy==1.13.1" "pandas==2.3.3" "scanpy==1.10.4" "annd
     ml-collections absl-py "torch==2.3.1" tables igraph leidenalg pyyaml tqdm
 check otdb_otbench "import platform, torch, cinemaot, ot, scanpy, tables, leidenalg, ml_collections, pandas, scipy, sklearn; print('otdb_otbench', platform.machine(), 'torch', torch.__version__, 'pot', ot.__version__, 'pandas', pandas.__version__, 'scipy', scipy.__version__, 'sklearn', sklearn.__version__, 'csr_array.getnnz', hasattr(__import__('scipy.sparse').sparse.csr_array((1, 1)), 'getnnz'))"
 
+# CINEMA-OTW (2026-11-27): the otbench pins plus pynndescent 0.5.13. On units with >= 4,096 cells scanpy 1.10.4 builds the
+# neighbour graph with pynndescent, whose 0.7 release returns scipy csr_array, which anndata 0.10.9 refuses in obsp (45 of
+# 60 cinemaotw rows, jobs 1164779); 0.5.13 returns csr_matrix. Smaller units take sklearn's exact path and are unaffected.
+mk otdb_cinemaotw "numpy<2" "scipy==1.13.1" "pandas==2.3.3" "scanpy==1.10.4" "anndata<0.11" "scikit-learn==1.7.2" statsmodels "cinemaot==0.0.5" "pot==0.9.5"     "pynndescent==0.5.13" igraph leidenalg pyyaml tqdm
+check otdb_cinemaotw "import platform, cinemaot, ot, scanpy, pynndescent, leidenalg, anndata; print('otdb_cinemaotw', platform.machine(), 'pynndescent', pynndescent.__version__, 'anndata', anndata.__version__, 'scanpy', scanpy.__version__)"
+
 # CellOT, the authors' repository at the commit tested locally (522d2b9)
 if [ ! -d "$TOOLS/cellot/.git" ]; then git clone -q https://github.com/bunnech/cellot.git "$TOOLS/cellot"; fi
 git -C "$TOOLS/cellot" checkout -q 522d2b953da8ad244fcf36f64521487fdf763788 && echo "cellot $(git -C "$TOOLS/cellot" rev-parse --short HEAD)" >> "$REPORT"
