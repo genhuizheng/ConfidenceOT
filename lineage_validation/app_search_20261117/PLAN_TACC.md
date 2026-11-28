@@ -355,3 +355,29 @@ Checks that each label means what it says. Means are log1p(CP10k).
   its interpreter in the scratch purge).
 - **Not yet submitted:** SPLINTR and zebrafish (preparation pending). Scoring follows the definitions above once the
   rows finish.
+
+## Post-hoc 2026-11-27: SPLINTR and zebrafish decisions (user), before any preparation code was run
+
+Written before the SPLINTR and zebrafish inputs were built. Nothing above is changed; where this section differs from
+the 2026-11-18 draft, this section holds.
+
+- **SPLINTR clone per cell (decision 1): keep all barcodes.** A cell's clone set is every barcode the singletCode sheet
+  lists for it (the sheet is already filtered by its authors; no read threshold of ours). Multi-barcode cells (15-26% per
+  sample) count toward each of their barcodes. Reads per cell x barcode (rows of the sheet) are kept in
+  `prep/cell_barcodes.tsv.gz` for reference only. The dominant-barcode rule of the draft is not used.
+  - Scoring consequence (fixed now): a source cell's truth = at least one of its barcodes has a cell in that target
+    sample; clone mass counts a coupling entry as same-clone when the two cells share at least one barcode.
+- **SPLINTR cells (decision 2): barcoded cells only**, as in the draft; no HTO demultiplexing of ours. Two exclusions,
+  both reported in `prep/` and neither a threshold: (a) sheet cells absent from the GEX barcodes of their library;
+  (b) a cell listed under two samples of the same library (its mouse is not defined). Cells listed under samples of
+  different libraries are different cells (barcode collision across libraries) and are kept in each.
+- **SPLINTR pool-2 days (decision 4): not split.** The four pool-2 mice are labelled `chemo_d5to7`; units are still one
+  per mouse, named by pool and hashtag (A0301, A0302, A0303, A0305) from the HTO map, which agrees with the sheet sample
+  at 99-100%. No day-5 vs day-7 comparison is made. The sheet's own sample name is kept in `obs.sheet_sample`.
+- **SPLINTR units (16):** TP0_1 and TP0_2 baselines -> each of the 8 mice (pool 1: A0301 / A0302 vehicle, A0303 /
+  A0305 chemo day 2; pool 2: A0301 / A0302 / A0303 / A0305 chemo day 5-7). Baselines capped at 10,000 cells at random.
+- **Zebrafish units (decision 3): all 9 units of the draft.** Conditions come from the metadata columns `time`,
+  `morphine`, `inhib` (read with `NULL` kept as a string); the heart lists checked on 2026-11-27 equal the draft table
+  (untreated 7 dpi = Hr1, Hr13, Hr2a, Hr2b, Hr6a, Hr6v, Hr7a, Hr7v, Hr8, Hr9). The preparation asserts this.
+  Tree leaves are taken first within the 10,000-cell cap. `trees.pkl` is read with an unpickler restricted to
+  networkx graph classes and builtins.

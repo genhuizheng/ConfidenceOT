@@ -7,7 +7,9 @@
 # <dataset>/inputs/*.h5ad from 06_prepare_tacc.py. Output root new: <dataset>/ot_20261123.
 #
 #   bash submit_app_ot.sh [--dry-run] DATASET worklist|run|status
-#   DATASET  kang | sciplex2 | schiebinger | celegans | pancreas | larry_invivo
+#   DATASET  kang | sciplex2 | schiebinger | celegans | pancreas | larry_invivo | splintr | zebrafish
+#   (splintr / zebrafish added 2026-11-27, same two configurations; the root keeps the name ot_20261123 so that
+#   every application is scored by the same code)
 #
 # worklist  build_worklist.py, units x 2 encoding keys (one fit per row with --configs); login node, one thread, timeout
 # run       1 gg node per dataset (workers x fit workers per node set by unit size), worker.py --configs = the 2 configurations
@@ -19,12 +21,12 @@ dry_run=0; ds=""; stage=""
 while (( $# )); do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
-        kang|sciplex2|schiebinger|celegans|pancreas|larry_invivo) ds=$1; shift ;;
+        kang|sciplex2|schiebinger|celegans|pancreas|larry_invivo|splintr|zebrafish) ds=$1; shift ;;
         worklist|run|status) stage=$1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-[[ -n "$ds" && -n "$stage" ]] || { echo "usage: bash $0 [--dry-run] kang|sciplex2|schiebinger|celegans|pancreas|larry_invivo worklist|run|status" >&2; exit 2; }
+[[ -n "$ds" && -n "$stage" ]] || { echo "usage: bash $0 [--dry-run] kang|sciplex2|schiebinger|celegans|pancreas|larry_invivo|splintr|zebrafish worklist|run|status" >&2; exit 2; }
 repo=${CONFIDENCEOT_REPO:-/scratch/10119/ghzheng/OT_project/code/ConfidenceOT}
 venv=${V3_VENV:-/scratch/10119/ghzheng/OT_project/envs/otdb_otbench}
 app=/scratch/10119/ghzheng/OT_project/app_search_20261117
@@ -35,8 +37,8 @@ configs="ranknm256-midrank|none|scale|cos|pca50;logcpm|none|noscale|sqeuc|pca30"
 case $ds in
     sciplex2)                        procs=36; fitw=4;  hours=12 ;;
     schiebinger)                     procs=12; fitw=12; hours=24 ;;
-    kang|celegans)                   procs=8;  fitw=16; hours=24 ;;
-    pancreas|larry_invivo)           procs=6;  fitw=24; hours=24 ;;
+    kang|celegans|splintr)           procs=8;  fitw=16; hours=24 ;;
+    pancreas|larry_invivo|zebrafish) procs=6;  fitw=24; hours=24 ;;
 esac
 export PYTHONPATH=$repo/src:$repo/cancer_metastasis:$repo/realdata_benchmark:$repo
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1

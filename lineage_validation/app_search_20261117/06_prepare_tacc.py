@@ -24,6 +24,10 @@ informative cells; C. elegans: lineage-annotated cells), then random others. Dat
   celegans      GSE126954, QC-passed cells; adjacent embryo.time.bin
   pancreas      GSE132188: the authors' cells (h5ad obs), raw counts from RAW.tar matched by barcode and stage;
                 E12.5 -> E13.5 -> E14.5 -> E15.5
+  splintr       GSE186305 GEX with the singletCode SPLINTR sheet (post-hoc 2026-11-27): barcoded cells only, all barcodes
+                of a cell kept, pool-2 days not split; TP0_1 / TP0_2 baseline -> each of 8 mice (16 units)
+  zebrafish     GSE159032 / GSE158919 filtered h5 + moslin figshare metadata and trees; 9 units (untreated and morphine
+                time steps, morphine -> morphine + IWR-1 at 3 / 7 dpi, untreated -> morphine at 3 dpi); tree leaves first
 """
 
 from __future__ import annotations
@@ -293,9 +297,208 @@ def pancreas(d: Path, W: Writer):
                ["day", "cell_type", "cell_type_fine", "proliferation"])
 
 
+def tar_bytes(tf: tarfile.TarFile, name: str) -> io.BytesIO:
+    raw = tf.extractfile(name).read()
+    return io.BytesIO(gzip.decompress(raw) if name.endswith(".gz") else raw)
+
+
+# SPLINTR (PLAN_TACC.md post-hoc 2026-11-27): sheet sample -> (GEX library, pool, hashtag, condition)
+SPLINTR_SAMPLES = {
+    "chemoKRASBaseline_1": ("GSM5643580_KF16_TP0_1", "TP0_1", "", "baseline"),
+    "chemoKRASBaseline_2": ("GSM5643581_KF16_TP0_2", "TP0_2", "", "baseline"),
+    "chemoVehicle_1": ("GSM5643582_KF16_POOL_1", "POOL1", "A0301", "vehicle"),
+    "chemoVehicle_2": ("GSM5643582_KF16_POOL_1", "POOL1", "A0302", "vehicle"),
+    "chemoDay2_1": ("GSM5643582_KF16_POOL_1", "POOL1", "A0303", "chemo_d2"),
+    "chemoDay2_2": ("GSM5643582_KF16_POOL_1", "POOL1", "A0305", "chemo_d2"),
+    "chemoDay5_1": ("GSM5643583_KF16_POOL_2", "POOL2", "A0301", "chemo_d5to7"),
+    "chemoDay5_2": ("GSM5643583_KF16_POOL_2", "POOL2", "A0302", "chemo_d5to7"),
+    "chemoDay7_1": ("GSM5643583_KF16_POOL_2", "POOL2", "A0303", "chemo_d5to7"),
+    "chemoDay7_2": ("GSM5643583_KF16_POOL_2", "POOL2", "A0305", "chemo_d5to7"),
+}
+SPLINTR_HTO = {"POOL1": "GSM5643584_KF16_POOL_1_HTO", "POOL2": "GSM5643585_KF16_POOL_2_HTO"}
+
+
+def splintr(d: Path, W: Writer):
+    """Fennell 2022 (GSE186305) with the singletCode SPLINTR barcode sheet. Barcoded cells only; every barcode of a
+    cell kept (obs.clones, ';'-joined); pool-2 days not split (chemo_d5to7); HTO argmax per pool cell for the record."""
+    import anndata as ad
+    sheet = pd.read_csv(d / "splintr_singletcode_figshare/extracted/allBarcodeSheets/SPLINTR/stepFourStarcodeShavedReads50.csv", dtype=str)
+    sheet = sheet[sheet["sample"].isin(list(SPLINTR_SAMPLES))]
+    reads = sheet.groupby(["sample", "cellID", "barcode"]).size().rename("reads").reset_index()   # one sheet row per read
+    reads["library"] = reads["sample"].map(lambda s: SPLINTR_SAMPLES[s][0])
+    # (b) a cell listed under two samples of the same library: its mouse is not defined -> excluded, reported
+    cs = reads.drop_duplicates(["library", "sample", "cellID"])
+    nsamp = cs.groupby(["library", "cellID"])["sample"].transform("nunique")
+    conflict = cs[nsamp > 1]
+    conflict.groupby(["library", "sample"]).size().rename("cells").to_csv(W.root / "prep" / "sample_conflicts.tsv", sep="\t")
+    bad = set(zip(conflict.library, conflict.cellID))
+    reads = reads[[k not in bad for k in zip(reads.library, reads.cellID)]]
+    reads.to_csv(W.root / "prep" / "cell_barcodes.tsv.gz", sep="\t", index=False)
+    clones = reads.groupby(["sample", "cellID"])["barcode"].agg(lambda x: ";".join(sorted(set(x))))
+    print("sheet cells per sample (after same-library conflicts):", clones.groupby(level=0).size().to_dict(),
+          "conflict cells:", len(bad), flush=True)
+    parts, rep, var0 = {}, [], None
+    with tarfile.open(d / "splintr_gse186305/GSE186305_RAW.tar") as tf:
+        hto_top = {}
+        for pool, gsm in SPLINTR_HTO.items():
+            import scipy.io
+            M = scipy.io.mmread(tar_bytes(tf, f"{gsm}_matrix.mtx.gz")).tocsc()
+            bc = pd.read_csv(tar_bytes(tf, f"{gsm}_barcodes.tsv.gz"), header=None)[0].astype(str).str.replace("-1$", "", regex=True)
+            ft = pd.read_csv(tar_bytes(tf, f"{gsm}_features.tsv.gz"), sep="\t", header=None)
+            names = ft[1].astype(str).to_numpy() if ft.shape[1] > 1 else ft[0].astype(str).to_numpy()
+            if M.shape[0] != len(names):
+                M = M.T.tocsc()
+            hto_top[pool] = pd.Series(names[np.asarray(M.argmax(axis=0)).ravel()], index=bc.to_numpy())
+        for lib in sorted({v[0] for v in SPLINTR_SAMPLES.values()}):
+            ft = pd.read_csv(tar_bytes(tf, f"{lib}_features.tsv.gz"), sep="\t", header=None)
+            bc = pd.read_csv(tar_bytes(tf, f"{lib}_barcodes.tsv.gz"), header=None)[0].astype(str).str.replace("-1$", "", regex=True)
+            X = read_mtx(tar_text(tf, f"{lib}_matrix.mtx.gz"), transpose=True)      # cells x features
+            assert X.shape == (len(bc), len(ft)), (lib, X.shape, len(bc), len(ft))
+            if ft.shape[1] > 2:
+                gex = (ft[2].astype(str) == "Gene Expression").to_numpy()
+                print(lib, "feature types:", ft[2].value_counts().to_dict(), flush=True)
+                X, ft = X[:, np.flatnonzero(gex)], ft[gex]
+            var0 = ft if var0 is None else var0
+            assert (ft[0].to_numpy() == var0[0].to_numpy()).all(), f"{lib}: gene order differs"
+            parts[lib] = (X.tocsr(), pd.Index(bc))
+            print(lib, "GEX", X.shape, X.nnz, flush=True)
+    sym = pd.Index(ad.utils.make_index_unique(pd.Index(var0[1].astype(str).to_numpy())))
+    blocks, obs = [], []
+    for s, (lib, pool, hto, cond) in SPLINTR_SAMPLES.items():
+        X, bc = parts[lib]
+        cl = clones.loc[s]
+        pos = bc.get_indexer(cl.index)
+        ok = pos >= 0
+        rec = {"sample": s, "library": lib, "sheet_cells": len(cl), "in_gex": int(ok.sum()), "share": round(float(ok.mean()), 4)}
+        o = pd.DataFrame({"sheet_sample": s, "library": lib, "pool": pool, "hashtag": hto, "condition": cond,
+                          "mouse": f"{pool}_{hto}" if hto else pool, "barcode_cell": cl.index[ok].to_numpy(),
+                          "clones": cl.to_numpy()[ok], "n_barcodes": [c.count(";") + 1 for c in cl.to_numpy()[ok]]})
+        if pool in hto_top:
+            top = hto_top[pool].reindex(o.barcode_cell.to_numpy()).astype(str).to_numpy()
+            o["hto_top"] = top
+            rec["hto_agrees"] = round(float(np.mean([hto in t for t in top])), 4)
+        else:
+            o["hto_top"] = ""
+        rep.append(rec); print(rec, flush=True)
+        blocks.append(X[pos[ok]]); obs.append(o)
+    pd.DataFrame(rep).to_csv(W.root / "prep" / "barcode_match.tsv", sep="\t", index=False)
+    o = pd.concat(obs, ignore_index=True); o.index = [f"c{i}" for i in range(len(o))]
+    A = ad.AnnData(sp.vstack(blocks).tocsr().astype(np.float32), obs=o, var=pd.DataFrame(index=sym))
+    pd.crosstab(o.mouse, o.n_barcodes.clip(upper=4)).to_csv(W.root / "prep" / "barcodes_per_cell.tsv", sep="\t")
+    cols = ["sheet_sample", "library", "barcode_cell", "pool", "hashtag", "condition", "mouse", "clones", "n_barcodes", "hto_top"]
+    targets = [s for s, v in SPLINTR_SAMPLES.items() if v[3] != "baseline"]
+    for base in ("TP0_1", "TP0_2"):
+        src = np.flatnonzero((o.mouse == base).to_numpy())
+        for s in targets:
+            _, pool, hto, cond = SPLINTR_SAMPLES[s]
+            tgt = np.flatnonzero((o.sheet_sample == s).to_numpy())
+            W.unit(f"SPLINTR_{base}_to_{pool}_{hto}_{cond}", base, A, src, tgt, cols, meta={"target_condition": cond})
+
+
+class _GraphUnpickler(__import__("pickle").Unpickler):
+    """trees.pkl holds networkx DiGraphs (PLAN_TACC.md): only networkx graph classes and plain builtins load."""
+    OK_BUILTINS = {"dict", "list", "set", "frozenset", "tuple", "str", "int", "float", "bool", "object"}
+
+    def find_class(self, module, name):
+        if module.startswith("networkx.classes.") or (module == "builtins" and name in self.OK_BUILTINS):
+            return super().find_class(module, name)
+        raise __import__("pickle").UnpicklingError(f"refused: {module}.{name}")
+
+
+ZF_HEARTS = {  # PLAN_TACC.md section 8 (checked against the metadata 2026-11-27); asserted below
+    ("Ctrl", "Ctrl", "NULL"): "H5 H6 H7 H8a H8v",
+    ("3dpi", "Ctrl", "NULL"): "Hr11 Hr12 Hr24 Hr27",
+    ("7dpi", "Ctrl", "NULL"): "Hr1 Hr13 Hr2a Hr2b Hr6a Hr6v Hr7a Hr7v Hr8 Hr9",
+    ("30dpi", "Ctrl", "NULL"): "Hr19 Hr3 Hr4",
+    ("3dpi", "Morph", "NULL"): "Hr10 Hr22 Hr23 Hr25 Hr26 Hr28",
+    ("7dpi", "Morph", "NULL"): "Hr14 Hr15 Hr30",
+    ("30dpi", "Morph", "NULL"): "Hr20 Hr21",
+    ("3dpi", "Morph", "IWR1"): "Hr29 Hr34 Hr35",
+    ("7dpi", "Morph", "IWR1"): "Hr31 Hr32 Hr33",
+}
+
+
+def read_10x_h5(b: io.BytesIO):
+    import h5py
+    with h5py.File(b, "r") as h:
+        g = h["matrix"] if "matrix" in h else h[list(h.keys())[0]]
+        shape = tuple(g["shape"][:])
+        X = sp.csc_matrix((g["data"][:].astype(np.float32), g["indices"][:], g["indptr"][:]), shape=shape).T.tocsr()  # cells x genes
+        bc = pd.Series(g["barcodes"][:].astype(str)).str.replace("-1$", "", regex=True).to_numpy()
+        if "features" in g:
+            gid, gname = g["features"]["id"][:].astype(str), g["features"]["name"][:].astype(str)
+        else:
+            gid, gname = g["genes"][:].astype(str), g["gene_names"][:].astype(str)
+    return X, bc, gid, gname
+
+
+def zebrafish(d: Path, W: Writer):
+    """Hu 2022 heart regeneration: the authors' cells (moslin figshare metadata) with raw counts from the GEO filtered h5,
+    matched by barcode within the library whose barcodes hold all of a heart's cells (Hr22 / Hr23 file names are
+    swapped in GEO; 08_content_checks). Conditions never pooled; hearts pooled within a side; tree leaves first."""
+    import anndata as ad
+    z = d / "zebrafish_heart_moslin_figshare"
+    m = pd.read_csv(z / "Zebrafish_metadata.csv", dtype=str, keep_default_na=False,
+                    usecols=["Cell", "orig.ident", "time", "morphine", "inhib", "AV", "Cell_type", "nCount_RNA"])
+    m["bc"] = m.Cell.str.split("_", n=1).str[1]
+    got = m.groupby(["time", "morphine", "inhib"])["orig.ident"].agg(lambda x: " ".join(sorted(set(x)))).to_dict()
+    assert got == ZF_HEARTS, f"heart lists differ from PLAN_TACC.md: {got}"
+    with open(z / "trees.pkl", "rb") as fh:
+        trees = _GraphUnpickler(fh).load()
+    leaves = set()
+    for t in (trees.values() if isinstance(trees, dict) else trees):
+        leaves |= {n for n in t.nodes if t.out_degree(n) == 0}
+    m["tree_leaf"] = m.Cell.isin(leaves)
+    m.groupby("orig.ident").tree_leaf.agg(["size", "sum"]).to_csv(W.root / "prep" / "tree_leaves_per_heart.tsv", sep="\t")
+    print("trees", len(trees), "leaves", len(leaves), "leaves in metadata", int(m.tree_leaf.sum()), flush=True)
+    libs = {}
+    for tar in (d / "zebrafish_heart_gse159032/GSE159032_RAW.tar", d / "zebrafish_heart_gse158919/GSE158919_RAW.tar"):
+        with tarfile.open(tar) as tf:
+            for mem in tf.getmembers():
+                if mem.name.endswith("_filtered_matrix.h5"):
+                    libs[f"{tar.parent.name.split('_')[-1]}:{mem.name}"] = read_10x_h5(io.BytesIO(tf.extractfile(mem).read()))
+    gid0 = next(iter(libs.values()))[2]; gname0 = next(iter(libs.values()))[3]
+    blocks, obs, rep = [], [], []
+    for ident, g in m.groupby("orig.ident", sort=True):
+        bcs = pd.Index(g.bc)
+        best = max(libs, key=lambda k: int(bcs.isin(libs[k][1]).sum()))
+        X, bc, gid, _ = libs[best]
+        pos = pd.Index(bc).get_indexer(bcs)
+        rep.append({"orig.ident": ident, "library": best, "metadata_cells": len(bcs), "matched": int((pos >= 0).sum())})
+        assert (pos >= 0).all(), f"{ident}: {(pos < 0).sum()} metadata cells not in {best}"
+        if not (gid == gid0).all():
+            order = pd.Index(gid).get_indexer(gid0); assert (order >= 0).all(), f"{best}: gene set differs"
+            X = X[:, order]
+        blocks.append(X[pos]); obs.append(g)
+    pd.DataFrame(rep).to_csv(W.root / "prep" / "barcode_match.tsv", sep="\t", index=False)
+    o = pd.concat(obs); o.index = o.Cell.to_numpy()
+    A = ad.AnnData(sp.vstack(blocks).tocsr(), obs=o, var=pd.DataFrame(index=ad.utils.make_index_unique(pd.Index(gname0))))
+    tot = np.asarray(A.X.sum(1)).ravel()
+    pd.DataFrame({"raw_total": tot, "authors_nCount_RNA": o.nCount_RNA.astype(float).to_numpy()}).describe().to_csv(
+        W.root / "prep" / "raw_vs_authors_total.tsv", sep="\t")
+    o = A.obs
+    pd.crosstab([o.time, o.morphine, o.inhib], o.Cell_type).T.to_csv(W.root / "prep" / "condition_celltype.tsv", sep="\t")
+    def cells(time, morph, inhib):
+        return np.flatnonzero(((o.time == time) & (o.morphine == morph) & (o.inhib == inhib)).to_numpy())
+    pri = o.tree_leaf.to_numpy(bool)
+    cols = ["Cell", "orig.ident", "time", "morphine", "inhib", "AV", "Cell_type", "tree_leaf"]
+    units = [("Zebrafish_untreated_Ctrl_to_3dpi", ("Ctrl", "Ctrl", "NULL"), ("3dpi", "Ctrl", "NULL")),
+             ("Zebrafish_untreated_3dpi_to_7dpi", ("3dpi", "Ctrl", "NULL"), ("7dpi", "Ctrl", "NULL")),
+             ("Zebrafish_untreated_7dpi_to_30dpi", ("7dpi", "Ctrl", "NULL"), ("30dpi", "Ctrl", "NULL")),
+             ("Zebrafish_morphine_Ctrl_to_3dpi", ("Ctrl", "Ctrl", "NULL"), ("3dpi", "Morph", "NULL")),
+             ("Zebrafish_morphine_3dpi_to_7dpi", ("3dpi", "Morph", "NULL"), ("7dpi", "Morph", "NULL")),
+             ("Zebrafish_morphine_7dpi_to_30dpi", ("7dpi", "Morph", "NULL"), ("30dpi", "Morph", "NULL")),
+             ("Zebrafish_morphine_to_IWR1_3dpi", ("3dpi", "Morph", "NULL"), ("3dpi", "Morph", "IWR1")),
+             ("Zebrafish_morphine_to_IWR1_7dpi", ("7dpi", "Morph", "NULL"), ("7dpi", "Morph", "IWR1")),
+             ("Zebrafish_untreated_to_morphine_3dpi", ("3dpi", "Ctrl", "NULL"), ("3dpi", "Morph", "NULL"))]
+    for u, s, t in units:
+        W.unit(u, "heart", A, cells(*s), cells(*t), cols, priority=pri)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dataset", required=True, choices=["larry_invivo", "kang", "schiebinger", "sciplex2", "celegans", "pancreas"])
+    p.add_argument("--dataset", required=True, choices=["larry_invivo", "kang", "schiebinger", "sciplex2", "celegans", "pancreas",
+                                                        "splintr", "zebrafish"])
     p.add_argument("--data", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()

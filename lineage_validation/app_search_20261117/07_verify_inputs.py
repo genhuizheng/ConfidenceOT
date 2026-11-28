@@ -10,6 +10,7 @@ Unit-level label tables are written per dataset: value counts of the label colum
 Writes APP/verify/inputs.tsv, APP/verify/<dataset>_labels.tsv and prints one line per problem. Reads only.
 
     python -I 07_verify_inputs.py --app $SCRATCH/OT_project/app_search_20261117
+    python -I 07_verify_inputs.py --app $SCRATCH/OT_project/app_search_20261117 --only splintr zebrafish --tag _20261127
 """
 from __future__ import annotations
 
@@ -20,7 +21,8 @@ import numpy as np
 import pandas as pd
 
 LABELS = {"kang": ["cell_type", "donor"], "sciplex2": ["drug", "dose"], "schiebinger": ["stage", "condition"],
-          "celegans": ["time_bin", "cell_type"], "pancreas": ["day", "cell_type"], "larry_invivo": ["time", "cell_type"]}
+          "celegans": ["time_bin", "cell_type"], "pancreas": ["day", "cell_type"], "larry_invivo": ["time", "cell_type"],
+          "splintr": ["condition", "mouse", "n_barcodes"], "zebrafish": ["orig.ident", "Cell_type", "tree_leaf"]}
 
 
 def main() -> None:
@@ -28,11 +30,15 @@ def main() -> None:
     import scipy.sparse as sp
     p = argparse.ArgumentParser()
     p.add_argument("--app", type=Path, required=True)
+    p.add_argument("--only", nargs="+", default=None, help="dataset directories to check (default: every one with a manifest)")
+    p.add_argument("--tag", default="", help="suffix of the summary file: verify/inputs<tag>.tsv (default keeps inputs.tsv)")
     a = p.parse_args()
     out = a.app / "verify"; out.mkdir(exist_ok=True)
     rows, problems = [], []
     for man_f in sorted(a.app.glob("*/manifest.csv")):
         ds = man_f.parent.name
+        if a.only and ds not in a.only:
+            continue
         man = pd.read_csv(man_f)
         units = pd.read_csv(man_f.parent / "prep" / "units.tsv", sep="\t").set_index("pair_id")
         lab_rows = []
@@ -72,7 +78,7 @@ def main() -> None:
                 problems.append(f"{ds} {r.pair_id}: obs names shared between sides")
         pd.DataFrame(lab_rows).to_csv(out / f"{ds}_labels.tsv", sep="\t", index=False)
         print(ds, "rows", len(man), flush=True)
-    pd.DataFrame(rows).to_csv(out / "inputs.tsv", sep="\t", index=False)
+    pd.DataFrame(rows).to_csv(out / f"inputs{a.tag}.tsv", sep="\t", index=False)
     print("problems:", len(problems))
     for x in problems:
         print("  " + x)
