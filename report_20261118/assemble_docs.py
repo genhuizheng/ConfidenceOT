@@ -11,7 +11,7 @@ from pptx import Presentation
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
-STEMS = ["Figure1", "Figure2", "Figure3", "Figure4", "FigureFW"]
+STEMS = ["Figure1", "Figure2", "Figure3", "Figure4", "Figure5", "FigureFW"]
 
 
 def main():
@@ -41,7 +41,7 @@ def main():
         seen[title.split(" |")[0]] = i
     # completeness check: every figure has an overview and every panel a slide
     check = ["\n## Overview / panel coverage\n", "| Figure | Overview slide | Panels | Panel slides |", "|---|---|---|---|"]
-    for s, label in zip(STEMS, ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Future work"]):
+    for s, label in zip(STEMS, ["Figure 1", "Figure 2", "Figure 3", "Figure 4", "Figure 5", "Future work"]):
         panels = list(json.loads((OUT / s / f"{s}_panels.json").read_text())["panels"])
         ov = seen.get(label, "MISSING")
         ps = [seen.get(f"{label} {k}" if label == "Future work" else f"{label}{k}", "MISSING") for k in panels]

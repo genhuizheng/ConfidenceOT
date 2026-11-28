@@ -42,9 +42,10 @@ FIGS = [
     ("Figure4", "Figure 4", "CRISPR: does RNA-based matching agree with lineage information?",
      "Independent CRISPR lineage supports RNA-only matching at the family and clade level, not at the level of exact "
      "cell-to-cell partners."),
+    ("Figure5", "Figure 5", "Applications: does rejection follow known biology?",
+     "On two data sets with references the OT never sees, rejection follows the biology: it grows with drug dose (sciPlex2) and marks the cell types with the largest IFN response, while cell identity is kept (Kang)."),
     ("FigureFW", "Future work", "Where can we apply ConfidenceOT next?",
-     "Ten collected data sets; six (68 units) are prepared and checked, none is evaluated yet. Next: evaluate the ones "
-     "with independent reference information."),
+     "Six collected data sets (68 units) are now run and evaluated; two earlier runs wait for mapping and two data sets for preparation."),
 ]
 
 
@@ -178,22 +179,23 @@ def intro_slides(D: Deck):
              ("Figure 2", "Controlled validation", "How well does it work, and when does it fail?", "simulation, known truth"),
              ("Figure 3", "Real cell-state change", "Can OT capture changes in cell states?", "PDX, no truth: consistency with the published biology"),
              ("Figure 4", "Independent lineage", "Does RNA matching agree with lineage information?", "CRISPR edits, not seen by the RNA-only OT"),
-             ("Future work", "Applications", "Where can we apply ConfidenceOT next?", "collected data sets; not yet evaluated")]
-    w, gap, x0, y0 = 2.25, 0.27, 0.55, 2.45
+             ("Figure 5", "Applications", "Does rejection follow known biology?", "drug dose and IFN-beta: references not seen by the OT"),
+             ("Future work", "Next data sets", "Where can we apply ConfidenceOT next?", "collected data sets: status and readings")]
+    w, gap, x0, y0 = 1.86, 0.22, 0.45, 2.45
     for i, (f, h, q, ev) in enumerate(steps):
         x = x0 + i * (w + gap)
         b = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y0), Inches(w), Inches(1.75))
         b.fill.solid(); b.fill.fore_color.rgb = RGBColor(0xF3, 0xF4, 0xF5); b.line.color.rgb = RGBColor(0xB0, 0xB5, 0xB9)
         b.adjustments[0] = 0.08
-        txt(s, x + 0.08, y0 + 0.12, w - 0.16, 2.35, [[(f, {"bold": True, "color": ORANGE, "size": 15})],
-                                                     ("__space__", 2, [(h, {"bold": True, "size": 15})]),
-                                                     ("__space__", 10, [(q, {"size": 13})])])
+        txt(s, x + 0.08, y0 + 0.12, w - 0.16, 2.35, [[(f, {"bold": True, "color": ORANGE, "size": 14})],
+                                                     ("__space__", 2, [(h, {"bold": True, "size": 14})]),
+                                                     ("__space__", 10, [(q, {"size": 12})])])
         txt(s, x + 0.05, y0 + 1.88, w - 0.1, 0.9, [[(ev, {"size": 12, "color": SUB, "italic": True})]], align=PP_ALIGN.CENTER)
         if i < len(steps) - 1:
             a = s.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(x + w + 0.04), Inches(y0 + 0.74), Inches(0.19), Inches(0.28))
             a.fill.solid(); a.fill.fore_color.rgb = RGBColor(0x6B, 0x72, 0x80); a.line.fill.background()
     txt(s, 0.6, 6.2, 12.1, 0.7, [[("The levels of evidence differ and are not merged: known truth (Figure 2), consistency with a "
-                                   "paper (Figure 3), independent lineage (Figure 4), prepared but unevaluated data (Future work).",
+                                   "paper (Figure 3), independent lineage (Figure 4), independent references in real applications (Figure 5).",
                                    {"size": 13, "color": SUB})]])
 
 
@@ -201,9 +203,10 @@ def closing_slides(D: Deck):
     s = D.slide("Next steps")
     items = [
         ("Evaluate ConfidenceOT on existing biological applications with independent reference information where available.", True),
-        ("Submit OT for the 68 prepared units (same frozen pipeline: main configuration, calibration v3, M4-E), with your go.", False),
-        ("Score them with the definitions fixed in PLAN_TACC: LARRY in vivo clones, sciPlex2 dose, Kang control; then map each "
-         "result to the original paper, in both directions.", False),
+        ("Done (2026-11-23): OT for the 68 prepared units with best preprocessing and logCPM only, scored with the PLAN_TACC "
+         "definitions and compared with each original paper (sciPlex2 and Kang in Figure 5).", False),
+        ("Map the earlier LARRY in vitro and Cook runs to their papers; LARRY in vivo needs a closer look (93-96% of day-2 "
+         "cells rejected).", False),
         ("Finish SPLINTR and zebrafish preparation after the three open decisions (clone rule, cell set, unit list).", False),
         ("Not planned: new algorithm development or a new preprocessing grid search.", False),
     ]
@@ -219,7 +222,9 @@ def closing_slides(D: Deck):
             ("Figure 3", "PDX: retained matches follow the published state order (intermediate -> intermediate, ASCL1+ -> ASCL1-); "
                          "consistency, not a reconstructed trajectory."),
             ("Figure 4", "CRISPR: RNA matching agrees with lineage at family (d = 0.23) and clade level, not at exact cell partners (0.04)."),
-            ("Future work", "68 units prepared on real data with independent references where available; evaluation is the next step.")]
+            ("Figure 5", "Applications: rejection grows with dose (sciPlex2, Nutlin rho 0.86) and marks the myeloid IFN response "
+                         "while cell identity is kept (Kang, same-type mass 0.72 vs 0.28)."),
+            ("Future work", "Six data sets evaluated; SPLINTR and zebrafish next, then mapping of the LARRY in vitro and Cook runs.")]
     paras = []
     for i, (h, t) in enumerate(rows):
         para = [(f"{h}   ", {"bold": True, "color": ORANGE, "size": 17}), (t, {"size": 17})]
