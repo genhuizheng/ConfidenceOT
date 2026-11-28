@@ -305,3 +305,12 @@ the log domain and the substitution is recorded per row; nothing else about a me
 
 **Tier 2** (uniPort, Pamona, SCOT v2, GENOT, CellFlow) run only if their environments install; any deviation (e.g.
 CellFlow iterations) is recorded before running.
+
+## Post-hoc, 2026-11-27: Partial OT iteration cap at N = 5,000
+
+TACC pilot 1164970 (12 rows of the N = 5,000 S1 / S2 / S2b worklist, every cost family): six solvers ran; Partial OT
+failed on every row with POT's "Error in the EMD resolution: try to increase the number of dummy points". POT raises it
+whenever its internal `emd` returns a warning, here the iteration cap (default 100,000) reached by the network simplex on a
+~5,000 x 5,000 problem. `partial_wasserstein` now receives `numItermax=10_000_000`, the value exact OT already used. The
+objective, m = 0.8 and nb_dummy = 1 are unchanged; an iteration cap does not change a solution that converges, so the
+local N = 200 results (no failure) stand. The 12 pilot rows are archived and rerun with the full worklist.

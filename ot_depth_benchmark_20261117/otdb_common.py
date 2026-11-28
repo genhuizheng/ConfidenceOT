@@ -164,7 +164,9 @@ def solve_all(C, Xc=None, Yc=None, scale=None, rng=None, index: int = 0, solvers
                     P = solve_fixed_bidirectional_uot(C, np.ones(n, bool), np.ones(m, bool), rejection_cost=1.0, epsilon=EPSILON,
                                                       lambda_a=LAMBDA, lambda_b=LAMBDA, threshold=TOL, max_iterations=100_000).coupling
                 elif s == "partial":
-                    P = ot.partial.partial_wasserstein(a, b, C, m=PARTIAL_MASS)
+                    # numItermax as for exact OT (forwarded to POT's emd): with the default cap the network simplex stops
+                    # early at N = 5,000 and POT raises "Error in the EMD resolution" (pilot 1164970, PLAN 2026-11-27)
+                    P = ot.partial.partial_wasserstein(a, b, C, m=PARTIAL_MASS, numItermax=10_000_000)
                 elif s in ("confidenceot", "confidenceot_bot"):
                     # the generator state is copied so both backbones draw the same calibration subsample and nulls
                     import copy
