@@ -26,6 +26,25 @@ Dataset-specific (PLAN_TACC):
               expectation over the same annotated cells; gates per lineage depth (name length)
   pancreas    label cell_type. emerging.tsv: target rejection of types with < 1% of source cells (absent or rare the day
               before) vs the other target types
+Added 2026-11-27 (PLAN_TACC.md sections 7 / 8 and post-hoc 2026-11-27; fixed before any SPLINTR / zebrafish OT result):
+  splintr     no cell-type label; obs.clones holds every barcode of a cell. Sisters T_i of source cell i = target cells
+              sharing >= 1 barcode with i; truth_i = |T_i| > 0.
+              clone_truth.tsv: source rejected share for cells with / without sisters, AUROC of the (binary) rejection
+              for 'no sister' (= 0.5 + (difference of the two shares) / 2), and Spearman of source clone size (max over
+              the cell's barcodes of the source cells carrying it) vs rejection; target rejected share for cells with /
+              without any barcode in the whole baseline library (GEX-matched sheet cells, --data) and the share of
+              target cells without one.
+              clone_mass.tsv: as LARRY 03_score on the retained x retained block Q: retained source cells with >= 1
+              retained sister; m_i = sum_{j in T_i} Q_ij / sum_j Q_ij; uniform = |T_i| / n_retained_target;
+              independent = sum_{j in T_i} b_j / sum_j b_j (b = column mass of Q); medians of m / baseline and shares
+              of cells above each baseline.
+  zebrafish   label Cell_type. activated_origin.tsv: for each activated fibroblast type in the retained targets
+              (col11a1a, col12a1a, nppc, proliferating), the share of its incoming retained mass from each source group
+              (epicardium, endocardium, constitutive fibroblasts, other fibroblasts, other) vs the group's share of
+              all retained source mass. tree_relatedness.tsv: in each tree of the target condition (trees.pkl, --data),
+              a cell's clade = its parent node; relatedness(a, b) = share of clades holding type a that also hold b,
+              averaged over those trees; Spearman over source types between P(source type | target type a) and
+              relatedness(a, source type), per activated type a. Consistency only, not lineage.
 """
 from __future__ import annotations
 
@@ -37,7 +56,21 @@ import pandas as pd
 from scipy.stats import rankdata, spearmanr
 
 CONFIGS = {"l5best": "ranknm256-midrank|none|scale|cos|pca50", "logcpm_pca": "logcpm|none|noscale|sqeuc|pca30"}
-LABEL = {"kang": "cell_type", "sciplex2": None, "schiebinger": "stage", "celegans": "cell_type", "pancreas": "cell_type"}
+LABEL = {"kang": "cell_type", "sciplex2": None, "schiebinger": "stage", "celegans": "cell_type", "pancreas": "cell_type",
+         "splintr": None, "zebrafish": "Cell_type"}
+ZF_ACTIVATED = ["Fibroblasts (col11a1a)", "Fibroblasts (col12a1a)", "Fibroblasts (nppc)", "Fibroblasts (proliferating)"]
+
+
+def zf_group(t):
+    if t.startswith("Epicardium"):
+        return "epicardium"
+    if t.startswith("Endocardium"):
+        return "endocardium"
+    if t == "Fibroblasts (const.)":
+        return "constitutive fibroblasts"
+    if t.startswith("Fibroblasts") or t == "Valve fibroblasts":
+        return "other fibroblasts"
+    return "other"
 S_GENES = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1",
            "MLF1IP", "CENPU", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7", "POLD3",
            "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN",
@@ -83,11 +116,144 @@ def compatible(src, tgt):
     return False
 
 
+def splintr_baseline_barcodes(data: Path) -> dict:
+    """Barcodes carried by the GEX-matched sheet cells of each baseline library (TP0_1 / TP0_2)."""
+    import gzip
+    import io
+    import tarfile
+    sheet = pd.read_csv(data / "splintr_singletcode_figshare/extracted/allBarcodeSheets/SPLINTR/stepFourStarcodeShavedReads50.csv", dtype=str)
+    out = {}
+    with tarfile.open(data / "splintr_gse186305/GSE186305_RAW.tar") as tf:
+        for base, s, lib in (("TP0_1", "chemoKRASBaseline_1", "GSM5643580_KF16_TP0_1"), ("TP0_2", "chemoKRASBaseline_2", "GSM5643581_KF16_TP0_2")):
+            bc = pd.read_csv(io.BytesIO(gzip.decompress(tf.extractfile(f"{lib}_barcodes.tsv.gz").read())), header=None)[0]
+            bc = set(bc.astype(str).str.replace("-1$", "", regex=True))
+            g = sheet[(sheet["sample"] == s) & sheet.cellID.isin(bc)]
+            out[base] = set(g.barcode)
+            print("baseline", base, "GEX-matched cells", g.cellID.nunique(), "barcodes", len(out[base]), flush=True)
+    return out
+
+
+def score_splintr(key, A, pos, rj, P, base_bc):
+    rows = []
+    cs = [set(x.split(";")) for x in A["source"].obs["clones"].astype(str).to_numpy()[pos["source"]]]
+    ct = [set(x.split(";")) for x in A["target"].obs["clones"].astype(str).to_numpy()[pos["target"]]]
+    where = {}
+    for j, bs in enumerate(ct):
+        for b in bs:
+            where.setdefault(b, set()).add(j)
+    sis = [set().union(*(where.get(b, set()) for b in bs)) for bs in cs]
+    has = np.array([len(x) > 0 for x in sis])
+    size_ = {}
+    for bs in cs:
+        for b in bs:
+            size_[b] = size_.get(b, 0) + 1
+    csize = np.array([max(size_[b] for b in bs) for bs in cs])
+    base = A["source"].obs["mouse"].astype(str).iloc[0]
+    tin = np.array([len(bs & base_bc[base]) > 0 for bs in ct])
+    rs_, rt_ = rj["source"], rj["target"]
+    rec = {**key, "table": "clone_truth", "target_condition": A["target"].obs["condition"].astype(str).iloc[0],
+           "source_cells": len(cs), "source_with_sister": int(has.sum()),
+           "rejected_with_sister": float(rs_[has].mean()) if has.any() else np.nan,
+           "rejected_without_sister": float(rs_[~has].mean()) if (~has).any() else np.nan,
+           "auroc_rejection_for_no_sister": auroc(rs_.astype(float), ~has),
+           "spearman_clone_size_vs_rejected": float(spearmanr(csize, rs_.astype(float)).correlation) if rs_.any() and (~rs_).any() else np.nan,
+           "target_cells": len(ct), "target_share_without_baseline_barcode": float((~tin).mean()),
+           "target_rejected_with_baseline_barcode": float(rt_[tin].mean()) if tin.any() else np.nan,
+           "target_rejected_without_baseline_barcode": float(rt_[~tin].mean()) if (~tin).any() else np.nan}
+    rows.append(rec)
+    rs, rt = ~rs_, ~rt_
+    Q = P[np.ix_(rs, rt)]
+    if Q.sum() > 0:
+        tmap = -np.ones(len(rt), int)
+        tmap[np.flatnonzero(rt)] = np.arange(rt.sum())
+        b = Q.sum(0); n_t = int(rt.sum()); R = []
+        for qi, i in enumerate(np.flatnonzero(rs)):
+            T = [tmap[j] for j in sis[i] if tmap[j] >= 0]
+            row = Q[qi]
+            if not T or row.sum() <= 0:
+                continue
+            R.append((row[T].sum() / row.sum(), len(T) / n_t, b[T].sum() / b.sum()))
+        R = np.array(R).reshape(-1, 3)
+        ok = len(R) > 0
+        rows.append({**key, "table": "clone_mass", "target_condition": rec["target_condition"], "scored_cells": len(R),
+                     "median_m": float(np.median(R[:, 0])) if ok else np.nan,
+                     "median_m_over_uniform": float(np.median(R[:, 0] / R[:, 1])) if ok else np.nan,
+                     "median_m_over_independent": float(np.median(R[:, 0] / np.maximum(R[:, 2], 1e-300))) if ok else np.nan,
+                     "share_m_gt_uniform": float((R[:, 0] > R[:, 1]).mean()) if ok else np.nan,
+                     "share_m_gt_independent": float((R[:, 0] > R[:, 2]).mean()) if ok else np.nan})
+    return rows
+
+
+def zebrafish_clades(data: Path):
+    """Per tree: condition (time, morphine, inhib) of its leaves and the Cell_type sets of its clades (parent nodes)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("prep06", Path(__file__).resolve().parent / "06_prepare_tacc.py")
+    prep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prep)
+    z = data / "zebrafish_heart_moslin_figshare"
+    m = pd.read_csv(z / "Zebrafish_metadata.csv", dtype=str, keep_default_na=False,
+                    usecols=["Cell", "time", "morphine", "inhib", "Cell_type"]).set_index("Cell")
+    with open(z / "trees.pkl", "rb") as fh:
+        trees = prep._GraphUnpickler(fh).load()
+    out = []
+    for name, t in (trees.items() if isinstance(trees, dict) else enumerate(trees)):
+        clades = {}
+        leaves = [n for n in t.nodes if t.out_degree(n) == 0 and n in m.index]
+        for n in leaves:
+            for par in t.predecessors(n):
+                clades.setdefault(par, set()).add(m.at[n, "Cell_type"])
+        cond = m.loc[leaves, ["time", "morphine", "inhib"]].drop_duplicates()
+        assert len(cond) == 1, f"tree {name}: leaves from more than one condition"
+        out.append({"tree": str(name), "condition": tuple(cond.iloc[0]), "clades": list(clades.values())})
+    print("trees", len(out), flush=True)
+    return out
+
+
+def score_zebrafish(key, A, pos, rj, Q, zf):
+    rows = []
+    ls = A["source"].obs["Cell_type"].astype(str).to_numpy()[pos["source"]][~rj["source"]]
+    lt = A["target"].obs["Cell_type"].astype(str).to_numpy()[pos["target"]][~rj["target"]]
+    grp = np.array([zf_group(x) for x in ls])
+    row_mass = Q.sum(1); tot = row_mass.sum()
+    us = sorted(set(ls))
+    cond = tuple(A["target"].obs[["time", "morphine", "inhib"]].astype(str).iloc[0])
+    trees = [t for t in zf if t["condition"] == cond]
+    for a_ in ZF_ACTIVATED:
+        m = lt == a_
+        if not m.any():
+            continue
+        col = Q[:, m].sum(1); cm = col.sum()
+        if cm <= 0:
+            continue
+        for gname in ("epicardium", "endocardium", "constitutive fibroblasts", "other fibroblasts", "other"):
+            gm = grp == gname
+            rows.append({**key, "table": "activated_origin", "target_type": a_, "retained_target_cells": int(m.sum()),
+                         "source_group": gname, "incoming_share": float(col[gm].sum() / cm),
+                         "source_mass_share": float(row_mass[gm].sum() / tot)})
+        p_src = {b: float(col[ls == b].sum() / cm) for b in us}
+        rel = {}
+        for b in us:
+            vals = []
+            for t in trees:
+                with_a = [c for c in t["clades"] if a_ in c]
+                if with_a:
+                    vals.append(np.mean([b in c for c in with_a]))
+            if vals:
+                rel[b] = float(np.mean(vals))
+        bb = sorted(rel)
+        rho = float(spearmanr([p_src[b] for b in bb], [rel[b] for b in bb]).correlation) if len(bb) >= 3 else np.nan
+        rows.append({**key, "table": "tree_relatedness", "target_type": a_, "target_condition": "/".join(cond), "trees": len(trees),
+                     "trees_with_type": int(sum(any(a_ in c for c in t["clades"]) for t in trees)), "source_types": len(bb),
+                     "spearman_coupling_vs_relatedness": rho})
+    return rows
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--app", type=Path, required=True)
     p.add_argument("--dataset", required=True, choices=list(LABEL))
     p.add_argument("--gmt", type=Path, default=None, help="hallmark gmt (Kang IFN sets)")
+    p.add_argument("--data", type=Path, default=None, help="downloaded data root (SPLINTR baseline library, zebrafish trees)")
     a = p.parse_args()
     import anndata as ad
     ds = a.dataset; root = a.app / ds / "ot_20261123"; out = root / "score"; out.mkdir(exist_ok=True)
@@ -99,6 +265,11 @@ def main():
         sets = read_gmt(a.gmt, {"HALLMARK_INTERFERON_ALPHA_RESPONSE", "HALLMARK_INTERFERON_GAMMA_RESPONSE"})
         ifn = sorted(set(sum(sets.values(), [])))
     G, C, SL, D, EX = [], [], [], [], []
+    base_bc, zf = {}, None
+    if ds == "splintr":
+        base_bc = splintr_baseline_barcodes(a.data)
+    if ds == "zebrafish":
+        zf = zebrafish_clades(a.data)
     for _, r in man.iterrows():
         u = r.pair_id
         A = {s: ad.read_h5ad(r[f"{s}_h5ad"]) for s in ("source", "target")}
@@ -192,6 +363,10 @@ def main():
                             m = depth_ == dv
                             EX.append({**key, "table": "lineage_depth", "side": side, "name_length": int(dv), "cells": int(m.sum()),
                                        "rejected_share": float(rj[side][m].mean())})
+                if ds == "splintr":
+                    EX.extend(score_splintr(key, A, pos, rj, P, base_bc))
+                if ds == "zebrafish" and Q.sum() > 0:
+                    EX.extend(score_zebrafish(key, A, pos, rj, Q, zf))
                 if ds == "pancreas":
                     st_ = A["source"].obs["cell_type"].astype(str).value_counts(normalize=True)
                     lt_ = A["target"].obs["cell_type"].astype(str).to_numpy()[pos["target"]]

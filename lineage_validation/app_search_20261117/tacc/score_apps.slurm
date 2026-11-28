@@ -27,6 +27,10 @@ for ds in "${sets[@]}"; do
             --inputs "$app/$ds/inputs" --out "$app/$ds/ot_20261123/score" \
             --units LARRYvivo_LSK_d2_to_d9 LARRYvivo_LSK_d2_to_d16 LARRYvivo_LK_d2_to_d9 --non-mature Undifferentiated Prog \
             > "$app/logs/score_${ds}_${SLURM_JOB_ID:-local}.log" 2>&1
+    elif [[ $ds == splintr || $ds == zebrafish ]]; then
+        # added 2026-11-27: the repo copy of 09 (a superset; earlier datasets unchanged) with --data (baseline library, trees)
+        /usr/bin/time -v python -I lineage_validation/app_search_20261117/09_score_apps.py --app "$app" --dataset "$ds" --data "$app/data" \
+            > "$app/logs/score_${ds}_${SLURM_JOB_ID:-local}.log" 2>&1
     else
         /usr/bin/time -v python -I "$app/code/09_score_apps.py" --app "$app" --dataset "$ds" --gmt "$gmt" \
             > "$app/logs/score_${ds}_${SLURM_JOB_ID:-local}.log" 2>&1
